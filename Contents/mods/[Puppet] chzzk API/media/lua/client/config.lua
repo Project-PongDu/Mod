@@ -4,6 +4,6 @@ local _a = {
     targetTime            = 0.4,
     filePath              = "rewards.txt",
     lockPath              = "data.lock",
-    KaboomTime            = 3600,
+    KaboomTime            = 180,
 }
 return _a
