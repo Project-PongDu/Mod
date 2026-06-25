@@ -285,18 +285,24 @@ local function applyDonation(amount, sender, message)
         sender       = sender,
         remaining_ms = PANEL_DURATION_MS,
         amount       = amount,
-        applied      = true,
+        applied      = false,   -- false = prep countdown running; true = effect already fired
     }
+    -- Fired by onTick when the prep countdown reaches 0. rewardManager.a keeps
+    -- processingEvent held through the effect, then its callback re-shows the
+    -- panel as an "applied" confirmation for another PANEL_DURATION_MS.
+    entry.fire = function()
+        rewardManager.a(entry.amount, entry.sender, function()
+            removePanel(entry)
+            entry.remaining_ms = PANEL_DURATION_MS
+            local found = false
+            for _, e in ipairs(activeEntries) do if e == entry then found = true break end end
+            if not found then table.insert(activeEntries, entry) end
+            addPanel(entry)
+        end)
+    end
+    global.processingEvent = true   -- hold the queue through prep countdown + effect
     table.insert(activeEntries, entry)
     addPanel(entry)
-    rewardManager.a(amount, sender, function()
-        removePanel(entry)
-        entry.remaining_ms = PANEL_DURATION_MS
-        local found = false
-        for _, e in ipairs(activeEntries) do if e == entry then found = true break end end
-        if not found then table.insert(activeEntries, entry) end
-        addPanel(entry)
-    end)
 end
 
 -- ── Client-side donation file poller (풉키 방식) ──────────────────────────────
@@ -351,6 +357,8 @@ end
 
 -- Drain the queue one donation at a time, only while nothing is processing.
 -- FIFO: the oldest queued donation fires first, none are ever skipped.
+-- applyDonation sets processingEvent, so the next donation waits through this
+-- one's prep countdown + effect.
 local function consumeDonationQueue()
     if global.processingEvent then return end
     if #donationQueue == 0 then return end
@@ -372,12 +380,25 @@ Events.OnServerCommand.Add(onServerCommand)
 -- ── OnTick: countdown + queues ────────────────────────────────────────────────
 local function onTick()
     local dt = getGameTime():getTimeDelta() * 1000
+    local toFire = nil
     for _, entry in ipairs(activeEntries) do
         entry.remaining_ms = entry.remaining_ms - dt
-        if entry.remaining_ms <= 0 then removePanel(entry) end
+        if entry.remaining_ms <= 0 then
+            removePanel(entry)
+            if not entry.applied then
+                entry.applied = true   -- prep countdown finished: fire the effect now
+                toFire = toFire or {}
+                toFire[#toFire + 1] = entry
+            end
+        end
     end
     for i = #activeEntries, 1, -1 do
         if activeEntries[i].remaining_ms <= 0 then table.remove(activeEntries, i) end
+    end
+    -- Fire after the loops so the reward callback's panel/queue mutations don't
+    -- run mid-iteration over activeEntries.
+    if toFire then
+        for _, e in ipairs(toFire) do e.fire() end
     end
     if bandit then bandit.b() end
     if zombie then zombie.a() end
