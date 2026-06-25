@@ -110,8 +110,8 @@ DOServer["Schedule"]["Kaboom"] = function(player, data)
                 if dist < r then
                     local sq = e:getGridSquare(wx, wy, floor)
                     if sq then
-                        if floor == 0 and ZombRand(100) < 80 then sq:BurnWalls(false) end   -- 바닥 탈 확률: 80%
-                        if ZombRand(100) < 30 and sq:isFree(false) then                     -- 바닥 잿더미 확률: 10%
+                        if floor == 0 then sq:BurnWalls(false) end                    -- 벽: 100% (확률 제거)
+                        if ZombRand(100) < 70 and sq:isFree(false) then               -- 바닥: 70%
                             local obj = IsoObject.new(sq, "floors_burnt_01_1", "")
                             sq:AddSpecialObject(obj)
                         end
@@ -133,7 +133,11 @@ DOServer["Schedule"]["Kaboom"] = function(player, data)
             end
         end
     end
-    -- Notify nearby players.
+    -- Notify nearby players, and tell every client in range (the donee
+    -- included) to rebuild the render slices for the blasted area so the new
+    -- burnt-floor / ash tiles appear at once instead of after a natural redraw.
+    local refresh = { x = cx, y = cy, r = r }
+    sendServerCommand(player, "Schedule", "RefreshMap", refresh)   -- donee refreshes too
     local players = getOnlinePlayers()
     for i = 0, players:size() - 1 do
         local p = players:get(i)
@@ -141,6 +145,7 @@ DOServer["Schedule"]["Kaboom"] = function(player, data)
             local dist = math.sqrt(math.pow(p:getX() - cx, 2) + math.pow(p:getY() - cy, 2))
             if dist < r then
                 sendServerCommand(p, "Schedule", "NearbyExplosion", {})
+                sendServerCommand(p, "Schedule", "RefreshMap", refresh)
             end
         end
     end

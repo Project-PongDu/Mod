@@ -190,6 +190,36 @@ Events.OnServerCommand.Add(function(a, b, c)
             DOTex.tex   = getTexture("media/textures/mask_white.png")
             DOTex.alpha = 2
             -- 사운드 제거, 실제 폭발은 triggerExplosion()에서만 day_one_kaboom 재생
+        elseif b == "RefreshMap" then
+            -- 폭격으로 서버가 추가한 그을린 바닥/잿더미 타일이 즉시 보이도록,
+            -- 잠깐 기다렸다(서버가 추가한 오브젝트가 클라에 도착할 시간 확보) 반경 내 모든 칸의
+            -- 렌더 슬라이스를 더럽혀 강제로 다시 그리게 한다. (DirtySlice = 해당 칸 렌더 캐시 무효화)
+            local cx = tonumber(c.x)
+            local cy = tonumber(c.y)
+            local r  = tonumber(c.r) or 55
+            if cx and cy then
+                local delay = 15   -- í±: ìë²ê° ì¶ê°í ì¤ë¸ì í¸ê° í´ë¼ì ëì°©í  ìê° íë³´
+                local sweep
+                sweep = function()
+                    delay = delay - 1
+                    if delay > 0 then return end
+                    Events.OnTick.Remove(sweep)
+                    local cell = getCell()
+                    if not cell then return end
+                    local r2 = r * r
+                    for floor = 0, 1 do
+                        for dy = -r, r do
+                            for dx = -r, r do
+                                if dx * dx + dy * dy < r2 then
+                                    local sq = cell:getGridSquare(cx + dx, cy + dy, floor)
+                                    if sq then sq:DirtySlice() end
+                                end
+                            end
+                        end
+                    end
+                end
+                Events.OnTick.Add(sweep)
+            end
         end
     end
 end)
