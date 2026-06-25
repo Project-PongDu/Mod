@@ -110,8 +110,8 @@ DOServer["Schedule"]["Kaboom"] = function(player, data)
                 if dist < r then
                     local sq = e:getGridSquare(wx, wy, floor)
                     if sq then
-                        if floor == 0 then sq:BurnWalls(false) end                    -- 벽: 100% (확률 제거)
-                        if ZombRand(100) < 70 and sq:isFree(false) then               -- 바닥: 70%
+                        if floor == 0 and ZombRand(100) < 80 then sq:BurnWalls(false) end   -- 바닥 탈 확률: 80%
+                        if ZombRand(100) < 30 and sq:isFree(false) then                     -- 바닥 잿더미 확률: 10%
                             local obj = IsoObject.new(sq, "floors_burnt_01_1", "")
                             sq:AddSpecialObject(obj)
                         end
