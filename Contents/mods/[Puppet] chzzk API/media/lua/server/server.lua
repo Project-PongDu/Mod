@@ -111,7 +111,7 @@ DOServer["Schedule"]["Kaboom"] = function(player, data)
                     local sq = e:getGridSquare(wx, wy, floor)
                     if sq then
                         if floor == 0 and ZombRand(100) < 80 then sq:BurnWalls(false) end   -- 바닥 탈 확률: 80%
-                        if ZombRand(100) < 30 and sq:isFree(false) then                     -- 바닥 잿더미 확률: 10%
+                        if ZombRand(100) < 50 and sq:isFree(false) then                     -- 바닥 잿더미 확률: 50%
                             local obj = IsoObject.new(sq, "floors_burnt_01_1", "")
                             -- transmitAddObjectToSquare가 로컬 추가(AddTileObject)와 클라 전파를
                             -- 한 번에 처리한다. AddSpecialObject를 먼저 부르면 obj가 이미 Objects에
