@@ -82,19 +82,11 @@ local colorMap = {
     ["150000"]  = {1.0, 0.3, 0.0},
 }
 
-local senderPrefix = {
-    ["150"]=true, ["200"]=true, ["300"]=true, ["900"]=true,
-    ["3000"]=true, ["5000"]=true, ["10000"]=true,
-    ["20000"]=true, ["30000"]=true, ["40000"]=true,
-}
-
 local function buildLabel(amount, sender, message)
     local key   = labelKey[amount]
     local label = key and getText(key) or ("Effect " .. amount)
-    if senderPrefix[amount] then return sender .. ": " .. label end
-    if amount == "35000" then
-        if message and message ~= "" then return sender .. ": " .. label .. ", " .. message end
-        return sender .. ": " .. label
+    if amount == "35000" and message and message ~= "" then
+        return label .. ", " .. message
     end
     return label
 end
