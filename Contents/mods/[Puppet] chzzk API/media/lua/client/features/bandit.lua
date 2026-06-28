@@ -3,10 +3,11 @@ local _b = require("utils/zone")
 local _c = {}
 local _d = false
 local _e = {
-    [11] = {clanId = "f6e2ca8c-311e-4ee2-9fe6-1c9e14dbcd11", size = 3, pistol = 0,  rifle = 0},
-    [15] = {clanId = "f6e2ca8c-311e-4ee2-9fe6-1c9e14dbcd11", size = 2, pistol = 80, rifle = 60},
+[11] = {clanId = "1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220", size = 4, ...},  -- 2만 melee
+[15] = {clanId = "7b0273ef-54db-444f-97f9-bf2b22e7fe38", size = 2, ...},  -- 4만 ranged
 }
 local function _f(a, player)
+    local angle = ZombRandFloat(0, 2 * math.pi)
     return {
         cid              = a.clanId,
         size             = a.size,
@@ -16,8 +17,8 @@ local function _f(a, player)
         pistolMagCount   = 2,
         hasRifleChance   = a.rifle,
         rifleMagCount    = 1,
-        x = player:getX(),
-        y = player:getY(),
+        x = math.floor(player:getX() + 20 * math.cos(angle)),
+        y = math.floor(player:getY() + 20 * math.sin(angle)),
         z = player:getZ(),
     }
 end
