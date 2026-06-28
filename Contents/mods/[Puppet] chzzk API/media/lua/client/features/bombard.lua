@@ -90,7 +90,6 @@ local function applyBlastInjury(p)
         "UpperLeg_L", "UpperLeg_R",
     }
     local bd = p:getBodyDamage()
-    -- bodyParts 풀에서 종류별로 distinct 부위를 뽑는다 (머리/목 제외).
     local function pickParts(n)
         local out, seen = {}, {}
         while #out < n do
@@ -102,87 +101,68 @@ local function applyBlastInjury(p)
         end
         return out
     end
-    -- Head: 화상 + 통증
     local head = bd:getBodyPart(BodyPartType.Head)
     head:setBurned()
     head:setAdditionalPain(100)
-    -- 랜덤 4부위: 긁힌 상처 (좀비 감염은 forceNoInfection=true로 차단)
     for _, name in ipairs(pickParts(4)) do
         bd:getBodyPart(BodyPartType[name]):setScratched(true, true)
     end
-    -- 랜덤 1부위: 깊은 상처 (출혈/모델/타이머까지 생성)
     for _, name in ipairs(pickParts(1)) do
         bd:getBodyPart(BodyPartType[name]):generateDeepWound()
     end
-    -- 랜덤 1부위: 찢어진 상처 (Laceration, 좀비 감염 차단)
     for _, name in ipairs(pickParts(1)) do
         bd:getBodyPart(BodyPartType[name]):setCut(true, true)
     end
 end
 
+-- 폭발 처리 공용 함수
+local function doExplosion(a, b, handler, afterExplode)
+    local e = a:getX()
+    local f = a:getY()
+
+    DOTex.tex   = getTexture("media/textures/mask_white.png")
+    DOTex.alpha = 2
+    getSoundManager():PlaySound("day_one_kaboom", false, 1.0)
+
+    local radius = 55
+    sendClientCommand("Schedule", "Kaboom", {r = radius})
+
+    local bandits = BanditZombie and BanditZombie.GetAll and BanditZombie.GetAll() or {}
+    for n, o in pairs(bandits) do
+        local dist = math.sqrt(math.pow(o.x - e, 2) + math.pow(o.y - f, 2))
+        if dist < radius then
+            local q = BanditZombie.GetInstanceById(n)
+            if q and q:isOutside() then
+                q:setCrawler(true)
+                q:setHealth(0)
+                q:clearAttachedItems()
+                q:changeState(ZombieOnGroundState.instance())
+                q:becomeCorpse()
+            end
+        end
+    end
+
+    applyBlastInjury(a)
+    Events.OnTick.Remove(handler)
+    b.timeBombActivated = false
+
+    if afterExplode then afterExplode() end
+end
+
 _a.b = function(a)
     local b = a:getModData()
 
-    -- 동시 금지: 이미 폭탄이 카운트다운 중이면 큐에 쌓아두고, 현재 폭탄이 터진 뒤
-    -- 다음 것을 순차로 발동한다. 동시에 두 개가 도는 일은 없다.
     b.bombPending = b.bombPending or 0
     if b.timeBombActivated then
         b.bombPending = b.bombPending + 1
         return
     end
 
-    -- 폭탄 하나를 시작. detonation 시 큐에 남은 게 있으면 자기 자신을 다시 호출한다.
     local function startBomb()
         b.bombTimer         = _b.KaboomTime
         b.timeBombActivated = true
 
-        -- handler를 호출별 로컬로 둬서 자기 자신만 정확히 제거한다.
-        -- (모듈 전역 _d를 공유해 엉뚱한 핸들러를 제거하던 버그 제거)
         local handler
-
-        -- Explosion sequence run when timer reaches zero.
-        local function triggerExplosion()
-            local e = a:getX()
-            local f = a:getY()
-
-            DOTex.tex   = getTexture("media/textures/mask_white.png") -- 원하는 텍스처
-            DOTex.alpha = 2
-            getSoundManager():PlaySound("day_one_kaboom", false, 1.0)
-
-            local radius = 55
-            local payload = {}
-            payload.r = radius
-            sendClientCommand("Schedule", "Kaboom", payload)
-
-            -- Kill nearby bandits.
-            local bandits = BanditZombie and BanditZombie.GetAll and BanditZombie.GetAll() or {}
-            for n, o in pairs(bandits) do
-                local dist = math.sqrt(math.pow(o.x - e, 2) + math.pow(o.y - f, 2))
-                if dist < radius then
-                    local q = BanditZombie.GetInstanceById(n)
-                    if q and q:isOutside() then
-                        q:setCrawler(true)
-                        q:setHealth(0)
-                        q:clearAttachedItems()
-                        q:changeState(ZombieOnGroundState.instance())
-                        q:becomeCorpse()
-                    end
-                end
-            end
-
-            -- Damage the donee (same logic shared with nearby clients).
-            applyBlastInjury(a)
-
-            Events.OnTick.Remove(handler)
-            b.timeBombActivated = false
-
-            -- 큐에 대기 중인 폭탄이 있으면 다음 것을 순차 발동.
-            if (b.bombPending or 0) > 0 then
-                b.bombPending = b.bombPending - 1
-                startBomb()
-            end
-        end
-
         handler = function()
             if b.bombTimer then
                 b.bombTimer = b.bombTimer - 1
@@ -192,13 +172,16 @@ _a.b = function(a)
                 end
                 if b.bombTimer <= 0 then
                     b.bombTimer = 0
-                    triggerExplosion()
+                    doExplosion(a, b, handler, function()
+                        if (b.bombPending or 0) > 0 then
+                            b.bombPending = b.bombPending - 1
+                            startBomb()
+                        end
+                    end)
                 end
             end
         end
-
         Events.OnTick.Add(handler)
-        b.timeBombActivated = true
         _a.a(a)
     end
 
@@ -208,19 +191,54 @@ end
 Events.OnServerCommand.Add(function(a, b, c)
     if a == "Schedule" then
         if b == "PlayExplosion" then
-            -- 여기서는 사운드 제거 (예고음은 이미 타이머 480틱 조건에서 재생됨)
+            -- 예고음은 타이머 480틱 조건에서 재생됨
         elseif b == "PlayAlert" then
-            -- 발동 시 알람은 그대로 유지
             getSoundManager():PlaySound("alert", false, 1.0)
         elseif b == "NearbyExplosion" then
-            -- 근처 폭발: 도네 당사자와 동일한 폭발 피해 적용 (야외일 때) + 섬광, 사운드는 제거
             applyBlastInjury(getPlayer())
-
             DOTex.tex   = getTexture("media/textures/mask_white.png")
             DOTex.alpha = 2
-            -- 사운드 제거, 실제 폭발은 triggerExplosion()에서만 day_one_kaboom 재생
         end
     end
 end)
+
+-- 재접속 복구: OnTick 안에서 플레이어 로드 확인 후 한 번만 실행
+local _recoveryDone = false
+local function onTickRecovery()
+    if _recoveryDone then
+        Events.OnTick.Remove(onTickRecovery)
+        return
+    end
+    local a = getSpecificPlayer(0)
+    if not a then return end
+    local b = a:getModData()
+    if b.bombTimer and b.bombTimer > 0 and b.timeBombActivated then
+        _a.a(a)  -- UI 복원
+
+        local handler
+        handler = function()
+            if b.bombTimer then
+                b.bombTimer = b.bombTimer - 1
+                if b.bombTimer == 480 then
+                    getSoundManager():PlaySound("explosion", false, 1.0)
+                    sendClientCommand("Schedule", "PlayExplosion", {})
+                end
+                if b.bombTimer <= 0 then
+                    b.bombTimer = 0
+                    doExplosion(a, b, handler, function()
+                        if (b.bombPending or 0) > 0 then
+                            b.bombPending = b.bombPending - 1
+                            _a.b(a)
+                        end
+                    end)
+                end
+            end
+        end
+        Events.OnTick.Add(handler)
+    end
+    _recoveryDone = true
+    Events.OnTick.Remove(onTickRecovery)
+end
+Events.OnTick.Add(onTickRecovery)
 
 return _a

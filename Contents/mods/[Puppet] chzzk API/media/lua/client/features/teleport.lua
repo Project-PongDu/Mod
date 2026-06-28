@@ -12,8 +12,8 @@ function ReturnTimerDisplay:new(a, b)
     local e = ISPanel:new(c / 2 - 50, d - 120, 100, 25)
     setmetatable(e, self)
     self.__index = self
-    e.player     = a
-    e.maxTime    = b
+    e.player      = a
+    e.maxTime     = b
     e.currentTime = b
     e:noBackground()
     return e
@@ -43,6 +43,45 @@ function _a.a(a)
     end
 end
 
+-- 복귀 처리
+local function doReturn(a, b)
+    if b.isDead or b.hasReturned then return end
+    getSoundManager():PlaySound("exile_exit", false, 1.0)
+    if b.originalPosition then
+        a:setX(b.originalPosition.x)
+        a:setY(b.originalPosition.y)
+        a:setZ(b.originalPosition.z)
+        a:setLx(a:getX())
+        a:setLy(a:getY())
+        a:setLz(a:getZ())
+        getWorld():update()
+    end
+    b.returnTime        = 0
+    b.hasReturned       = true
+    b.hasMoved          = false
+    b.originalPosition  = nil
+end
+
+-- 틱 핸들러 등록 (재접속 복구와 신규 발동 공용)
+local function startTickHandler(a, b)
+    if b.tickHandlerRegistered then
+        Events.OnTick.Remove(_e)
+    end
+    _e = function()
+        if b.returnTime then
+            b.returnTime = b.returnTime - 1
+            if b.returnTime <= 0 then
+                b.returnTime = 0
+                doReturn(a, b)
+                Events.OnTick.Remove(_e)
+                b.tickHandlerRegistered = false
+            end
+        end
+    end
+    Events.OnTick.Add(_e)
+    b.tickHandlerRegistered = true
+end
+
 -- Teleport player to Santa's Land and start the return countdown.
 function _a.b(a)
     local b = a:getModData()
@@ -58,66 +97,46 @@ function _a.b(a)
     a:setLy(a:getY())
     a:setLz(a:getZ())
     getWorld():update()
-    local c = _b.SantaLandTime
-    if not b.isTimerInitialized then
-        b.returnTime = 0
-        b.isTimerInitialized = true
-    end
-    b.returnTime = b.returnTime + c
-    b.isDead      = false
-    b.hasReturned = false
-    b.hasMoved    = true
-    if not b.tickHandlerRegistered then
-        b.tickHandlerRegistered = false
-    end
-    if b.tickHandlerRegistered then
-        Events.OnTick.Remove(_e)
-    end
 
-    local function returnPlayer()
-        if not b.isDead and not b.hasReturned then
-            getSoundManager():PlaySound("exile_exit", false, 1.0)
-            a:setX(b.originalPosition.x)
-            a:setY(b.originalPosition.y)
-            a:setZ(b.originalPosition.z)
-            a:setLx(a:getX())
-            a:setLy(a:getY())
-            a:setLz(a:getZ())
-            getWorld():update()
-            b.returnTime        = 0
-            b.hasReturned       = true
-            b.hasMoved          = false
-            b.originalPosition  = nil
-            b.isTimerInitialized = false
+    -- 유배 중 추가 후원 시 시간 누적
+    b.returnTime = (b.returnTime or 0) + _b.SantaLandTime
+    b.isDead     = false
+    b.hasReturned = false
+    b.hasMoved   = true
+
+    local function onDeath()
+        b.isDead            = true
+        b.returnTime        = 0
+        b.hasMoved          = false
+        b.originalPosition  = nil
+        if b.tickHandlerRegistered then
             Events.OnTick.Remove(_e)
             b.tickHandlerRegistered = false
         end
     end
-
-    local function onDeath()
-        b.isDead             = true
-        b.returnTime         = 0
-        b.hasMoved           = false
-        b.originalPosition   = nil
-        b.isTimerInitialized = false
-        Events.OnTick.Remove(_e)
-        b.tickHandlerRegistered = false
-    end
     Events.OnPlayerDeath.Add(onDeath)
 
-    _e = function()
-        if b.returnTime then
-            b.returnTime = b.returnTime - 1
-            if b.returnTime <= 0 then
-                b.returnTime = 0
-                returnPlayer()
-                Events.OnTick.Remove(_e)
-                b.tickHandlerRegistered = false
-            end
-        end
-    end
-    Events.OnTick.Add(_e)
-    b.tickHandlerRegistered = true
+    startTickHandler(a, b)
     _a.a(a)
 end
+
+-- 재접속 복구: OnTick 안에서 플레이어 로드 확인 후 한 번만 실행
+local _recoveryDone = false
+local function onTickRecovery()
+    if _recoveryDone then
+        Events.OnTick.Remove(onTickRecovery)
+        return
+    end
+    local a = getSpecificPlayer(0)
+    if not a then return end
+    local b = a:getModData()
+    if b.returnTime and b.returnTime > 0 and not b.hasReturned and not b.isDead then
+        _a.a(a)
+        startTickHandler(a, b)
+    end
+    _recoveryDone = true
+    Events.OnTick.Remove(onTickRecovery)
+end
+Events.OnTick.Add(onTickRecovery)
+
 return _a
