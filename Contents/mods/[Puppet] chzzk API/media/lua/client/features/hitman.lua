@@ -17,8 +17,8 @@ local function _f(a, player)
         pistolMagCount   = 2,
         hasRifleChance   = a.rifle,
         rifleMagCount    = 1,
-        x = math.floor(player:getX() + 20 * math.cos(angle)),
-        y = math.floor(player:getY() + 20 * math.sin(angle)),
+        x = math.floor(player:getX() + 15 * math.cos(angle)),
+        y = math.floor(player:getY() + 15 * math.sin(angle)),
         z = player:getZ(),
     }
 end
