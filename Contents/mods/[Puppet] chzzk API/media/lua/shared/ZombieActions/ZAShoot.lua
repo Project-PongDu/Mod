@@ -139,11 +139,8 @@ local function hit(shooter, item, victim)
         -- return baseChance / (1 + math.exp(k * (distance - d50)))
     end
 
-    local accuracyLevelMap = {-8, -4, 0, 4, 8}
-    local accuracyLevel = SandboxVars.Hitmans.General_OverallAccuracy
-
     -- general sandbox setting for accuracy 
-    local sightGeneral = accuracyLevelMap[accuracyLevel] or 0 -- will add or substract max 8
+    local sightGeneral = 8 -- will add or substract max 8
 
     -- accuracy set in hitman creator
     local sightCharacter = brainShooter.accuracyBoost or 0 -- will add or substract max 8

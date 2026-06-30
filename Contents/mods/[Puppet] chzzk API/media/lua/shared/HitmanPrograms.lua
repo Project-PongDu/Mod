@@ -121,7 +121,7 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot)
     if modes then
         for i=0, modes:size()-1 do
             local mode = modes:get(i)
-            if dist < 12 and mode == "Auto" then
+            if dist < 15 and mode == "Auto" then
                 bullets = 2 + ZombRand(6)
                 break
             end
