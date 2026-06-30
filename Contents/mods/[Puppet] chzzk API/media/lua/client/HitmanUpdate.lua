@@ -509,25 +509,8 @@ end
 
 -- manages endurance regain tasks 
 local function ManageEndurance(hitman)
-    if not SandboxVars.Hitmans.General_LimitedEndurance then
-        return {}
-    end
-
-    local brain = HitmanBrain.Get(hitman)
-    if brain.endurance > 0 or Hitman.HasActionTask(hitman) then
-        return {}
-    end
-
-    brain.endurance = 1
-
-    local exhaustionTasks = {}
-    local exhaustionTask = { action = "Time", anim = "Exhausted", time = 200, lock = true }
-
-    for i = 1, 5 do
-        exhaustionTasks[i] = exhaustionTask
-    end
-
-    return exhaustionTasks
+    -- hitmen never tire / never stop to rest (relentless pursuit)
+    return {}
 end
 
 -- manages tasks related to hitman health
@@ -937,7 +920,7 @@ local function ManageCombat(hitman)
 
     local bestDist = 40
     local enemyCharacter, switchTo
-    local healing, reload, resupply = false, false, false
+    local reload, resupply = false, false
     local combat, switch, firing, shove, escape = false, false, false, false, false
     local maxRangeMelee, maxRangePistol, maxRangeRifle
     local friendlies, friendliesBwd, enemies, enemiesBwd = 0, 0, 0, 0
@@ -946,12 +929,6 @@ local function ManageCombat(hitman)
     -- THIS GOVERNS LOW-PRIORITY TASKS
     if not HitmanBrain.HasActionTask(brain) then
         
-        -- HEALING FLAG
-        local health = hitman:getHealth()    
-        if health < 0.4 then
-            healing = true
-        end
-
         -- PEACFUL RELOAD FLAG
         for _, slot in pairs({"primary", "secondary"}) do
             if weapons[slot].name then
@@ -1177,30 +1154,7 @@ local function ManageCombat(hitman)
         end
     end
     
-    if enemies >= friendlies + 3 then
-        if not HitmanBrain.HasMoveTask(brain) then
-            local l = 4
-            local time = 80
-            if firing then 
-                l = 20
-                time = 400
-            end
-            -- hitman:addLineChatElement("Escape", 0.8, 0.8, 0.1)
-            -- print ("E: " .. enemies .. " F: " .. friendlies)
-            Hitman.ClearTasks(hitman)
-            local mrad = math.atan2(sy, sx)
-            local mdeg = math.deg(mrad)
-            local nbx = zx + (l * math.cos(mrad))
-            local nby = zy + (l * math.sin(mrad))
-            local nbz = zz
-            local task = HitmanUtils.GetMoveTask(0.01, nbx, nby, nbz, "Run", 12, false)
-            task.time = time
-            task.lock = true
-            task.backwards = false
-            table.insert(tasks, task)
-        end
-
-    elseif shove then
+    if shove then
         if not HitmanBrain.HasTaskType(brain, "Shove") then
             Hitman.ClearTasks(hitman)
             local veh = enemyCharacter:getVehicle()
@@ -1267,12 +1221,6 @@ local function ManageCombat(hitman)
             local task = {action="Shove", anim="Shove", sound="AttackShove", time=60, endurance=-0.05, eid=eid, x=enemyCharacter:getX(), y=enemyCharacter:getY(), z=enemyCharacter:getZ()}
             -- local task = {action="Hit", time=65, endurance=-0.03, weapon=weapons.melee, eid=eid, x=enemyCharacter:getX(), y=enemyCharacter:getY(), z=enemyCharacter:getZ()}
             table.insert(tasks, task)]]
-        end
-
-    elseif healing then
-        if not HitmanBrain.HasTaskType(brain, "Bandage") then
-            local task = {action="Bandage"}
-            table.insert(tasks, task)
         end
 
     elseif firing then

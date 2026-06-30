@@ -17,24 +17,9 @@ option Hitmans.General_SpawnMultiplier = {
     page = Hitmans_General, translation = Hitmans.SpawnMultiplier,
 }
 
-option Hitmans.General_SizeMultiplier = {
-    type = double, min = 0.25, max = 4, default = 1.00,
-    page = Hitmans_General, translation = Hitmans.SizeMultiplier,
-}
-
-option Hitmans.General_DensityScore = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.DensityScore,
-}
-
 option Hitmans.General_OriginalHitmans = {
     type = boolean, default = true,
     page = Hitmans_General, translation = Hitmans.OriginalHitmans,
-}
-
-option Hitmans.General_Surrender = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.Surrender,
 }
 
 option Hitmans.General_BleedOut = {
@@ -47,69 +32,9 @@ option Hitmans.General_Infection = {
     page = Hitmans_General, translation = Hitmans.Infection,
 }
 
-option Hitmans.General_LimitedEndurance = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.LimitedEndurance,
-}
-
-option Hitmans.General_RunAway = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.RunAway,
-}
-
-option Hitmans.General_DestroyDoor = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.DestroyDoor,
-}
-
-option Hitmans.General_SmashWindow = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.SmashWindow,
-}
-
 option Hitmans.General_RemoveBarricade = {
     type = boolean, default = true,
     page = Hitmans_General, translation = Hitmans.RemoveBarricade,
-}
-
-option Hitmans.General_DestroyThumpable = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.DestroyThumpable,
-}
-
-option Hitmans.General_SabotageVehicles = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.SabotageVehicles,
-}
-
-option Hitmans.General_Theft = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.Theft,
-}
-
-option Hitmans.General_SabotageCrops = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.SabotageCrops,
-}
-
-option Hitmans.General_EnterVehicles = {
-    type = boolean, default = false,
-    page = Hitmans_General, translation = Hitmans.EnterVehicles,
-}
-
-option Hitmans.General_GeneratorCutoff = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.GeneratorCutoff,
-}
-
-option Hitmans.General_BuildBridge = {
-    type = boolean, default = false,
-    page = Hitmans_General, translation = Hitmans.BuildBridge,
-}
-
-option Hitmans.General_BuildRoadblock = {
-    type = boolean, default = true,
-    page = Hitmans_General, translation = Hitmans.BuildRoadblock,
 }
 
 option Hitmans.General_Speak = {
@@ -140,9 +65,4 @@ option Hitmans.General_ArrivalIcon = {
 option Hitmans.General_OverallAccuracy = {
     type = enum, numValues=5, default = 3,
     page = Hitmans_General, translation = Hitmans.OverallAccuracy, _tooltip=Hitmans.OverallAccuracyTooltip, valueTranslation=Hitmans.OverallAccuracy,
-}
-
-option Hitmans.General_DefenderLootAmount = {
-    type = enum, numValues=7, default = 5,
-    page = Hitmans_General, translation = Hitmans.DefenderLootAmount, valueTranslation=Rarity,
 }
