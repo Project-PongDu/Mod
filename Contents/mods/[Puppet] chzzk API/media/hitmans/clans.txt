@@ -10,8 +10,8 @@
 	spawn: dayStart = 0
 	spawn: dayEnd = 0
 	spawn: spawnChance = 0
-	spawn: groupMin = 3
-	spawn: groupMax = 3
+	spawn: groupMin = 4
+	spawn: groupMax = 4
 	spawn: zone = 0
 
 [7b0273ef-54db-444f-97f9-bf2b22e7fe38]
@@ -26,6 +26,6 @@
 	spawn: dayStart = 0
 	spawn: dayEnd = 0
 	spawn: spawnChance = 0
-	spawn: groupMin = 3
-	spawn: groupMax = 3
+	spawn: groupMin = 2
+	spawn: groupMax = 2
 	spawn: zone = 0

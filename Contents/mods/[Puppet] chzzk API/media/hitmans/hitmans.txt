@@ -3,32 +3,28 @@
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
 	general: name = Hitman_Melee_01
 	general: female = false
-	general: skin = 1
+	general: skin = 3
 	general: hairType = 6
-	general: beardType = 1
-	general: hairColor = 1
-	general: health = 10
-	general: strength = 10
-	general: endurance = 10
+	general: beardType = 2
+	general: hairColor = 12
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
 	general: sight = 10
-	general: exp1 = 11
-	general: exp2 = 11
-	general: exp3 = 11
+	general: exp1 = 7
+	general: exp2 = 7
+	general: exp3 = 7
 	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
-	clothing: Hat = Base.Hat_EarMuffs
-	clothing: Jacket = Base.WeddingJacket
-	clothing: Shirt = Base.Shirt_FormalWhite
-	clothing: TorsoExtraVest = Base.Vest_WaistcoatTINT
-	clothing: Neck = Base.Tie_Full
+	clothing: Necklace = Base.Necklace_Gold
+	clothing: LeftWrist = Base.WristWatch_Left_ClassicGold
+	clothing: Shirt = Base.Shirt_HawaiianRed
 	clothing: Pants = Base.Trousers_Suit
-	clothing: Shoes = Base.Shoes_ArmyBoots
-	tint: Hat = 6710886
-	tint: TorsoExtraVest = 4473924
-	weapons: melee = Base.HuntingKnife
+	clothing: Shoes = Base.Shoes_Black
+	weapons: melee = Base.LeadPipe
 
 [437879e7-0341-43d9-a36f-85fe7ac44526]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
 	general: name = Hitman_Melee_02
 	general: female = false
@@ -36,13 +32,13 @@
 	general: hairType = 6
 	general: beardType = 1
 	general: hairColor = 1
-	general: health = 10
-	general: strength = 10
-	general: endurance = 10
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
 	general: sight = 10
-	general: exp1 = 11
-	general: exp2 = 11
-	general: exp3 = 11
+	general: exp1 = 7
+	general: exp2 = 7
+	general: exp3 = 7
 	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Hat = Base.Hat_EarMuffs
@@ -57,7 +53,7 @@
 	weapons: melee = Base.HuntingKnife
 
 [6610823d-756a-4c85-8450-6846496cddea]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
 	general: name = Hitman_Melee_03
 	general: female = false
@@ -65,13 +61,13 @@
 	general: hairType = 6
 	general: beardType = 1
 	general: hairColor = 1
-	general: health = 10
-	general: strength = 10
-	general: endurance = 10
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
 	general: sight = 10
-	general: exp1 = 11
-	general: exp2 = 11
-	general: exp3 = 11
+	general: exp1 = 7
+	general: exp2 = 7
+	general: exp3 = 7
 	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Hat = Base.Hat_EarMuffs
@@ -86,7 +82,7 @@
 	weapons: melee = Base.HuntingKnife
 
 [e5c7a77b-e352-4848-97e0-11e828a27c09]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
 	general: name = Hitman_Melee_04
 	general: female = false
@@ -94,13 +90,13 @@
 	general: hairType = 6
 	general: beardType = 1
 	general: hairColor = 1
-	general: health = 10
-	general: strength = 10
-	general: endurance = 10
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
 	general: sight = 10
-	general: exp1 = 11
-	general: exp2 = 11
-	general: exp3 = 11
+	general: exp1 = 7
+	general: exp2 = 7
+	general: exp3 = 7
 	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Hat = Base.Hat_EarMuffs
@@ -115,7 +111,7 @@
 	weapons: melee = Base.HuntingKnife
 
 [3b8ecbe4-8617-45be-876e-26eaae755d46]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
 	general: name = Hitman_Ranged_01
 	general: female = false
@@ -145,7 +141,7 @@
 	ammo: primary = 2
 
 [325dbf7d-c7ab-4448-95fd-6d891db970a6]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
 	general: name = Hitman_Ranged_02
 	general: female = false
@@ -175,7 +171,7 @@
 	ammo: primary = 2
 
 [742dac1d-301e-4eb4-8e80-97df952f0f3e]
-	general: modid = t3chzzkDonation
+	general: modid = Hitmans2
 	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
 	general: name = Hitman_Ranged_03
 	general: female = false
