@@ -423,28 +423,14 @@ end
 
 function HitmanUtils.GetTarget(character, config)
 
-    local closestZombie = HitmanUtils.GetClosestZombieLocation(character)
-    local closestHitman = HitmanUtils.GetClosestEnemyHitmanLocation(character)
     local closestPlayer = HitmanUtils.GetClosestPlayerLocation(character, config)
 
-    local target = closestZombie
-    local enemy = HitmanZombie.Cache[target.id]
-
-    if closestHitman.dist < closestZombie.dist then
-        target = closestHitman
-        enemy = HitmanZombie.Cache[target.id]
-    end
-
-    local handicap = 5
-    if Hitman.IsHostile(character) and closestPlayer.dist + handicap < closestHitman.dist then
-        target = closestPlayer
-        enemy = HitmanPlayer.GetPlayerById(target.id)
-
-    end
+    local target = closestPlayer
+    local enemy = HitmanPlayer.GetPlayerById(target.id)
 
     if target.x and target.y and target.d then
         local i = target.dist
-        local theta = target.d * 0.0174533  -- Convert degrees to radians
+        local theta = target.d * 0.0174533
         target.fx = target.x + (i * math.cos(theta))
         target.fy = target.y + (i * math.sin(theta))
     end
