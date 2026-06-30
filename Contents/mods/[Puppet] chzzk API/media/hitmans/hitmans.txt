@@ -14,7 +14,7 @@
 	general: exp1 = 9
 	general: exp2 = 12
 	general: exp3 = 0
-	clothing: Eyes = Base.Glasses_Aviators
+	clothing: Eyes = Base.Glasses_Shooting
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Necklace = Base.Necklace_Gold
 	clothing: LeftWrist = Base.WristWatch_Left_ClassicGold
@@ -28,9 +28,9 @@
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
 	general: name = Hitman_Melee_02
 	general: female = false
-	general: skin = 1
+	general: skin = 4
 	general: hairType = 19
-	general: beardType = 1
+	general: beardType = 2
 	general: hairColor = 12
 	general: health = 7
 	general: strength = 7
@@ -39,8 +39,10 @@
 	general: exp1 = 9
 	general: exp2 = 12
 	general: exp3 = 0
-	clothing: Eyes = Base.Glasses_SafetyGoggles
+	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Necklace = Base.Necklace_Gold
+	clothing: LeftWrist = Base.WristWatch_Left_ClassicGold
 	clothing: Shirt = Base.Shirt_HawaiianRed
 	clothing: Pants = Base.Trousers_Suit
 	clothing: Shoes = Base.Shoes_ArmyBoots
@@ -137,7 +139,7 @@
 [325dbf7d-c7ab-4448-95fd-6d891db970a6]
 	general: modid = Hitmans2
 	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
-	general: name = Ranged_SR
+	general: name = Ranged_DMR
 	general: female = false
 	general: skin = 1
 	general: hairType = 6
@@ -157,7 +159,7 @@
 	clothing: TorsoExtraVest = Base.Vest_Hunting_Grey
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	tint: Boilersuit = 3355443
-	weapons: primary = Base.HuntingRifle
+	weapons: primary = Base.AssaultRifle2
 	weapons: secondary = Base.Revolver_Long
 	ammo: primary = 2
 	ammo: secondary = 3
