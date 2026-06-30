@@ -179,7 +179,7 @@ local function ApplyVisuals(hitman, brain)
     if brain.cid then
 
         if Hitman.HasExpertise(hitman, Hitman.Expertise.Recon) then
-            hitman:setVariable("MovementSpeed", 1.00)
+            hitman:setVariable("MovementSpeed", 1.20)
         else
             hitman:setVariable("MovementSpeed", 0.70)
         end
