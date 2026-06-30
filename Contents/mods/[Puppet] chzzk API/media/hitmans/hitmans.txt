@@ -1,10 +1,10 @@
 [733c42f7-3f8f-443c-b7b1-208d0a3c7bc5]
 	general: modid = t3chzzkDonation
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
-	general: name = Hitman_Melee_01
+	general: name = Melee_Rookie1
 	general: female = false
-	general: skin = 3
-	general: hairType = 6
+	general: skin = 2
+	general: hairType = 19
 	general: beardType = 2
 	general: hairColor = 12
 	general: health = 7
@@ -14,19 +14,15 @@
 	general: exp1 = 9
 	general: exp2 = 12
 	general: exp3 = 0
-	clothing: Eyes = Base.Glasses_Shooting
-	clothing: Hands = Base.Gloves_LeatherGlovesBlack
-	clothing: Necklace = Base.Necklace_Gold
-	clothing: LeftWrist = Base.WristWatch_Left_ClassicGold
-	clothing: Shirt = Base.Shirt_HawaiianRed
+	clothing: Shirt = Base.Shirt_FormalWhite
 	clothing: Pants = Base.Trousers_Suit
 	clothing: Shoes = Base.Shoes_Black
-	weapons: melee = Base.LeadPipe
+	weapons: melee = Base.Machete
 
 [437879e7-0341-43d9-a36f-85fe7ac44526]
 	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
-	general: name = Hitman_Melee_02
+	general: name = Melee_Rookie2
 	general: female = false
 	general: skin = 2
 	general: hairType = 10
@@ -39,11 +35,7 @@
 	general: exp1 = 9
 	general: exp2 = 12
 	general: exp3 = 0
-	clothing: Eyes = Base.Glasses_Aviators
-	clothing: Hands = Base.Gloves_LeatherGlovesBlack
-	clothing: Necklace = Base.Necklace_Gold
-	clothing: LeftWrist = Base.WristWatch_Left_ClassicGold
-	clothing: Shirt = Base.Shirt_HawaiianRed
+	clothing: Shirt = Base.Shirt_FormalWhite
 	clothing: Pants = Base.Trousers_Suit
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	weapons: melee = Base.Machete
@@ -51,10 +43,10 @@
 [6610823d-756a-4c85-8450-6846496cddea]
 	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
-	general: name = Hitman_Melee_03
+	general: name = Melee_Knifefighter
 	general: female = false
-	general: skin = 1
-	general: hairType = 19
+	general: skin = 2
+	general: hairType = 6
 	general: beardType = 2
 	general: hairColor = 12
 	general: health = 7
@@ -63,7 +55,7 @@
 	general: sight = 1
 	general: exp1 = 9
 	general: exp2 = 12
-	general: exp3 = 0
+	general: exp3 = 17
 	clothing: Eyes = Base.Glasses_Aviators
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Shirt = Base.Shirt_FormalWhite
@@ -72,14 +64,14 @@
 	clothing: Pants = Base.Trousers_Suit
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	tint: TorsoExtraVest = 4473924
-	weapons: melee = Base.Machete
+	weapons: melee = Base.HuntingKnife
 
 [e5c7a77b-e352-4848-97e0-11e828a27c09]
 	general: modid = Hitmans2
 	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
-	general: name = Hitman_Melee_04
+	general: name = Melee_Swordsman
 	general: female = true
-	general: skin = 1
+	general: skin = 2
 	general: hairType = 5
 	general: beardType = 1
 	general: hairColor = 12
@@ -94,11 +86,13 @@
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
 	clothing: Hat = Base.Hat_EarMuffs
 	clothing: Shirt = Base.Shirt_FormalWhite
+	clothing: TorsoExtraVest = Base.Vest_WaistcoatTINT
 	clothing: Neck = Base.Tie_Full
 	clothing: Pants = Base.Trousers_Suit
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	tint: Hat = 6710886
-	weapons: melee = Base.Katana
+	tint: TorsoExtraVest = 4473924
+	weapons: melee = Base.HuntingKnife
 
 
 
