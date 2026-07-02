@@ -58,9 +58,14 @@ HitmanZombiePrograms.Hitman.Main = function(hitman)
     config.mustSee = true
     config.hearDist = 7
 
-    if Hitman.HasExpertise(hitman, Hitman.Expertise.Recon) then
+    if Bandit.HasExpertise(hitman, Hitman.Expertise.Recon)
+    and Bandit.HasExpertise(hitman, Hitman.Expertise.Tracker) then
+        config.hearDist = 80
+
+    elseif Bandit.HasExpertise(hitman, Hitman.Expertise.Recon) then
         config.hearDist = 20
-    elseif Hitman.HasExpertise(hitman, Hitman.Expertise.Tracker) then
+
+    elseif Bandit.HasExpertise(hitman, Hitman.Expertise.Tracker) then
         config.hearDist = 60
     end
 
