@@ -26,7 +26,7 @@ HitmanZombieActions.UnbarricadeMetal.onComplete = function(zombie, task)
 
     if HitmanUtils.IsController(zombie) then
         local args = {x=task.x, y=task.y, z=task.z, index=task.idx}
-        sendClientCommand(getSpecificPlayer(0), 'Commands', 'Unbarricade', args)
+        sendClientCommand(getSpecificPlayer(0), 't3_Commands', 'Unbarricade', args)
     end
 
     if HitmanUtils.IsController(zombie) then

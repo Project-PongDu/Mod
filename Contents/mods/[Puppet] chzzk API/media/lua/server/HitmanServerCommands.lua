@@ -10,9 +10,9 @@ local getBarricadeAble = function(x, y, z, index)
 end
 
 HitmanServer = HitmanServer or {}
-HitmanServer.Commands = {}
+HitmanServer.t3_Commands = {}
 
-HitmanServer.Commands.PostToggle = function(player, args)
+HitmanServer.t3_Commands.PostToggle = function(player, args)
     local gmd = GetHitmanModData()
     if not (args.x and args.y and args.z) then return end
 
@@ -25,7 +25,7 @@ HitmanServer.Commands.PostToggle = function(player, args)
     end
 end
 
-HitmanServer.Commands.PostUpdate = function(player, args)
+HitmanServer.t3_Commands.PostUpdate = function(player, args)
     local gmd = GetHitmanModData()
     if not (args.x and args.y and args.z) then return end
 
@@ -33,7 +33,7 @@ HitmanServer.Commands.PostUpdate = function(player, args)
     gmd.Posts[id] = args
 end
 
-HitmanServer.Commands.BaseUpdate = function(player, args)
+HitmanServer.t3_Commands.BaseUpdate = function(player, args)
     local gmd = GetHitmanModData()
     if not (args.x and args.y) then return end
 
@@ -41,7 +41,7 @@ HitmanServer.Commands.BaseUpdate = function(player, args)
     gmd.Bases[id] = args
 end
 
-HitmanServer.Commands.HitmanRemove  = function(player, args)
+HitmanServer.t3_Commands.HitmanRemove  = function(player, args)
     local gmd = GetHitmanModData()
     local id = args.id
     if gmd.Queue[id] then
@@ -50,7 +50,7 @@ HitmanServer.Commands.HitmanRemove  = function(player, args)
     end
 end
 
-HitmanServer.Commands.HitmanFlush  = function(player, args)
+HitmanServer.t3_Commands.HitmanFlush  = function(player, args)
     local gmd = GetHitmanModData()
     gmd.Queue = {}
     gmd.VisitedBuildings = {}
@@ -59,7 +59,7 @@ HitmanServer.Commands.HitmanFlush  = function(player, args)
     print ("[INFO] All hitmans removed!!!")
 end
 
-HitmanServer.Commands.HitmanUpdatePart = function(player, args)
+HitmanServer.t3_Commands.HitmanUpdatePart = function(player, args)
     local gmd = GetHitmanModData()
     local id = args.id
     if id and gmd.Queue[id] then
@@ -72,11 +72,11 @@ HitmanServer.Commands.HitmanUpdatePart = function(player, args)
 
         gmd.Queue[id] = brain
 
-        sendServerCommand('Commands', 'UpdateHitmanPart', args)
+        sendServerCommand('t3_Commands', 'UpdateHitmanPart', args)
     end
 end
 
-HitmanServer.Commands.Unbarricade = function(player, args)
+HitmanServer.t3_Commands.Unbarricade = function(player, args)
     local object = getBarricadeAble(args.x, args.y, args.z, args.index)
     if object then
         local barricade = object:getBarricadeOnSameSquare()
@@ -96,7 +96,7 @@ HitmanServer.Commands.Unbarricade = function(player, args)
     end
 end
 
-HitmanServer.Commands.Barricade = function(player, args)
+HitmanServer.t3_Commands.Barricade = function(player, args)
     local object = getBarricadeAble(args.x, args.y, args.z, args.index)
     if object then
         local barricade = IsoBarricade.AddBarricadeToObject(object, player)
@@ -127,7 +127,7 @@ HitmanServer.Commands.Barricade = function(player, args)
     end
 end
 
-HitmanServer.Commands.OpenDoor = function(player, args)
+HitmanServer.t3_Commands.OpenDoor = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, args.z)
     if sq and args.index >= 0 and args.index < sq:getObjects():size() then
         local object = sq:getObjects():get(args.index)
@@ -139,7 +139,7 @@ HitmanServer.Commands.OpenDoor = function(player, args)
     end
 end
 
-HitmanServer.Commands.CloseDoor = function(player, args)
+HitmanServer.t3_Commands.CloseDoor = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, args.z)
     if sq and args.index >= 0 and args.index < sq:getObjects():size() then
         local object = sq:getObjects():get(args.index)
@@ -151,7 +151,7 @@ HitmanServer.Commands.CloseDoor = function(player, args)
     end
 end
 
-HitmanServer.Commands.LockDoor = function(player, args)
+HitmanServer.t3_Commands.LockDoor = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, args.z)
     if sq and args.index >= 0 and args.index < sq:getObjects():size() then
         local object = sq:getObjects():get(args.index)
@@ -163,7 +163,7 @@ HitmanServer.Commands.LockDoor = function(player, args)
     end
 end
 
-HitmanServer.Commands.UnlockDoor = function(player, args)
+HitmanServer.t3_Commands.UnlockDoor = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, args.z)
     if sq and args.index >= 0 and args.index < sq:getObjects():size() then
         local object = sq:getObjects():get(args.index)
@@ -175,7 +175,7 @@ HitmanServer.Commands.UnlockDoor = function(player, args)
     end
 end
 
-HitmanServer.Commands.VehiclePartRemove = function(player, args)
+HitmanServer.t3_Commands.VehiclePartRemove = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, 0)
     if sq then
         local vehicle = sq:getVehicleContainer()
@@ -190,7 +190,7 @@ HitmanServer.Commands.VehiclePartRemove = function(player, args)
     end
 end
 
-HitmanServer.Commands.VehiclePartDamage = function(player, args)
+HitmanServer.t3_Commands.VehiclePartDamage = function(player, args)
     local sq = getCell():getGridSquare(args.x, args.y, 0)
     if sq then
         local vehicle = sq:getVehicleContainer()
@@ -211,7 +211,7 @@ HitmanServer.Commands.VehiclePartDamage = function(player, args)
     end
 end
 
-HitmanServer.Commands.IncrementHitmanKills = function(player, args)
+HitmanServer.t3_Commands.IncrementHitmanKills = function(player, args)
     local gmd = GetHitmanModData()
     local id = HitmanUtils.GetCharacterID(player)
     if gmd.Kills[id] then
@@ -221,7 +221,7 @@ HitmanServer.Commands.IncrementHitmanKills = function(player, args)
     end
 end
 
-HitmanServer.Commands.ResetHitmanKills = function(player, args)
+HitmanServer.t3_Commands.ResetHitmanKills = function(player, args)
     local gmd = GetHitmanModData()
     local id = HitmanUtils.GetCharacterID(player)
     if gmd.Kills[id] then
@@ -229,13 +229,13 @@ HitmanServer.Commands.ResetHitmanKills = function(player, args)
     end
 end
 
-HitmanServer.Commands.UpdateVisitedBuilding = function(player, args)
+HitmanServer.t3_Commands.UpdateVisitedBuilding = function(player, args)
     local gmd = GetHitmanModData()
     gmd.VisitedBuildings[args.bid] = args.wah 
 end
 
 local onClientCommand = function(module, command, player, args)
-    if module == "Commands" and HitmanServer[module] and HitmanServer[module][command] then
+    if module == "t3_Commands" and HitmanServer[module] and HitmanServer[module][command] then
         local argStr = ""
         for k, v in pairs(args) do
             argStr = argStr .. " " .. k .. "=" .. tostring(v)

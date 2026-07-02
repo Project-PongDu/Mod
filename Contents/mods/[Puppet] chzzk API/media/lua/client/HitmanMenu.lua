@@ -73,7 +73,7 @@ end
 
 function HitmanMenu.HitmanFlush(player)
     local args = {a=1}
-    sendClientCommand(player, 'Commands', 'HitmanFlush', args)
+    sendClientCommand(player, 't3_Commands', 'HitmanFlush', args)
 end
 
 function HitmanMenu.SpawnClan(player, square, cid)
@@ -82,7 +82,7 @@ function HitmanMenu.SpawnClan(player, square, cid)
     args.x = square:getX()
     args.y = square:getY()
     args.z = square:getZ()
-    sendClientCommand(player, 'Spawner', 'Type', args)
+    sendClientCommand(player, 't3_Spawner', 'Type', args)
 end
 
 function HitmanMenu.WorldContextMenuPre(playerID, context, worldobjects, test)

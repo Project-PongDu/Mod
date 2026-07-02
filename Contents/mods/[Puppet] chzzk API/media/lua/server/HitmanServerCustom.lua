@@ -1,23 +1,23 @@
 HitmanServer = HitmanServer or {}
-HitmanServer.Custom = {}
+HitmanServer.t3_Custom = {}
 
-HitmanServer.Custom.SendToClients  = function(player, argsOld)
+HitmanServer.t3_Custom.SendToClients  = function(player, argsOld)
     HitmanCustom.Load()
     local args = {}
     args.hitmanData = HitmanCustom.hitmanData
     args.clanData = HitmanCustom.clanData
-    -- sendServerCommand('Commands', 'SendCustomToClients', args)
+    -- sendServerCommand('t3_Commands', 'SendCustomToClients', args)
 end
 
-HitmanServer.Custom.ReceiveFromClient  = function(player, args)
+HitmanServer.t3_Custom.ReceiveFromClient  = function(player, args)
     HitmanCustom.hitmanData = args.hitmanData
     HitmanCustom.clanData = args.clanData
     HitmanCustom.Save()
-    -- sendServerCommand('Commands', 'SendCustomToClients', args)
+    -- sendServerCommand('t3_Commands', 'SendCustomToClients', args)
 end
 
 local function onClientCommand(module, command, player, args)
-    if module == "Custom" and HitmanServer[module] and HitmanServer[module][command] then
+    if module == "t3_Custom" and HitmanServer[module] and HitmanServer[module][command] then
         local argStr = ""
         for k, v in pairs(args) do
             argStr = argStr .. " " .. k .. "=" .. tostring(v)

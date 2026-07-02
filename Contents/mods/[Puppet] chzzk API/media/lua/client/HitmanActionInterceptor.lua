@@ -35,7 +35,7 @@ HitmanActionInterceptor.Main = function(data)
             local y2 = buildingDef:getY2()
 
             local args = {x=x, y=y, x2=x2, y2=y2}
-            sendClientCommand(character, 'Commands', 'BaseUpdate', args)
+            sendClientCommand(character, 't3_Commands', 'BaseUpdate', args)
             -- HitmanPlayerBase.RegisterBase(buildingDef)
         end
     end

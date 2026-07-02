@@ -220,7 +220,7 @@ local function hit(shooter, item, victim)
                     local h = victim:getHealth()
                     local id = HitmanUtils.GetCharacterID(hitman)
                     local args = {id=id, h=h}
-                    sendClientCommand(getSpecificPlayer(0), 'Sync', 'Health', args)
+                    sendClientCommand(getSpecificPlayer(0), 't3_Sync', 'Health', args)
 
                 else
                     --victim:changeState(ZombieOnGroundState.instance())
@@ -408,7 +408,7 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
                             vehicle:updatePartStats()
 
                             local args = {x=square:getX(), y=square:getY(), id=vehiclePartId, dmg=dmg}
-                            sendClientCommand(player, 'Commands', 'VehiclePartDamage', args)
+                            sendClientCommand(player, 't3_Commands', 'VehiclePartDamage', args)
 
                         end
                     end

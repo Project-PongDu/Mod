@@ -1,8 +1,8 @@
 HitmanServer = HitmanServer or {}
-HitmanServer.Sync = {}
+HitmanServer.t3_Sync = {}
 
-HitmanServer.Sync.Health  = function(player, args)
-    sendServerCommand('Commands', 'UpdateHealth', args)
+HitmanServer.t3_Sync.Health  = function(player, args)
+    sendServerCommand('t3_Commands', 'UpdateHealth', args)
     --[[
     local id = args.id
     if id then
@@ -34,7 +34,7 @@ HitmanServer.Sync.Health  = function(player, args)
                 print ("HEALTH CURRENT: " .. health .. " NEW:" .. args.h)
                 if health > args.h then
                     chr:setHealth(args.h)
-                    sendServerCommand('Commands', 'UpdateHealth', args)
+                    sendServerCommand('t3_Commands', 'UpdateHealth', args)
                     break
                 end
             end
@@ -44,7 +44,7 @@ HitmanServer.Sync.Health  = function(player, args)
 end
 
 local onClientCommand = function(module, command, player, args)
-    if module == "Sync" and HitmanServer[module] and HitmanServer[module][command] then
+    if module == "t3_Sync" and HitmanServer[module] and HitmanServer[module][command] then
         local argStr = ""
         for k, v in pairs(args) do
             argStr = argStr .. " " .. k .. "=" .. tostring(v)

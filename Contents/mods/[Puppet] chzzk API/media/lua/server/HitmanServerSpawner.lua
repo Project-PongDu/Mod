@@ -440,7 +440,7 @@ local function spawnType(player, args)
                 local x, y = spawnPoints[1].x, spawnPoints[1].y
                 if isServer() then
                     local args = {icon=icon, time=1800, x=x, y=y, color=color, desc=desc}
-                    sendServerCommand('Commands', 'SetMarker', args)
+                    sendServerCommand('t3_Commands', 'SetMarker', args)
                 else
                     HitmanEventMarkerHandler.set(getRandomUUID(), icon, 1800, x, y, color, desc)
                 end
@@ -450,7 +450,7 @@ local function spawnType(player, args)
 
 end
 local function onClientCommand(module, command, player, args)
-    if module == "Spawner" and HitmanServer[module] and HitmanServer[module][command] then
+    if module == "t3_Spawner" and HitmanServer[module] and HitmanServer[module][command] then
         local argStr = ""
         for k, v in pairs(args) do
             argStr = argStr .. " " .. k .. "=" .. tostring(v)
@@ -458,7 +458,7 @@ local function onClientCommand(module, command, player, args)
         -- print ("received " .. module .. "." .. command .. " "  .. argStr)
         HitmanServer[module][command](player, args)
 
-        if module == "Spawner" then
+        if module == "t3_Spawner" then
             TransmitHitmanModData()
         end
     end
@@ -466,10 +466,10 @@ end
 
 -- api
 HitmanServer = HitmanServer or {}
-HitmanServer.Spawner = {}
+HitmanServer.t3_Spawner = {}
 
 -- used for dedicated spawning by mods or debug
-HitmanServer.Spawner.Type = function(player, args)
+HitmanServer.t3_Spawner.Type = function(player, args)
     if not args.cid then return end
     
     args.pid = HitmanUtils.GetCharacterID(player)
@@ -477,7 +477,7 @@ HitmanServer.Spawner.Type = function(player, args)
 end
 
 -- used for dedicated spawning by mods or debug
-HitmanServer.Spawner.Clan = function(player, args)
+HitmanServer.t3_Spawner.Clan = function(player, args)
     if not args.cid then return end
     args.pid = HitmanUtils.GetCharacterID(player)
 

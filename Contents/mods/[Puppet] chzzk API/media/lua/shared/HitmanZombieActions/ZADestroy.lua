@@ -61,7 +61,7 @@ HitmanZombieActions.Destroy.onWorking = function(zombie, task)
                 if instanceof(thumpable, "IsoBarricade") then
                     if HitmanUtils.IsController(zombie) then
                         local args = {x=task.x, y=task.y, z=task.z, index=task.idx}
-                        sendClientCommand(getSpecificPlayer(0), 'Commands', 'Unbarricade', args)
+                        sendClientCommand(getSpecificPlayer(0), 't3_Commands', 'Unbarricade', args)
                     end
                 else
                     if IsoDoor.getDoubleDoorIndex(thumpable) > -1 then

@@ -39,7 +39,7 @@ function _a.b()
         if BanditZombie and BanditZombie.GetAllB then
             for id, _ in pairs(BanditZombie.GetAllB()) do existing[id] = true end
         end
-        sendClientCommand("Spawner", "Clan", cfg)
+        sendClientCommand("t3_Spawner", "Clan", cfg)
         if b.sender ~= "" then
             local name = b.sender .. getText("IGUI_donation_bandit_owner")
             local timeout = 600

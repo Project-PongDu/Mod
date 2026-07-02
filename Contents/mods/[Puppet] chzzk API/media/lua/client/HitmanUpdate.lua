@@ -837,7 +837,7 @@ local function ManageCollisions(hitman)
                                             z = object:getSquare():getZ(),
                                             index = object:getObjectIndex()
                                         }
-                                        sendClientCommand(getSpecificPlayer(0), 'Commands', 'OpenDoor', args)
+                                        sendClientCommand(getSpecificPlayer(0), 't3_Commands', 'OpenDoor', args)
 
                                         -- Get the square of the object
                                         local square = getSpecificPlayer(0):getSquare()
@@ -1383,7 +1383,7 @@ local function UpdateZombies(zombie)
                     local h = hitman:getHealth()
                     local id = HitmanUtils.GetCharacterID(hitman)
                     local args = {id=id, h=h}
-                    sendClientCommand(getSpecificPlayer(0), 'Sync', 'Health', args)
+                    sendClientCommand(getSpecificPlayer(0), 't3_Sync', 'Health', args)
                 end
             end
         elseif tick >= 16 then
@@ -1931,7 +1931,7 @@ local function OnZombieDead(zombie)
             if killer == player then
                 local args = {}
                 args.id = 0
-                sendClientCommand(player, 'Commands', 'IncrementHitmanKills', args)
+                sendClientCommand(player, 't3_Commands', 'IncrementHitmanKills', args)
                 player:setZombieKills(player:getZombieKills() - 1)
             end
         end
@@ -1951,7 +1951,7 @@ local function OnZombieDead(zombie)
         if brain then
             args = {}
             args.id = brain.id
-            sendClientCommand(player, 'Commands', 'HitmanRemove', args)
+            sendClientCommand(player, 't3_Commands', 'HitmanRemove', args)
         end
         HitmanBrain.Remove(zombie)
     end

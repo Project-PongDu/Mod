@@ -365,7 +365,7 @@ local function Hit(attacker, item, victim)
                     vehicle:updatePartStats()
 
                     local args = {x=square:getX(), y=square:getY(), id=vehiclePartId, dmg=dmg}
-                    sendClientCommand(player, 'Commands', 'VehiclePartDamage', args)
+                    sendClientCommand(player, 't3_Commands', 'VehiclePartDamage', args)
                 end
             end
         else
@@ -409,7 +409,7 @@ local function Hit(attacker, item, victim)
                 local h = victim:getHealth()
                 local id = HitmanUtils.GetCharacterID(victim)
                 local args={id=id, h=h}
-                sendClientCommand(getSpecificPlayer(0), 'Sync', 'Health', args)
+                sendClientCommand(getSpecificPlayer(0), 't3_Sync', 'Health', args)
             end
 
             victim:playSound(item:getZombieHitSound())
