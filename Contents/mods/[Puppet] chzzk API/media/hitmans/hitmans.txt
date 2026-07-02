@@ -92,7 +92,7 @@
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	tint: Hat = 6710886
 	tint: TorsoExtraVest = 4473924
-	weapons: melee = Base.HuntingKnife
+	weapons: melee = Base.Katana
 
 
 
