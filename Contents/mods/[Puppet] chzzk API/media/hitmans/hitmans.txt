@@ -114,7 +114,7 @@
 	general: sight = 6
 	general: exp1 = 9
 	general: exp2 = 12
-	general: exp3 = 0
+	general: exp3 = 18
 	clothing: MaskEyes = Base.Hat_GasMask
 	clothing: Hat = Base.Hat_BeretArmy
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack
@@ -143,7 +143,7 @@
 	general: sight = 10
 	general: exp1 = 9
 	general: exp2 = 12
-	general: exp3 = 0
+	general: exp3 = 18
 	clothing: Eyes = Base.Glasses_Eyepatch_Left
 	clothing: Hat = Base.Hat_BeretArmy
 	clothing: Hands = Base.Gloves_LeatherGlovesBlack

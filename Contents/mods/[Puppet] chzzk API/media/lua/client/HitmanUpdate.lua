@@ -986,6 +986,7 @@ local function ManageCombat(hitman)
                                     if dist <= maxRangeMelee then
                                         local asn = enemyCharacter:getActionStateName()
                                         shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "sitonground" and asn ~= "climbfence" and asn ~= "bumped"
+                                            and not Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker)
                                         combat = not shove
                                     end
                                 else
@@ -1093,6 +1094,7 @@ local function ManageCombat(hitman)
 
                                         if dist <= maxRangeMelee + fix then
                                             shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "climbfence" and asn ~= "bumped" and asn ~= "getup" and asn ~= "falldown"
+                                                and not Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker)
                                             combat = not shove
                                         end
                                     else
@@ -1586,7 +1588,7 @@ local function ProcessTask(hitman, task)
         -- normalize time speed
         local decrement = 1 / ((getAverageFPS() + 0.5) * 0.01666667)
         if task.action == "Smack" and Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker) then
-            decrement = decrement * 5
+            decrement = decrement * 3
         end
         task.time = task.time - decrement
 

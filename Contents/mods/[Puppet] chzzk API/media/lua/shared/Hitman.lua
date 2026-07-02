@@ -64,6 +64,7 @@ Hitman.Expertise.Traitor = 14
 Hitman.Expertise.Sacrificer = 15
 Hitman.Expertise.Zombiemaster = 16
 Hitman.Expertise.Berserker = 17
+Hitman.Expertise.Sharpshooter = 18
 
 Hitman.Engine = true
 

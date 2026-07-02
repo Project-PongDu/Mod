@@ -115,6 +115,9 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot)
 
     local dist = HitmanUtils.DistTo(hitman:getX(), hitman:getY(), enemyCharacter:getX(), enemyCharacter:getY())
     local firingtime = weaponItem:getRecoilDelay() + math.floor(dist ^ 1.1) + fireTimeIndividual
+    if Hitman.HasExpertise(hitman, Hitman.Expertise.Sharpshooter) then
+        firingtime = firingtime / 2
+    end
 
     local bullets = 1
     local modes = weaponItem:getFireModePossibilities()
