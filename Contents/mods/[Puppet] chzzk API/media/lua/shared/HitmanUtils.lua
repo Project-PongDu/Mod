@@ -423,10 +423,31 @@ end
 
 function HitmanUtils.GetTarget(character, config)
 
+    local closestZombie = HitmanUtils.GetClosestZombieLocation(character)
+    local closestHitman = HitmanUtils.GetClosestEnemyHitmanLocation(character)
     local closestPlayer = HitmanUtils.GetClosestPlayerLocation(character, config)
 
-    local target = closestPlayer
-    local enemy = HitmanPlayer.GetPlayerById(target.id)
+    -- NPC targets (restored from the original Bandits GetTarget, which the
+    -- slim pass removed): nearest ordinary zombie -- this includes Bandit
+    -- NPCs, which carry no "Hitman" variable and therefore live in
+    -- CacheLightZ -- or nearest hostile hitman from another clan. This is
+    -- what makes hitmen actively close in on out-of-range NPC enemies
+    -- instead of standing still until ManageCombat's weapon range is reached.
+    local target = closestZombie
+    local enemy = HitmanZombie.Cache[target.id]
+
+    if closestHitman.dist < closestZombie.dist then
+        target = closestHitman
+        enemy = HitmanZombie.Cache[target.id]
+    end
+
+    -- Player has absolute priority, consistent with ManageCombat: whenever a
+    -- player is detectable at all (CanSee or within hearDist), chase the
+    -- player over any NPC. Same unconditional behavior as before this change.
+    if closestPlayer.x then
+        target = closestPlayer
+        enemy = HitmanPlayer.GetPlayerById(target.id)
+    end
 
     if target.x and target.y and target.d then
         local i = target.dist
