@@ -378,7 +378,7 @@ local function getIconDataByProgram(program, friendly)
     end
 
     if program == "Hitman" then 
-        icon = "media/ui/raid.png"
+        icon = "media/ui/hitman_raid.png"
         desc = desc .. " " .. "Assault"
     elseif program == "Companion" then
         icon = "media/ui/friend.png"
