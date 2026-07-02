@@ -1,0 +1,4 @@
+UI_TR = {
+    UI_optionscreen_binding_Hitmans = "Haydutlar/Hitmans",
+    UI_optionscreen_binding_POSTS = "N?et? Karakollar??Y?et",
+}

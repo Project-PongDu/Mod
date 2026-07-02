@@ -1,0 +1,250 @@
+local getBarricadeAble = function(x, y, z, index)
+    local sq = getCell():getGridSquare(x, y, z)
+    if sq and index >= 0 and index < sq:getObjects():size() then
+        local o = sq:getObjects():get(index)
+        if instanceof(o, 'BarricadeAble') then
+            return o
+        end
+    end
+    return nil
+end
+
+HitmanServer = HitmanServer or {}
+HitmanServer.Commands = {}
+
+HitmanServer.Commands.PostToggle = function(player, args)
+    local gmd = GetHitmanModData()
+    if not (args.x and args.y and args.z) then return end
+
+    local id = args.x .. "-" .. args.y .. "-" .. args.z
+    
+    if gmd.Posts[id] then
+        gmd.Posts[id] = nil
+    else
+        gmd.Posts[id] = args
+    end
+end
+
+HitmanServer.Commands.PostUpdate = function(player, args)
+    local gmd = GetHitmanModData()
+    if not (args.x and args.y and args.z) then return end
+
+    local id = args.x .. "-" .. args.y .. "-" .. args.z
+    gmd.Posts[id] = args
+end
+
+HitmanServer.Commands.BaseUpdate = function(player, args)
+    local gmd = GetHitmanModData()
+    if not (args.x and args.y) then return end
+
+    local id = args.x .. "-" .. args.y
+    gmd.Bases[id] = args
+end
+
+HitmanServer.Commands.HitmanRemove  = function(player, args)
+    local gmd = GetHitmanModData()
+    local id = args.id
+    if gmd.Queue[id] then
+        gmd.Queue[id] = nil
+        -- print ("[INFO] Hitman removed: " .. id)
+    end
+end
+
+HitmanServer.Commands.HitmanFlush  = function(player, args)
+    local gmd = GetHitmanModData()
+    gmd.Queue = {}
+    gmd.VisitedBuildings = {}
+    gmd.Posts = {}
+    gmd.Bases = {}
+    print ("[INFO] All hitmans removed!!!")
+end
+
+HitmanServer.Commands.HitmanUpdatePart = function(player, args)
+    local gmd = GetHitmanModData()
+    local id = args.id
+    if id and gmd.Queue[id] then
+
+        local brain = gmd.Queue[id]
+        for k, v in pairs(args) do
+            brain[k] = v
+            -- print ("[INFO] Hitman sync id: " .. id .. " key: " .. k)
+        end
+
+        gmd.Queue[id] = brain
+
+        sendServerCommand('Commands', 'UpdateHitmanPart', args)
+    end
+end
+
+HitmanServer.Commands.Unbarricade = function(player, args)
+    local object = getBarricadeAble(args.x, args.y, args.z, args.index)
+    if object then
+        local barricade = object:getBarricadeOnSameSquare()
+        if not barricade then barricade = object:getBarricadeOnOppositeSquare() end
+        if barricade then
+            if barricade:isMetal() then
+                local metal = barricade:removeMetal(nil)
+            elseif barricade:isMetalBar() then
+                local bar = barricade:removeMetalBar(nil)
+            else
+                local plank = barricade:removePlank(nil)
+                if barricade:getNumPlanks() > 0 then
+                    barricade:sendObjectChange('state')
+                end
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.Barricade = function(player, args)
+    local object = getBarricadeAble(args.x, args.y, args.z, args.index)
+    if object then
+        local barricade = IsoBarricade.AddBarricadeToObject(object, player)
+        if barricade then
+            if not barricade:isMetal() and args.isMetal then
+                local metal = HitmanCompatibility.InstanceItem("Base.SheetMetal")
+                metal:setCondition(args.condition)
+                barricade:addMetal(nil, metal)
+                barricade:transmitCompleteItemToClients()
+            elseif not barricade:isMetalBar() and args.isMetalBar then
+                local metal = HitmanCompatibility.InstanceItem("Base.MetalBar")
+                metal:setCondition(args.condition)
+                barricade:addMetalBar(nil, metal)
+                barricade:transmitCompleteItemToClients()
+            elseif barricade:getNumPlanks() < 4 then
+                local plank = HitmanCompatibility.InstanceItem("Base.Plank")
+                plank:setCondition(args.condition)
+                barricade:addPlank(nil, plank)
+                if barricade:getNumPlanks() == 1 then
+                    barricade:transmitCompleteItemToClients()
+                else
+                    barricade:sendObjectChange('state')
+                end
+            end
+        end
+    else
+        noise('expected BarricadeAble')
+    end
+end
+
+HitmanServer.Commands.OpenDoor = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, args.z)
+    if sq and args.index >= 0 and args.index < sq:getObjects():size() then
+        local object = sq:getObjects():get(args.index)
+        if instanceof(object, "IsoDoor") or (instanceof(object, 'IsoThumpable') and object:isDoor() == true) then
+            if not object:IsOpen() then
+                object:ToggleDoorSilent()
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.CloseDoor = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, args.z)
+    if sq and args.index >= 0 and args.index < sq:getObjects():size() then
+        local object = sq:getObjects():get(args.index)
+        if instanceof(object, "IsoDoor") or (instanceof(object, 'IsoThumpable') and object:isDoor() == true) then
+            if object:IsOpen() then
+                object:ToggleDoorSilent()
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.LockDoor = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, args.z)
+    if sq and args.index >= 0 and args.index < sq:getObjects():size() then
+        local object = sq:getObjects():get(args.index)
+        if instanceof(object, "IsoDoor") or (instanceof(object, 'IsoThumpable') and object:isDoor() == true) then
+            if not object:isLockedByKey() then
+                object:setLockedByKey(true)
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.UnlockDoor = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, args.z)
+    if sq and args.index >= 0 and args.index < sq:getObjects():size() then
+        local object = sq:getObjects():get(args.index)
+        if instanceof(object, "IsoDoor") or (instanceof(object, 'IsoThumpable') and object:isDoor() == true) then
+            if object:isLockedByKey() then
+                object:setLockedByKey(false)
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.VehiclePartRemove = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, 0)
+    if sq then
+        local vehicle = sq:getVehicleContainer()
+        if vehicle then
+            local vehiclePart = vehicle:getPartById(args.id)
+            if vehiclePart then
+                vehiclePart:setInventoryItem(nil)
+                vehicle:transmitPartItem(vehiclePart)
+                vehicle:updatePartStats()
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.VehiclePartDamage = function(player, args)
+    local sq = getCell():getGridSquare(args.x, args.y, 0)
+    if sq then
+        local vehicle = sq:getVehicleContainer()
+        if vehicle then
+            local vehiclePart = vehicle:getPartById(args.id)
+            if vehiclePart then
+                vehiclePart:damage(args.dmg)
+
+                if vehiclePart:getCondition() <= 0 then
+                    vehiclePart:setInventoryItem(nil)
+                    vehicle:transmitPartItem(vehiclePart)
+                else
+                    vehicle:transmitPartCondition(vehiclePart)
+                end
+                vehicle:updatePartStats()
+            end
+        end
+    end
+end
+
+HitmanServer.Commands.IncrementHitmanKills = function(player, args)
+    local gmd = GetHitmanModData()
+    local id = HitmanUtils.GetCharacterID(player)
+    if gmd.Kills[id] then
+        gmd.Kills[id] = gmd.Kills[id] + 1
+    else
+        gmd.Kills[id] = 1
+    end
+end
+
+HitmanServer.Commands.ResetHitmanKills = function(player, args)
+    local gmd = GetHitmanModData()
+    local id = HitmanUtils.GetCharacterID(player)
+    if gmd.Kills[id] then
+        gmd.Kills[id] = 0
+    end
+end
+
+HitmanServer.Commands.UpdateVisitedBuilding = function(player, args)
+    local gmd = GetHitmanModData()
+    gmd.VisitedBuildings[args.bid] = args.wah 
+end
+
+local onClientCommand = function(module, command, player, args)
+    if module == "Commands" and HitmanServer[module] and HitmanServer[module][command] then
+        local argStr = ""
+        for k, v in pairs(args) do
+            argStr = argStr .. " " .. k .. "=" .. tostring(v)
+        end
+        -- print ("received " .. module .. "." .. command .. " "  .. argStr)
+        HitmanServer[module][command](player, args)
+
+        TransmitHitmanModData()
+    end
+end
+
+Events.OnClientCommand.Add(onClientCommand)

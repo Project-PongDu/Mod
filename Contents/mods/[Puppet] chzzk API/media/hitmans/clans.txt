@@ -1,0 +1,31 @@
+[1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220]
+	general: name = Hitman_Melee
+	spawn: friendly = false
+	spawn: companion = false
+	spawn: defenders = false
+	spawn: campers = false
+	spawn: assault = true
+	spawn: wanderer = false
+	spawn: roadblock = false
+	spawn: dayStart = 0
+	spawn: dayEnd = 0
+	spawn: spawnChance = 0
+	spawn: groupMin = 4
+	spawn: groupMax = 4
+	spawn: zone = 0
+
+[7b0273ef-54db-444f-97f9-bf2b22e7fe38]
+	general: name = Hitman_Ranged
+	spawn: friendly = false
+	spawn: companion = false
+	spawn: defenders = false
+	spawn: campers = false
+	spawn: assault = true
+	spawn: wanderer = false
+	spawn: roadblock = false
+	spawn: dayStart = 0
+	spawn: dayEnd = 0
+	spawn: spawnChance = 0
+	spawn: groupMin = 2
+	spawn: groupMax = 2
+	spawn: zone = 0

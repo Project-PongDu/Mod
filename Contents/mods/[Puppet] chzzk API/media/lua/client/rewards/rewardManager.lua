@@ -1,6 +1,6 @@
 local rewardManager = {}
 
-local bandit     = require("features/bandit")
+local bandit     = require("features/hitman")
 local teleport   = require("features/teleport")
 local backroom   = require("features/backroom")
 local bombard    = require("features/bombard")

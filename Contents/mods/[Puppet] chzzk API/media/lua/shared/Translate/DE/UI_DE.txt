@@ -1,0 +1,7 @@
+UI_DE = {
+    
+    /***** Localized by Eaglefire *****/
+
+    UI_optionscreen_binding_Hitmans = "Hitmanen",
+    UI_optionscreen_binding_POSTS = "Wachposten verwalten",
+}

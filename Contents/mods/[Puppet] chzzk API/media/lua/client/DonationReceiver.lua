@@ -1,7 +1,7 @@
 require("ISUI/ISPanel")
 local config        = require("config")
 local rewardManager = require("rewards/rewardManager")
-local bandit        = require("features/bandit")
+local bandit        = require("features/hitman")
 local zombie        = require("features/zombie")
 local global        = require("global")
 

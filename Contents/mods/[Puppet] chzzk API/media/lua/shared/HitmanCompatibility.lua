@@ -1,0 +1,372 @@
+HitmanCompatibility = HitmanCompatibility or {}
+
+-- compatibility wrappers
+
+local getGameVersion = function()
+    return getCore():getGameVersion():getMajor()
+end
+
+HitmanCompatibility.GetGameVersion = getGameVersion
+
+local legacyItemMap = {}
+legacyItemMap["Base.WineOpen"]                  = "Base.WineEmpty"
+legacyItemMap["Base.BaseballBat_Nails"]         = "Base.BaseballBatNails"
+legacyItemMap["Base.BaseballBat_RailSpike"]     = "Base.BaseballBatNails"
+legacyItemMap["Base.BaseballBat_Sawblade"]      = "Base.BaseballBatNails"
+legacyItemMap["Base.BaseballBat_Spiked"]        = "Base.BaseballBatNails"
+legacyItemMap["Base.BaseballBat_Metal"]         = "Base.BaseballBatNails"
+legacyItemMap["Base.WaterBottle"]               = "Base.WaterBottleFull"
+legacyItemMap["Base.Whiskey"]                   = "Base.WhiskeyFull"
+legacyItemMap["Base.Plank_Nails"]               = "Base.PlankNail"
+legacyItemMap["Base.BaconBits"]                 = "farming.BaconBits"
+legacyItemMap["Base.SpearShort"]                = "Base.WoodenLance"
+legacyItemMap["Base.GuitarElectric"]            = "Base.GuitarElectricRed"
+legacyItemMap["Base.HandShovel"]                = "farming.HandShovel"
+legacyItemMap["Base.BroccoliBagSeed2"]          = "farming.BroccoliBagSeed"
+legacyItemMap["Base.CabbageBagSeed2"]           = "farming.CabbageBagSeed"
+legacyItemMap["Base.CarrotBagSeed2"]            = "farming.CarrotBagSeed"
+legacyItemMap["Base.PotatoBagSeed2"]            = "farming.PotatoBagSeed"
+legacyItemMap["Base.RedRadishBagSeed2"]         = "farming.RedRadishBagSeed"
+legacyItemMap["Base.StrewberrieBagSeed2"]       = "farming.StrewberrieBagSeed"
+legacyItemMap["Base.TomatoBagSeed2"]            = "farming.TomatoBagSeed"
+legacyItemMap["Base.CigaretteSingle"]           = "Base.Cigarettes"
+legacyItemMap["Base.WateredCan"]                = "farming.WateredCan"
+legacyItemMap["Base.TireIron"]                  = "Base.LugWrench"
+legacyItemMap["Base.Ratchet"]                   = "Base.Wrench"
+legacyItemMap["Base.LightBulbBox"]              = "Base.LightBulb"
+legacyItemMap["Base.Toolbox_Mechanic"]          = "Base.Toolbox"
+legacyItemMap["Base.Bag_Satchel_Medical"]       = "Base.Bag_Satchel"
+legacyItemMap["Base.GuitarElectricBass"]        = "Base.GuitarElectricBassBlack"
+legacyItemMap["Base.PiePumpkin"]                = "Base.PieApple"
+legacyItemMap["Base.CakeCarrot"]                = "Base.PieApple"
+legacyItemMap["Base.EggOmlette"]                = "Base.Pancakes"
+legacyItemMap["Base.PiePumpkin"]                = "Base.PieApple"
+legacyItemMap["Base.PiePumpkin"]                = "Base.PieApple"
+legacyItemMap["Base.FightingKnife"]             = "Base.HuntingKnife"
+legacyItemMap["Base.LargeKnife"]                = "Base.HuntingKnife"
+legacyItemMap["Base.BoltCutters"]               = "Base.Crowbar"
+
+
+HitmanCompatibility.LegacyItemMap = legacyItemMap
+
+HitmanCompatibility.GetConfigPath = function()
+    if getGameVersion() < 42 then
+        return "media" .. getFileSeparator() .. "hitmans" .. getFileSeparator() -- that'll be /media/hitmans/
+    else
+        return "hitmans" .. getFileSeparator() -- that'll be common/hitmans/
+    end
+end
+
+HitmanCompatibility.GetModPrefix = function()
+    if getGameVersion() < 42 then
+        return ""
+    else
+        return "\\"
+    end
+end
+
+HitmanCompatibility.GetLegacyItem = function(itemFullType)
+    if getGameVersion() < 42 then
+        local map = HitmanCompatibility.LegacyItemMap
+        if map[itemFullType] then
+            return map[itemFullType]
+        end
+    end
+    return itemFullType
+end
+
+HitmanCompatibility.SetRandomCondition = function(item, m)
+    item:setCondition(ZombRand(item:getConditionMax() * m) + 1)
+
+    if getGameVersion() >= 42 and item:hasHeadCondition() then
+        item:setHeadCondition(ZombRand(item:getHeadConditionMax() * 0.8) + 1)
+    end
+    return item
+end
+
+HitmanCompatibility.GetClickedSquare = function()
+    if getGameVersion() >= 42 then
+        local fetch = ISWorldObjectContextMenu.fetchVars
+        return fetch.clickedSquare
+    else
+        return clickedSquare
+    end
+end
+
+HitmanCompatibility.GetGuardpostKey = function()
+    if getGameVersion() >= 42 then
+        local options = PZAPI.ModOptions:getOptions("Hitmans")
+        return options:getOption("POSTS"):getValue()
+    else
+        return getCore():getKey("POSTS")
+    end
+end
+
+HitmanCompatibility.InstanceItem = function(itemFullType)
+    local item
+    if getGameVersion() >= 42 then
+        item = instanceItem(itemFullType)
+    else
+        local itemFullTypeLegacy = HitmanCompatibility.GetLegacyItem(itemFullType)
+        item = InventoryItemFactory.CreateItem(itemFullTypeLegacy)
+    end
+
+    if item then
+        return item
+    else
+        print ("[WARN] Item " .. itemFullType .. " not found!")
+    end
+end
+
+HitmanCompatibility.Splash = function(hitman, item, zombie)
+    if getGameVersion() >= 42 then
+        local splatNo = item:getSplatNumber()
+        for i=0, splatNo do
+            hitman:splatBlood(3, 0.3)
+        end
+        hitman:splatBloodFloorBig()
+        hitman:playBloodSplatterSound()
+    else
+        SwipeStatePlayer.splash(hitman, item, zombie)
+    end
+end
+
+HitmanCompatibility.PlayerVoiceSound = function(player, sound)
+    if getGameVersion() >= 42 then
+        player:playerVoiceSound(sound)
+    else
+        -- not implemented
+    end
+end
+
+HitmanCompatibility.StartMuzzleFlash = function(shooter)
+    if getGameVersion() >= 42 then
+        local square = shooter:getSquare()
+        shooter:startMuzzleFlash() -- it does not work in b42 apparently, so here is how to do this now:
+        shooter:setMuzzleFlashDuration(getTimestampMs())
+        local lightSource = IsoLightSource.new(square:getX(), square:getY(), square:getZ(), 0.8, 0.8, 0.7, 18, 2)
+        getCell():addLamppost(lightSource)
+    else
+        shooter:startMuzzleFlash()
+    end
+end
+
+HitmanCompatibility.IsReanimatedForGrappleOnly = function(zombie)
+    if getGameVersion() >= 42 then
+        return zombie:isReanimatedForGrappleOnly()
+    else
+        return false
+    end
+end
+
+HitmanCompatibility.AddZombiesInOutfit = function(x, y, z, outfit, femaleChance, crawler, isFallOnFront, isFakeDead, knockedDown, isInvulnerable, isSitting, health)
+    local zombieList
+    if getGameVersion() >= 42 then
+        zombieList = addZombiesInOutfit(x, y, z, 1, outfit, femaleChance, crawler, isFallOnFront, isFakeDead, knockedDown, isInvulnerable, isSitting, health)
+    else
+        zombieList = addZombiesInOutfit(x, y, z, 1, outfit, femaleChance, crawler, isFallOnFront, isFakeDead, knockedDown, health)
+    end
+    return zombieList
+end
+
+HitmanCompatibility.AddId = function(zombie, fullname)
+    if getGameVersion() >= 42 then
+        local itemName = "Base.IDcard"
+        if zombie:isFemale() then itemName = "Base.IDcard_Female" end
+        local item = instanceItem(itemName)
+        item:setName("ID Card:" .. fullname)
+        zombie:addItemToSpawnAtDeath(item)
+    else
+        local item = InventoryItemFactory.CreateItem("Base.KeyRing")
+        item:setName(fullname .. " Key Ring")
+        zombie:addItemToSpawnAtDeath(item)
+    end
+end
+
+HitmanCompatibility.SurpressZombieSounds = function(hitman)
+    if getGameVersion() >= 42 then
+        hitman:getEmitter():stopSoundByName(hitman:getVoiceSoundName())
+        hitman:getEmitter():stopSoundByName(hitman:getBiteSoundName())
+    else
+        hitman:getEmitter():stopSoundByName("MaleZombieCombined")
+        hitman:getEmitter():stopSoundByName("FemaleZombieCombined")
+    end
+end
+
+HitmanCompatibility.HaveRoofFull = function(square)
+    if getGameVersion() >= 42 then
+        return square:haveRoofFull()
+    else
+        return true
+    end
+end
+
+HitmanCompatibility.GetMovementSpeed = function(object)
+    if getGameVersion() >= 42 then
+        local tempo = IsoGameCharacter.getTempo()
+        tempo:setX(object:getX() - object:getLastX())
+        tempo:setY(object:getY() - object:getLastY())
+        return tempo:getLength()
+
+        -- return object:getMovementSpeed()
+    else
+        local tempo = IsoGameCharacter.getTempo()
+        tempo:setX(object:getX() - object:getLx())
+        tempo:setY(object:getY() - object:getLy())
+        return tempo:getLength()
+    end
+end
+
+HitmanCompatibility.GetScopeRange = function(scope)
+    local sightScope
+    if getGameVersion() >= 42 then
+        sightScope = scope:getMaxSightRange()
+    else
+        sightScope = scope:getMaxRange()
+    end
+    return sightScope
+end
+
+HitmanCompatibility.GetMaxRange = function(weapon)
+    
+    --                      b42       b41
+    -- AssaultRifle         30        11 3
+    -- AssaultRifle2        40        10 3
+    -- DoubleBarrel         15        9
+    -- DoubleBarrelShff     8         8
+    -- HuntingRifle         40        10    3
+    -- Pistol               15        7     1.5
+    -- Pistol2              12        8     1.5
+    -- Pistol3              17        10    1.5
+    -- Revoler              12        9     1.5
+    -- Revolver_Long        18        11    1.5
+    -- Revolver_Short       8         6
+    -- Shotgun              12        7
+    -- Shotgun Sawn         10        6
+    -- Varmint              30        10    2
+
+    if getGameVersion() >= 42 then
+        local wrange = weapon:getMaxRange()
+        local scope = weapon:getWeaponPart("Scope")
+        if scope then
+            wrange = wrange + scope:getMaxSightRange()
+        end
+        return wrange
+    else
+        local weaponType = WeaponType.getWeaponType(weapon)
+        local wrange = weapon:getMaxRange()
+        if weaponType == WeaponType.firearm then
+            if wrange >= 10 then
+                wrange = wrange + 20
+            end
+            local scope = weapon:getScope()
+            if scope then
+                wrange = wrange + scope:getMaxRange()
+            end
+        elseif weaponType == WeaponType.handgun then
+            wrange = wrange + 6
+        end
+        return wrange
+    end   
+end
+
+HitmanCompatibility.UsesExternalMagazine = function(weapon)
+    if getGameVersion() >= 42 then
+        return weapon:usesExternalMagazine()
+    else
+        local magazineType = weapon:getMagazineType()
+        if magazineType then return true end
+    end
+    return false
+end
+
+HitmanCompatibility.setParameterValueByName = function(emitter, sid, name, mat)
+    if getGameVersion() >= 42 then
+        emitter:setParameterValueByName(sid, name, mat)
+    else
+        -- no implementation
+    end
+    return false
+end
+
+HitmanCompatibility.GetBodyLocations = function(weapon)
+    local bodyLocations = {}
+    if getGameVersion() >= 42 then
+        bodyLocations = {
+            Head = {"Hat", "FullHat", "Ears", "EarTop", "Nose"},
+            Face = {"Mask", "MaskEyes", "Eyes", "RightEye", "LeftEye"},
+            Neck = {"Neck", "Necklace", "Scarf", "Gorget"},
+            Suit = {"FullSuit", "FullSuitHead", "Boilersuit", "Torso1Legs1", "Dress", "LongDress", "BathRobe"},
+            TopShirt = {"TankTop", "Tshirt", "ShortSleeveShirt", "Shirt"},
+            TopJacket = {"Jacket", "JacketHat", "Jacket_Down", "JacketHat_Bulky", "Jacket_Bulky", "JacketSuit", "FullTop"},
+            TopExtra = {"TorsoExtraVest", "VestTexture", "TorsoExtraVestBullet", "Sweater", "SweaterHat", "TorsoExtra"},
+            Underwear = {"UnderwearBottom", "UnderwearTop", "UnderwearExtra1", "UnderwearExtra2"},
+            TopArmor = {"ShoulderpadRight", "ShoulderpadLeft", "ForeArm_Right", "ForeArm_Left"},
+            Hands = {"Hands", "RightWrist", "Right_MiddleFinger", "Right_RingFinger", "LeftWrist", "Left_MiddleFinger", "Left_RingFinger"},
+            Bags = {"FannyPackFront", "FannyPackBack", "Webbing"},
+            Holsters = {"AmmoStrap", "AnkleHolster", "BeltExtra", "ShoulderHolster"},
+            Bottom = {"Pants", "PantsExtra", "Legs1", "ShortPants", "ShortsShort", "LongSkirt", "Skirt"},
+            BottomArmor = {"Thigh_Right", "Thigh_Left", "Knee_Right", "Knee_Left", "Calf_Right", "Calf_Left"},
+            Feet = {"Socks", "Shoes"}
+        }
+    else
+        bodyLocations = {
+            Head = {"Hat", "FullHat", "Ears", "EarTop", "Nose"},
+            Face = {"Mask", "MaskEyes", "Eyes", "RightEye", "LeftEye"},
+            Neck = {"Neck", "Necklace", "Scarf"},
+            Suit = {"FullSuit", "FullSuitHead", "Boilersuit", "Torso1Legs1", "Dress", "BathRobe"},
+            TopShirt = {"TankTop", "Tshirt", "ShortSleeveShirt", "Shirt"},
+            TopJacket = {"Jacket", "JacketHat", "Jacket_Down", "JacketHat_Bulky", "Jacket_Bulky", "JacketSuit", "FullTop"},
+            TopExtra = {"TorsoExtraVest", "Sweater", "SweaterHat", "TorsoExtra"},
+            Underwear = {"UnderwearBottom", "UnderwearTop", "UnderwearExtra1", "UnderwearExtra2"},
+            Hands = {"Hands", "RightWrist", "Right_MiddleFinger", "Right_RingFinger", "LeftWrist", "Left_MiddleFinger", "Left_RingFinger"},
+            Bags = {"FannyPackFront", "FannyPackBack"},
+            Holsters = {"AmmoStrap", "BeltExtra"},
+            Bottom = {"Pants", "Legs1", "Skirt"},
+            Feet = {"Socks", "Shoes"}
+        }
+    end
+    return bodyLocations
+end
+
+HitmanCompatibility.GetBodyLocationsOrdered = function()
+    local bodyLocations = {}
+    if getGameVersion() >= 42 then
+        bodyLocations = {
+            "UnderwearBottom", "UnderwearTop", "UnderwearExtra1", "UnderwearExtra2", "Torso1Legs1", "Legs1",
+            "Ears", "EarTop", "Nose", "Hat", "FullHat",
+            "Mask", "MaskEyes", "Eyes", "RightEye", "LeftEye",
+            "Neck", "Necklace", "Gorget", "Scarf",
+            "TankTop", "Tshirt", "ShortSleeveShirt", "Shirt",
+            "VestTexture", "Sweater", "SweaterHat", "TorsoExtraVest", "TorsoExtraVestBullet", "TorsoExtra",
+            "Jacket", "JacketHat", "Jacket_Down", "JacketHat_Bulky", "Jacket_Bulky", "JacketSuit", "FullTop",
+            "RightWrist", "Right_MiddleFinger", "Right_RingFinger", "LeftWrist", "Left_MiddleFinger", "Left_RingFinger", "Hands",
+            "Pants", "PantsExtra", "ShortPants", "ShortsShort", "LongSkirt", "Skirt", "Dress", "LongDress",
+            "BathRobe", "FullSuit", "FullSuitHead", "Boilersuit",
+            "ShoulderpadRight", "ShoulderpadLeft", "ForeArm_Right", "ForeArm_Left",
+            "Thigh_Right", "Thigh_Left", "Knee_Right", "Knee_Left", "Calf_Right", "Calf_Left",
+            "FannyPackFront", "FannyPackBack", "Webbing",
+            "AmmoStrap", "AnkleHolster", "BeltExtra", "ShoulderHolster",
+            "Socks", "Shoes"
+        }
+    else
+        bodyLocations = {
+            "UnderwearBottom", "UnderwearTop", "UnderwearExtra1", "UnderwearExtra2", "Torso1Legs1", "Legs1",
+            "Ears", "EarTop", "Nose", "Hat", "FullHat",
+            "Mask", "MaskEyes", "Eyes", "RightEye", "LeftEye",
+            "Neck", "Necklace", "Gorget", "Scarf",
+            "TankTop", "Tshirt", "ShortSleeveShirt", "Shirt",
+            "VestTexture", "Sweater", "SweaterHat", "TorsoExtraVest", "TorsoExtraVestBullet", "TorsoExtra",
+            "Jacket", "JacketHat", "Jacket_Down", "JacketHat_Bulky", "Jacket_Bulky", "JacketSuit", "FullTop",
+            "RightWrist", "Right_MiddleFinger", "Right_RingFinger", "LeftWrist", "Left_MiddleFinger", "Left_RingFinger", "Hands",
+            "Pants", "PantsExtra", "ShortPants", "ShortsShort", "LongSkirt", "Skirt", "Dress", "LongDress",
+            "BathRobe", "FullSuit", "FullSuitHead", "Boilersuit",
+            "ShoulderpadRight", "ShoulderpadLeft", "ForeArm_Right", "ForeArm_Left",
+            "Thigh_Right", "Thigh_Left", "Knee_Right", "Knee_Left", "Calf_Right", "Calf_Left",
+            "FannyPackFront", "FannyPackBack", "Webbing",
+            "AmmoStrap", "AnkleHolster", "BeltExtra", "ShoulderHolster",
+            "Socks", "Shoes"
+        }
+    end
+    return bodyLocations
+end

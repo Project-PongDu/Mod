@@ -1,0 +1,4 @@
+UI_FR = {
+    UI_optionscreen_binding_Hitmans = "Hitmans",
+    UI_optionscreen_binding_POSTS = "G?er les postes de garde",
+}

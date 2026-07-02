@@ -1,0 +1,4 @@
+UI_RU = {
+    UI_optionscreen_binding_Hitmans = "Бандит?,
+    UI_optionscreen_binding_POSTS = "Настройк?зоны постов охраны",
+}

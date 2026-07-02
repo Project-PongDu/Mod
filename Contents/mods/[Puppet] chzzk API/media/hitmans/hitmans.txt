@@ -1,0 +1,157 @@
+[733c42f7-3f8f-443c-b7b1-208d0a3c7bc5]
+	general: modid = t3chzzkDonation
+	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
+	general: name = Melee_Rookie1
+	general: female = false
+	general: skin = 2
+	general: hairType = 19
+	general: beardType = 2
+	general: hairColor = 12
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
+	general: sight = 1
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 0
+	clothing: Shirt = Base.Shirt_FormalWhite
+	clothing: Pants = Base.Trousers_Suit
+	clothing: Shoes = Base.Shoes_Black
+	weapons: melee = Base.Machete
+
+[437879e7-0341-43d9-a36f-85fe7ac44526]
+	general: modid = t3chzzkDonation
+	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
+	general: name = Melee_Rookie2
+	general: female = false
+	general: skin = 2
+	general: hairType = 10
+	general: beardType = 1
+	general: hairColor = 12
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
+	general: sight = 1
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 0
+	clothing: Shirt = Base.Shirt_FormalWhite
+	clothing: Pants = Base.Trousers_Suit
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	weapons: melee = Base.Machete
+
+[6610823d-756a-4c85-8450-6846496cddea]
+	general: modid = t3chzzkDonation
+	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
+	general: name = Melee_Knifefighter
+	general: female = false
+	general: skin = 2
+	general: hairType = 6
+	general: beardType = 2
+	general: hairColor = 12
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
+	general: sight = 1
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 17
+	clothing: Eyes = Base.Glasses_Aviators
+	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Shirt = Base.Shirt_FormalWhite
+	clothing: TorsoExtraVest = Base.Vest_WaistcoatTINT
+	clothing: Neck = Base.Tie_Full
+	clothing: Pants = Base.Trousers_Suit
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	tint: TorsoExtraVest = 4473924
+	weapons: melee = Base.HuntingKnife
+
+[e5c7a77b-e352-4848-97e0-11e828a27c09]
+	general: modid = t3chzzkDonation
+	general: cid = 1a9db80f-9f5e-4e9e-a842-a9ca9a6bc220
+	general: name = Melee_Swordsman
+	general: female = true
+	general: skin = 2
+	general: hairType = 5
+	general: beardType = 1
+	general: hairColor = 12
+	general: health = 7
+	general: strength = 7
+	general: endurance = 7
+	general: sight = 1
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 0
+	clothing: Eyes = Base.Glasses_Aviators
+	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Hat = Base.Hat_EarMuffs
+	clothing: Shirt = Base.Shirt_FormalWhite
+	clothing: TorsoExtraVest = Base.Vest_WaistcoatTINT
+	clothing: Neck = Base.Tie_Full
+	clothing: Pants = Base.Trousers_Suit
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	tint: Hat = 6710886
+	tint: TorsoExtraVest = 4473924
+	weapons: melee = Base.HuntingKnife
+
+
+
+
+
+
+[3b8ecbe4-8617-45be-876e-26eaae755d46]
+	general: modid = t3chzzkDonation
+	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
+	general: name = Ranged_Assaulter
+	general: female = true
+	general: skin = 1
+	general: hairType = 5
+	general: beardType = 0
+	general: hairColor = 12
+	general: health = 10
+	general: strength = 10
+	general: endurance = 10
+	general: sight = 6
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 0
+	clothing: MaskEyes = Base.Hat_GasMask
+	clothing: Hat = Base.Hat_BeretArmy
+	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Boilersuit = Base.Boilersuit
+	clothing: TorsoExtraVest = Base.Vest_Hunting_Grey
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	tint: Boilersuit = 3355443
+	weapons: primary = Base.AssaultRifle
+	weapons: melee = Base.Machete
+	ammo: primary = 3
+	bag: name = Base.Bag_WeaponBag
+
+
+[325dbf7d-c7ab-4448-95fd-6d891db970a6]
+	general: modid = t3chzzkDonation
+	general: cid = 7b0273ef-54db-444f-97f9-bf2b22e7fe38
+	general: name = Ranged_Sniper
+	general: female = false
+	general: skin = 1
+	general: hairType = 6
+	general: beardType = 2
+	general: hairColor = 12
+	general: health = 10
+	general: strength = 10
+	general: endurance = 10
+	general: sight = 10
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 0
+	clothing: Eyes = Base.Glasses_Eyepatch_Left
+	clothing: Hat = Base.Hat_BeretArmy
+	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Boilersuit = Base.Boilersuit
+	clothing: TorsoExtraVest = Base.Vest_Hunting_Grey
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	tint: Boilersuit = 3355443
+	weapons: primary = Base.HuntingRifle
+	weapons: melee = Base.HuntingKnife
+	ammo: primary = 2
+	bag: name = Base.Bag_WeaponBag

@@ -1,0 +1,142 @@
+Sandbox_FR = {
+
+    /***** GENERAL *****/
+    Sandbox_Hitmans_General = "Hitmans G??al"
+
+    Sandbox_Hitmans.KillCounter = "Compteur de hitmans tu?"
+    Sandbox_Hitmans.StunlockHitSpeed = "Vitesse de l'animation des coups du joueur (une valeur plus ?ev? signifie moins d'?ourdissement)"
+    Sandbox_Hitmans.DensityScore = "Taux d'apparition des hitmans augment?dans les villes et r?uit dans les zones ?oign?s"
+    Sandbox_Hitmans.Surrender = "Les hitmans bless? peuvent se rendre"
+    Sandbox_Hitmans.BleedOut = "Les hitmans peuvent saigner et mourir"
+    Sandbox_Hitmans.Infection = "Les hitmans peuvent ?re infect? et zombifi?"
+    Sandbox_Hitmans.LimitedEndurance = "Les hitmans ont une endurance limit?"
+    Sandbox_Hitmans.RunAway = "Les hitmans bless? peuvent s'enfuir"
+    Sandbox_Hitmans.DestroyDoor = "Les hitmans peuvent d?ruire les portes"
+    Sandbox_Hitmans.SmashWindow = "Les hitmans peuvent briser les fen?res"
+    Sandbox_Hitmans.RemoveBarricade = "Les hitmans peuvent retirer les planches ou les plaques de m?al des fen?res et portes"
+    Sandbox_Hitmans.DestroyThumpable = "Les hitmans peuvent d?ruire les structures construites par un joueur"
+    Sandbox_Hitmans.SabotageVehicles = "Les hitmans peuvent immobiliser le v?icule d'un joueur"
+    Sandbox_Hitmans.SabotageCrops = "Les hitmans peuvent d?ruire les r?oltes des joueurs"
+    Sandbox_Hitmans.Theft = "Les hitmans peuvent voler des objets dans votre base"
+    Sandbox_Hitmans.EnterVehicles = "Les alli? peuvent entrer dans le v?icule d'un joueur [BUGGY]"
+    Sandbox_Hitmans.GeneratorCutoff = "Les hitmans peuvent ?eindre les g??ateurs ?ectriques"
+    Sandbox_Hitmans.BuildBridge = "Les hitmans peuvent construire des ponts sur l'eau"
+    Sandbox_Hitmans.BuildRoadblock = "Barrages routiers par des hitmans"
+    Sandbox_Hitmans.Speak = "Les hitmans parlent"
+    Sandbox_Hitmans.Captions = "Voir les sous-titres des hitmans qui parlent"
+    Sandbox_Hitmans.SneakAtNight = "Les hitmans s'accroupissent durant la nuit"
+    Sandbox_Hitmans.CarryTorches = "Les hitmans portent des lampes-torches durant la nuit"
+    Sandbox_Hitmans.ArrivalSoundLevel = "Volume des sons des hitmans qui attaquent"
+    Sandbox_Hitmans.ArrivalIcon = "Voir l'ic?e menant au point d'apparition des hitmans"
+    Sandbox_Hitmans.ArrivalWakeUp = "Les hitmans qui attaquent r?eillent le joueur cibl?
+    Sandbox_Hitmans.ArrivaPanic = "Les hitmans qui attaquent d?lenchent une panique temporaire"
+    Sandbox_Hitmans.GunReflexMin = "Temps minimum de vis? pour les armes [ticks]"
+    Sandbox_Hitmans.GunReflexRand = "Temps maximum de surplus al?toire de vis? pour les armes [ticks]"
+    Sandbox_Hitmans.PistolRange = "Port? maximale des pistolets des hitmans [carr?]"
+    Sandbox_Hitmans.RifleRange = "Port? maximale des fusils des hitmans [carr?]"
+
+    Sandbox_Hitmans.HitModel = "Mod?e de d?? du joueur touch?
+    Sandbox_Hitmans.HitModel_tooltip = "Comment les d??s sont calcul?"
+    Sandbox_Hitmans.HitModel_option1 = "Vanilla (+ compatible)"    
+    Sandbox_Hitmans.HitModel_option2 = "Hitmans"
+    
+    Sandbox_Hitmans.OverallAccuracy = "Pr?ision globale des armes des hitmans"
+    Sandbox_Hitmans.OverallAccuracy_tooltip = "Pr?ision globale des armes des hitmans"
+    Sandbox_Hitmans.OverallAccuracy_option1 = "Mode Stormtrooper"
+    Sandbox_Hitmans.OverallAccuracy_option2 = "Ne pourrait m?e pas toucher une grange"
+    Sandbox_Hitmans.OverallAccuracy_option3 = "Chasseur occasionnel"
+    Sandbox_Hitmans.OverallAccuracy_option4 = "Tireur d'?ite dans ses bons jours"
+    Sandbox_Hitmans.OverallAccuracy_option5 = "Ninja guid?au laser"
+
+    Sandbox_Hitmans.DefenderSpawnHourlyChance = "Chance d'apparition par heure des hitmans d?enseurs [%]"
+    Sandbox_Hitmans.DefenderMaxOccupants = "Nombre maximum de d?enseurs des hitmans dans un b?iment"
+    Sandbox_Hitmans.BaseSpawnHourlyChance = "Chance d'apparition par heure des camps et bases de hitmans (si la location le permet) [%]"
+    Sandbox_Hitmans.DefenderLootAmount = "Quantit?de butin des bases et d?enseurs"
+
+    /***** WAVES *****/
+    Sandbox_Hitmans = "Hitmans"
+    Sandbox_Hitmans_Clan_1 = "Hitmans Clan 1"
+    Sandbox_Hitmans_Clan_2 = "Hitmans Clan 2"
+    Sandbox_Hitmans_Clan_3 = "Hitmans Clan 3"
+    Sandbox_Hitmans_Clan_4 = "Hitmans Clan 4"
+    Sandbox_Hitmans_Clan_5 = "Hitmans Clan 5"
+    Sandbox_Hitmans_Clan_6 = "Hitmans Clan 6"
+    Sandbox_Hitmans_Clan_7 = "Hitmans Clan 7"
+    Sandbox_Hitmans_Clan_8 = "Hitmans Clan 8"
+    Sandbox_Hitmans_Clan_9 = "Hitmans Clan 9"
+    Sandbox_Hitmans_Clan_10 = "Hitmans Clan 10"
+    Sandbox_Hitmans_Clan_11 = "Hitmans Clan 11"
+    Sandbox_Hitmans_Clan_12 = "Hitmans Clan 12"
+    Sandbox_Hitmans_Clan_13 = "Hitmans Clan 13"
+    Sandbox_Hitmans_Clan_14 = "Hitmans Clan 14"
+    Sandbox_Hitmans_Clan_15 = "Hitmans Clan 15"
+    Sandbox_Hitmans_Clan_16 = "Hitmans Clan 16"
+    
+    Sandbox_Hitmans.WaveEnabled = "Apparition du clan activ?"
+    Sandbox_Hitmans.WaveEnabledTooltip = "Apparition du clan activ?"
+
+    Sandbox_Hitmans.FriendlyChance = "Chance d'alliance [%]"
+    Sandbox_Hitmans.FriendlyChance_tooltip = "Chance que le groupe de hitmans soit alli?avec les joueurs"
+
+    Sandbox_Hitmans.EnemyBehaviour = "Mod?e IA des ennemis"
+    Sandbox_Hitmans.EnemyBehaviour_tooltip = "Comportement du mod?e IA des ennemis"
+    Sandbox_Hitmans.EnemyBehaviour_option1 = "HITMAN: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option2 = "HITMAN: RAIDER"
+    Sandbox_Hitmans.EnemyBehaviour_option3 = "HITMAN: WANDERER"
+    Sandbox_Hitmans.EnemyBehaviour_option4 = "HITMAN: GUARD"
+    Sandbox_Hitmans.EnemyBehaviour_option5 = "HITMAN: THIEF"
+    Sandbox_Hitmans.EnemyBehaviour_option6 = "HITMAN: RANDOM (NO-RAIDER)"
+    Sandbox_Hitmans.EnemyBehaviour_option7 = "FRIENDLY: INDIFFERENT"
+    Sandbox_Hitmans.EnemyBehaviour_option8 = "FRIENDLY: COMPANION"
+    Sandbox_Hitmans.EnemyBehaviour_option9 = "FRIENDLY: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option10 = "RANDOM (HITMAN/FRIENDLY)"
+
+    Sandbox_Hitmans.FirstDay = "Jour de d?art"
+    Sandbox_Hitmans.FirstDay_tooltip = "Nombre de jours que le joueur a surv?u avant que l'apparition ne commence"
+
+    Sandbox_Hitmans.LastDay = "Jour de fin"
+    Sandbox_Hitmans.LastDay_tooltip = "Nombre de jours que le joueur a surv?u avant que l'apparition ne s'arr?e"
+
+    Sandbox_Hitmans.SpawnDistance = "Distance d'apparition"
+    Sandbox_Hitmans.SpawnDistance_tooltip = "A quelle distance les hitmans apparaitront par rapport au joueur [carr?]"
+
+    Sandbox_Hitmans.SpawnHourlyChance = "Chance d'apparition chaque heure [%]"
+    Sandbox_Hitmans.SpawnHourlyChance_tooltip = "Chance d'apparition que le clan apparaisse ?une heure donn?"
+
+    Sandbox_Hitmans.GroupSize = "Taille du groupe"
+    Sandbox_Hitmans.GroupSize_tooltip = "Nombre de hitmans qui apparaitront"
+
+    Sandbox_Hitmans.GroupName = "Type du groupe"
+    Sandbox_Hitmans.GroupName_tooltip = "Personnalit?du groupe"
+    Sandbox_Hitmans.GroupName_option1 = "Citoyens d?esp??                                                    \n Premiers survivants de l'apocalypse. Ils survivent surtout gr?e ?la chance que par leurs capacit?."
+    Sandbox_Hitmans.GroupName_option2 = "Psychopathes                                                                  \n Incapable de ressentir la peur ou la douleur, ils sont simplement sortis de l'hopital de Louisville pendant que d'autres mourraient dans la panique."
+    Sandbox_Hitmans.GroupName_option3 = "Cannibales                                                                      \n Ils ont surv?u principalement en ayant le talent de bien manier le couperet, et plus tard en ayant acc? ?de la nourriture tr? prot?n?."
+    Sandbox_Hitmans.GroupName_option4 = "Criminels                                                                       \n Sans aucune moralit?ou empathie, ils se sont adapt? ?ces nouvelles conditions apr? l'apparition de la pand?ie."
+    Sandbox_Hitmans.GroupName_option5 = "D?enus                                                                           \n After the outbreak in Knox prison they managed to flee and resocialize with the new community."
+    Sandbox_Hitmans.GroupName_option6 = "Police                                                                             \n Appel? ?servir et prot?er, ils ont eux acc? aux armes d? le premier jour, et ont saisi l'occasion de former un gang."
+    Sandbox_Hitmans.GroupName_option7 = "Survivalistes                                                                         \n Des d?ents qui ont eu apparemment raison ?propos de la fin du monde, ils se sont r?ouis du premier jour de l'apocalypse."
+    Sandbox_Hitmans.GroupName_option8 = "V??ans                                                                         \n Des patriotes, renforc? par la guerre, ils savaient comment combattre le nouvel ennemi, et comment ne pas perdre leur honneur."
+    Sandbox_Hitmans.GroupName_option9 = "Piliers de taverne                                                   \n Les visites journali?es au bar local ont ciment?leur amiti? ils ont surc?u ensemble et en travaillant en groupe." 
+    Sandbox_Hitmans.GroupName_option10 = "Chasseurs                                                                          \n Un groupe qui a accueilli la nouvelle saison de la chasse avec plaisir, sans avoir besoin de licence de chasse."
+    Sandbox_Hitmans.GroupName_option11 = "Saints Reconqu?ants                                                          \n Une secte religieuse avec une toute nouvelle liste de 10 commandements."
+    Sandbox_Hitmans.GroupName_option12 = "Scientifiques du gouvernement                                              \n Ils ont surv?u gr?e ?l'acc? ?des m?icaments r?roviraux et de v?ements de protection sp?ialis?, ils agissent sans aucun d?ir de soigner qui ce soit dor?avant."
+    Sandbox_Hitmans.GroupName_option13 = "Pilotes de l'enfer                                                            \n Un groupe organis?concentr?principalement sur le pillage, avec aucun remord si quelqu'un meurt sur la route."   
+    Sandbox_Hitmans.GroupName_option14 = "Milice priv?                                                          \n Ils ont d?ert?l'arm? juste avant que le gouverment s'effondre, avec un acc? illimit?aux armes et munitions."
+    Sandbox_Hitmans.GroupName_option15 = "La L?ion de la Mort                                                            \n Le clan le plus nombreux, le plus dangereux et le mieux ?uip?des environs, et soutenu par l'homme le plus riche de Louisville."
+    Sandbox_Hitmans.GroupName_option16 = "L'Ordre du Nouvel Espoir                                                            \n Une initiative du Gouvernement du Nouveau Monde de reconstruire et restaurer l'ordre."
+
+    Sandbox_Hitmans.HasPistolChance = "Chance de pistolet [%]"
+    Sandbox_Hitmans.HasPistolChance_tooltip = "Chance que les hitmans porteront un pistolet arm?
+
+    Sandbox_Hitmans.PistolMagCount = "Chargeurs de pistolet"
+    Sandbox_Hitmans.PistolMagCount_tooltip = "Le nombre de chargeurs suppl?entaires que le hitman porte pour un pistolet"
+
+    Sandbox_Hitmans.HasRifleChance = "Chance de fusil [%]"
+    Sandbox_Hitmans.HasRifleChance_tooltip = "Chance que les hitmans porteront un fusil arm?
+
+    Sandbox_Hitmans.RifleMagCount = "Chargeurs de fusil"
+    Sandbox_Hitmans.RifleMagCount_tooltip = "Le nombre de chargeurs suppl?entaires que le hitman porte pour un fusil"
+
+
+
+}

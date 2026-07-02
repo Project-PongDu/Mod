@@ -1,0 +1,4 @@
+UI_ES = {
+    UI_optionscreen_binding_Hitmans = "Bandidos",
+    UI_optionscreen_binding_POSTS = "Administrar puestos de guardia",
+}

@@ -1,0 +1,5 @@
+UI_CN = {
+    /***** Localized by @Oversights2006_ *****/
+    UI_optionscreen_binding_Hitmans = "Hitmans(?æœ«?¥æš´å¾?",
+    UI_optionscreen_binding_POSTS = "?˜æ›´Hitmansæ¨¡ç»„NPC?„è??’ä½ç½?,
+}

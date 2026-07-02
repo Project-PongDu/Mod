@@ -1,0 +1,140 @@
+Sandbox_UA = {
+"
+    /***** Загальні *****/
+    Sandbox_Hitmans_General = "Hitmans General"
+
+	Sandbox_Hitmans.KillCounter = "Лічильни?убитих бандитів"
+	Sandbox_Hitmans.StunlockHitSpeed = "Швидкіст?анімації удар?грав? (більше значен? означа?менший ступор)"
+	Sandbox_Hitmans.DensityScore = "Частот?появи бандитів вища ?містах ?нижч??ізольовани?района?
+	Sandbox_Hitmans.Surrender = "Поранені бандит?можуть здатися"
+	Sandbox_Hitmans.BleedOut = "Поранені бандит?можуть кровоточит??помирати"
+	Sandbox_Hitmans.Infection = "Бандит?можуть заразити? ?стат?зомб?
+	Sandbox_Hitmans.LimitedEndurance = "Бандит?мают?обмежену витривалість"
+	Sandbox_Hitmans.RunAway = "Поранені бандит?можуть утекти"
+	Sandbox_Hitmans.DestroyDoor = "Бандит?можуть зламуват?двер?
+	Sandbox_Hitmans.SmashWindow = "Бандит?можуть розбиват?вікн?
+	Sandbox_Hitmans.RemoveBarricade = "Бандит?можуть знімат?дошк?аб?металеві пластини ?віко??дверей"
+	Sandbox_Hitmans.DestroyThumpable = "Бандит?можуть руйнуват?конструкці? побудовані гравце?
+	Sandbox_Hitmans.SabotageVehicles = "Бандит?можуть знерухомит?транспортн?засоби грав?"
+	Sandbox_Hitmans.SabotageCrops = "Бандит?можуть знищуват?посіви гравці?
+	Sandbox_Hitmans.Theft = "Бандит?можуть вкраст?предмети ?вашо?бази"
+	Sandbox_Hitmans.EnterVehicles = "Дружні NPC можуть заходити ?транспор?грав? [Може працюват??помилкам?"
+	Sandbox_Hitmans.GeneratorCutoff = "Бандит?можуть відключати генератори"
+	Sandbox_Hitmans.BuildBridge = "Бандит?можуть будувати мост?чере?воду"
+    Sandbox_Hitmans.BuildRoadblock = "Бандитські перекрит? дорі?
+	Sandbox_Hitmans.Speak = "Бандит?гово?ть"
+	Sandbox_Hitmans.Captions = "Текстові підпис?до розмов бандитів"
+	Sandbox_Hitmans.SneakAtNight = "Бандит?крадуться вноч?
+	Sandbox_Hitmans.CarryTorches = "Бандит?но?ть ліхтарик?вноч?
+	Sandbox_Hitmans.ArrivalSoundLevel = "Гучність звук?появи атакуючи?бандитів"
+	Sandbox_Hitmans.ArrivalIcon = "Іконка, що вказує місц?появи бандитів"
+	Sandbox_Hitmans.ArrivalWakeUp = "Атакуючі бандит?бу?ть цільовог?грав?"
+	Sandbox_Hitmans.ArrivaPanic = "Атакуючі бандит?викликають тимчасов?паніку"
+	Sandbox_Hitmans.GunReflexMin = "Мінімальни?ча?прицілюван? [такт]"
+	Sandbox_Hitmans.GunReflexRand = "Максимальний додатковий ча?прицілюван? [такт]"
+	Sandbox_Hitmans.PistolRange = "Максимальн?дальніст?пострілу ?пістолет?[клітинки]"
+	Sandbox_Hitmans.RifleRange = "Максимальн?дальніст?пострілу ?гвинтівк?[клітинки]"
+
+	Sandbox_Hitmans.HitModel = "Модель завдан? шкод?гравцеві"
+	Sandbox_Hitmans.HitModel_tooltip = "Мето?розрахунку завданої шкод?
+	Sandbox_Hitmans.HitModel_option1 = "Vanilla (кращ?сумісність)"
+	Sandbox_Hitmans.HitModel_option2 = "Бандит?
+
+	Sandbox_Hitmans.OverallAccuracy = "Загальна точність бандитів"
+	Sandbox_Hitmans.OverallAccuracy_tooltip = "Загальна точність збро?бандитів"
+	Sandbox_Hitmans.OverallAccuracy_option1 = "Режи?штурмовикі?
+	Sandbox_Hitmans.OverallAccuracy_option2 = "Не можуть влучит?навіть ?сара?
+	Sandbox_Hitmans.OverallAccuracy_option3 = "Ча?ві?часу стрільці"
+	Sandbox_Hitmans.OverallAccuracy_option4 = "Снайпери на добрий день"
+	Sandbox_Hitmans.OverallAccuracy_option5 = "Лазерний нінд?"
+
+	Sandbox_Hitmans.DefenderSpawnHourlyChance = "Шанс щогодинної появи охоронці?[%]"
+    Sandbox_Hitmans.DefenderMaxOccupants = "Максимальн?кількіст?захисників бандитів ?буйдінгу"
+	Sandbox_Hitmans.BaseSpawnHourlyChance = "Шанс щогодинної появи бази/табору [%]"
+	Sandbox_Hitmans.DefenderLootAmount = "Кількіст?здобич??база?охоронці?
+
+	/***** ХВИЛ?*****/
+	Sandbox_Hitmans = "Hitmans"
+    Sandbox_Hitmans_Clan_1 = "Hitmans Clan 1"
+    Sandbox_Hitmans_Clan_2 = "Hitmans Clan 2"
+    Sandbox_Hitmans_Clan_3 = "Hitmans Clan 3"
+    Sandbox_Hitmans_Clan_4 = "Hitmans Clan 4"
+    Sandbox_Hitmans_Clan_5 = "Hitmans Clan 5"
+    Sandbox_Hitmans_Clan_6 = "Hitmans Clan 6"
+    Sandbox_Hitmans_Clan_7 = "Hitmans Clan 7"
+    Sandbox_Hitmans_Clan_8 = "Hitmans Clan 8"
+    Sandbox_Hitmans_Clan_9 = "Hitmans Clan 9"
+    Sandbox_Hitmans_Clan_10 = "Hitmans Clan 10"
+    Sandbox_Hitmans_Clan_11 = "Hitmans Clan 11"
+    Sandbox_Hitmans_Clan_12 = "Hitmans Clan 12"
+    Sandbox_Hitmans_Clan_13 = "Hitmans Clan 13"
+    Sandbox_Hitmans_Clan_14 = "Hitmans Clan 14"
+    Sandbox_Hitmans_Clan_15 = "Hitmans Clan 15"
+    Sandbox_Hitmans_Clan_16 = "Hitmans Clan 16"
+
+	Sandbox_Hitmans.WaveEnabled = "Увімкнен?спау?кланів"
+	Sandbox_Hitmans.WaveEnabledTooltip = "Увімкнен?спау?кланів"
+
+	Sandbox_Hitmans.FriendlyChance = "Шанс дружност?[%]"
+	Sandbox_Hitmans.FriendlyChance_tooltip = "Ймовірніст? що груп?бандитів буде дружньою до гравці?
+
+	Sandbox_Hitmans.EnemyBehaviour = "Модель поведінк?ворогі?
+	Sandbox_Hitmans.EnemyBehaviour_tooltip = "Модель штучного інтелект?ворогі?
+    Sandbox_Hitmans.EnemyBehaviour_option1 = "HITMAN: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option2 = "HITMAN: RAIDER"
+    Sandbox_Hitmans.EnemyBehaviour_option3 = "HITMAN: WANDERER"
+    Sandbox_Hitmans.EnemyBehaviour_option4 = "HITMAN: GUARD"
+    Sandbox_Hitmans.EnemyBehaviour_option5 = "HITMAN: THIEF"
+    Sandbox_Hitmans.EnemyBehaviour_option6 = "HITMAN: RANDOM (NO-RAIDER)"
+    Sandbox_Hitmans.EnemyBehaviour_option7 = "FRIENDLY: INDIFFERENT"
+    Sandbox_Hitmans.EnemyBehaviour_option8 = "FRIENDLY: COMPANION"
+    Sandbox_Hitmans.EnemyBehaviour_option9 = "FRIENDLY: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option10 = "RANDOM (HITMAN/FRIENDLY)"
+
+	Sandbox_Hitmans.FirstDay = "День початк?
+	Sandbox_Hitmans.FirstDay_tooltip = "Кількіст?днів після початк?гр? чере?яку ?являються бандит?
+
+	Sandbox_Hitmans.LastDay = "День завершен?"
+	Sandbox_Hitmans.LastDay_tooltip = "Кількіст?днів після початк?гр? чере?яку ?явлен? бандитів припиняється"
+
+	Sandbox_Hitmans.SpawnDistance = "Дистанція появи"
+	Sandbox_Hitmans.SpawnDistance_tooltip = "На які?відстані ві?грав? ?являються бандит?[клітинки]"
+
+	Sandbox_Hitmans.SpawnHourlyChance = "Шанс появи за годину [%]"
+	Sandbox_Hitmans.SpawnHourlyChance_tooltip = "Ймовірніст?появи клан?протяго?однієї години"
+
+	Sandbox_Hitmans.GroupSize = "Розмір груп?
+	Sandbox_Hitmans.GroupSize_tooltip = "Кількіст?бандитів ?груп?
+
+	Sandbox_Hitmans.GroupName = "Ти?груп?
+	Sandbox_Hitmans.GroupName_tooltip = "Характеристика груп?
+	Sandbox_Hitmans.GroupName_option1 = "Відчайдушн?громадяни"
+	Sandbox_Hitmans.GroupName_option2 = "Психопат?
+	Sandbox_Hitmans.GroupName_option3 = "Канібали"
+	Sandbox_Hitmans.GroupName_option4 = "Злочинці"
+	Sandbox_Hitmans.GroupName_option5 = "Ув'язнен?
+	Sandbox_Hitmans.GroupName_option6 = "Поліцейськ?
+	Sandbox_Hitmans.GroupName_option7 = "Підготовлені"
+	Sandbox_Hitmans.GroupName_option8 = "Ветерани"
+	Sandbox_Hitmans.GroupName_option9 = "Бригад??яниць"
+	Sandbox_Hitmans.GroupName_option10 = "Мисливці"
+	Sandbox_Hitmans.GroupName_option11 = "Святі Відновлювачі"
+	Sandbox_Hitmans.GroupName_option12 = "Державні вчен?
+	Sandbox_Hitmans.GroupName_option13 = "Клан Вершникі?Пекл?
+	Sandbox_Hitmans.GroupName_option14 = "Приватна міліція"
+	Sandbox_Hitmans.GroupName_option15 = "Легіон Смерті"
+	Sandbox_Hitmans.GroupName_option16 = "Орде?Ново?Наді?
+
+    Sandbox_Hitmans.HasPistolChance = "Шанс пістолет?[%]"
+	Sandbox_Hitmans.HasPistolChance_tooltip = "Шанс, що бандит?будуть носити за?джений пістолет"
+
+	Sandbox_Hitmans.PistolMagCount = "Кількіст?магазині?для пістолет?
+	Sandbox_Hitmans.PistolMagCount_tooltip = "Кількіст?додаткових магазині?для пістолет? які буде носити бандит"
+
+	Sandbox_Hitmans.HasRifleChance = "Шанс гвинтівк?[%]"
+	Sandbox_Hitmans.HasRifleChance_tooltip = "Шанс, що бандит?будуть носити за?джен?гвинтівк?
+
+	Sandbox_Hitmans.RifleMagCount = "Кількіст?магазині?для гвинтівк?
+	Sandbox_Hitmans.RifleMagCount_tooltip = "Кількіст?додаткових магазині?для гвинтівк? які буде носити бандит"
+
+}

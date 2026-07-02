@@ -1,0 +1,63 @@
+VERSION = 1,
+
+/***** GENERAL *****/
+
+option Hitmans.General_KillCounter = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.KillCounter,
+}
+
+option Hitmans.General_StunlockHitSpeed = {
+    type = double, min = 1, max = 5, default = 2.40,
+    page = Hitmans_General, translation = Hitmans.StunlockHitSpeed,
+}
+
+option Hitmans.General_SpawnMultiplier = {
+    type = double, min = 0.25, max = 4, default = 1.00,
+    page = Hitmans_General, translation = Hitmans.SpawnMultiplier,
+}
+
+option Hitmans.General_OriginalHitmans = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.OriginalHitmans,
+}
+
+option Hitmans.General_BleedOut = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.BleedOut,
+}
+
+option Hitmans.General_Infection = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.Infection,
+}
+
+option Hitmans.General_RemoveBarricade = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.RemoveBarricade,
+}
+
+option Hitmans.General_Speak = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.Speak,
+}
+
+option Hitmans.General_Captions = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.Captions,
+}
+
+option Hitmans.General_SneakAtNight = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.SneakAtNight,
+}
+
+option Hitmans.General_CarryTorches = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.CarryTorches,
+}
+
+option Hitmans.General_ArrivalIcon = {
+    type = boolean, default = true,
+    page = Hitmans_General, translation = Hitmans.ArrivalIcon,
+}

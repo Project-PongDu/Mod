@@ -1,0 +1,142 @@
+Sandbox_TR = {
+
+    /***** GENEL *****/
+    Sandbox_Hitmans_General = "Haydutlar - Genel"
+
+    Sandbox_Hitmans.KillCounter = "Haydut ?d?me sayac?
+    Sandbox_Hitmans.StunlockHitSpeed = "Oyuncu vuru?animasyon h??(daha y?sek de?r daha az sersemletme anlam?a gelir)"
+    Sandbox_Hitmans.DensityScore = "Haydutlar? ortaya çýkma oran??hirlerde artar, tenha b?gelerde azal?"
+    Sandbox_Hitmans.Surrender = "Yaralanan haydutlar teslim olabilir"
+    Sandbox_Hitmans.BleedOut = "Yaralanan haydutlar kan kayb?dan ?ebilir"
+    Sandbox_Hitmans.Infection = "Haydutlar enfekte olabilir ve zombiye d?üþebilir"
+    Sandbox_Hitmans.LimitedEndurance = "Haydutlar? s??l?dayan?l?ýð?vard?"
+    Sandbox_Hitmans.RunAway = "Yaralanan haydutlar ka?bilir"
+    Sandbox_Hitmans.DestroyDoor = "Haydutlar kap?ar?k?abilir"
+    Sandbox_Hitmans.SmashWindow = "Haydutlar pencereleri k?abilir"
+    Sandbox_Hitmans.RemoveBarricade = "Haydutlar pencere ve kap?ardaki tahta ya da metal plakalar?s?ebilir"
+    Sandbox_Hitmans.DestroyThumpable = "Haydutlar oyuncunun yaptýð?yap?ar?yok edebilir"
+    Sandbox_Hitmans.SabotageVehicles = "Haydutlar oyuncunun ara?ar???lýþamaz hale getirebilir"
+    Sandbox_Hitmans.SabotageCrops = "Haydutlar oyuncu mahsullerini yok edebilir"
+    Sandbox_Hitmans.Theft = "Haydutlar ?s??den e?a ?labilir"
+    Sandbox_Hitmans.EnterVehicles = "Dostlar oyuncunun ara?ar?a binebilir [BUGLU]"
+    Sandbox_Hitmans.GeneratorCutoff = "Haydutlar jenerat?leri devre dýþ?b?akabilir"
+    Sandbox_Hitmans.BuildBridge = "Haydutlar su ?erinde k?r?er in? edebilir"
+    Sandbox_Hitmans.BuildRoadblock = "Haydutlar? yol kesmeleri"
+    Sandbox_Hitmans.Speak = "Haydutlar konu?r"
+    Sandbox_Hitmans.Captions = "Haydutlar? konu?a metin altyaz?ar?
+    Sandbox_Hitmans.SneakAtNight = "Haydutlar gece vakti sessizce hareket eder"
+    Sandbox_Hitmans.CarryTorches = "Haydutlar gece vakti el feneri taþýr"
+    Sandbox_Hitmans.ArrivalSoundLevel = "Sald??yapan haydutlar? ses seviyesi"
+    Sandbox_Hitmans.ArrivalIcon = "Haydutlar? ortaya çýkýþ noktas??g?teren i?ret"
+    Sandbox_Hitmans.ArrivalWakeUp = "Sald?an haydutlar hedefteki oyuncuyu uyand??"
+    Sandbox_Hitmans.ArrivaPanic = "Sald?an haydutlar ge?ci panik yarat?"
+    Sandbox_Hitmans.GunReflexMin = "Silah i?n minimum ni?n alma s?esi [tik]"
+    Sandbox_Hitmans.GunReflexRand = "Silah i?n rastgele ek maksimum ni?n alma s?esi [tik]"
+    Sandbox_Hitmans.PistolRange = "Haydutlar? tabanca menzili [kare]"
+    Sandbox_Hitmans.RifleRange = "Haydutlar? t?ek menzili [kare]"
+
+    Sandbox_Hitmans.HitModel = "Oyuncu hasar hesaplama modeli"
+    Sandbox_Hitmans.HitModel_tooltip = "Hasar? nas? hesaplanacaðýn?belirler"
+    Sandbox_Hitmans.HitModel_option1 = "Vanilla (daha uyumlu)"    
+    Sandbox_Hitmans.HitModel_option2 = "Haydutlar (muhtemelen daha zorlu)"
+    
+    Sandbox_Hitmans.OverallAccuracy = "Haydutlar? genel silah isabet oran?
+    Sandbox_Hitmans.OverallAccuracy_tooltip = "Haydutlar? genel silah isabet oran??belirler"
+    Sandbox_Hitmans.OverallAccuracy_option1 = "K? Cahil Modu"    
+    Sandbox_Hitmans.OverallAccuracy_option2 = "Ah? Kap???Bile Vuramayanlar"
+    Sandbox_Hitmans.OverallAccuracy_option3 = "Ara S?a Tutturuyor"
+    Sandbox_Hitmans.OverallAccuracy_option4 = "?i G??deyse Tutturuyor"
+    Sandbox_Hitmans.OverallAccuracy_option5 = "Aim Bot Gibi Tutturuyor (?ka)"
+
+    Sandbox_Hitmans.DefenderSpawnHourlyChance = "Savunucu haydutlar? saatlik ortaya çýkma ?ns?[%]"
+    Sandbox_Hitmans.DefenderMaxOccupants = "Bir binadaki maksimum haydut savunucusu say??
+    Sandbox_Hitmans.BaseSpawnHourlyChance = "Haydut ?s?kamp?? saatlik ortaya çýkma ?ns?(uygun konum varsa) [%]"
+    Sandbox_Hitmans.DefenderLootAmount = "Savunucu Haydutlar?/?lerinin ganimet miktar?
+
+    /***** DALGALAR *****/
+    Sandbox_Hitmans = "Haydutlar"
+    Sandbox_Hitmans_Clan_1 = "Haydut Klan?1"
+    Sandbox_Hitmans_Clan_2 = "Haydut Klan?2"
+    Sandbox_Hitmans_Clan_3 = "Haydut Klan?3"
+    Sandbox_Hitmans_Clan_4 = "Haydut Klan?4"
+    Sandbox_Hitmans_Clan_5 = "Haydut Klan?5"
+    Sandbox_Hitmans_Clan_6 = "Haydut Klan?6"
+    Sandbox_Hitmans_Clan_7 = "Haydut Klan?7"
+    Sandbox_Hitmans_Clan_8 = "Haydut Klan?8"
+    Sandbox_Hitmans_Clan_9 = "Haydut Klan?9"
+    Sandbox_Hitmans_Clan_10 = "Haydut Klan?10"
+    Sandbox_Hitmans_Clan_11 = "Haydut Klan?11"
+    Sandbox_Hitmans_Clan_12 = "Haydut Klan?12"
+    Sandbox_Hitmans_Clan_13 = "Haydut Klan?13"
+    Sandbox_Hitmans_Clan_14 = "Haydut Klan?14"
+    Sandbox_Hitmans_Clan_15 = "Haydut Klan?15"
+    Sandbox_Hitmans_Clan_16 = "Haydut Klan?16"
+    
+    Sandbox_Hitmans.WaveEnabled = "Klanlar? Varlýð?
+    Sandbox_Hitmans.WaveEnabledTooltip = "Klanlar? etkin olup olmadýð??ayarlar"
+
+    Sandbox_Hitmans.FriendlyChance = "Dost olma ?ns?[%]"
+    Sandbox_Hitmans.FriendlyChance_tooltip = "Bir haydut grubunun oyunculara dost? davranma ?ns?
+
+    Sandbox_Hitmans.EnemyBehaviour = "Düþman yapay zeka modeli"
+    Sandbox_Hitmans.EnemyBehaviour_tooltip = "Düþman yapay zekas?? davranýþ modelini se?r"
+    Sandbox_Hitmans.EnemyBehaviour_option1 = "HITMAN: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option2 = "HITMAN: RAIDER"
+    Sandbox_Hitmans.EnemyBehaviour_option3 = "HITMAN: WANDERER"
+    Sandbox_Hitmans.EnemyBehaviour_option4 = "HITMAN: GUARD"
+    Sandbox_Hitmans.EnemyBehaviour_option5 = "HITMAN: THIEF"
+    Sandbox_Hitmans.EnemyBehaviour_option6 = "HITMAN: RANDOM (NO-RAIDER)"
+    Sandbox_Hitmans.EnemyBehaviour_option7 = "FRIENDLY: INDIFFERENT"
+    Sandbox_Hitmans.EnemyBehaviour_option8 = "FRIENDLY: COMPANION"
+    Sandbox_Hitmans.EnemyBehaviour_option9 = "FRIENDLY: RANDOM"
+    Sandbox_Hitmans.EnemyBehaviour_option10 = "RANDOM (HITMAN/FRIENDLY)"
+
+    Sandbox_Hitmans.FirstDay = "Ba?angýç G??
+    Sandbox_Hitmans.FirstDay_tooltip = "Haydutlar? ortaya çýkmaya ba?ayacaðý oyuncunun hayatta kaldýð?g? say??
+
+    Sandbox_Hitmans.LastDay = "Biti?G??
+    Sandbox_Hitmans.LastDay_tooltip = "Haydutlar? ortaya çýkmay?durduracaðý oyuncunun hayatta kaldýð?g? say??
+
+    Sandbox_Hitmans.SpawnDistance = "Ortaya Çýkýþ Mesafesi"
+    Sandbox_Hitmans.SpawnDistance_tooltip = "Haydutlar? oyuncuya ne kadar uzakta ortaya çýkacaðýn?belirler [kare]"
+
+    Sandbox_Hitmans.SpawnHourlyChance = "Saatlik Ortaya Çýkýþ ?ns?[%]"
+    Sandbox_Hitmans.SpawnHourlyChance_tooltip = "Klanlardan birinin herhangi bir saatte ortaya çýkma ?ns?
+
+    Sandbox_Hitmans.GroupSize = "Grup Boyutu"
+    Sandbox_Hitmans.GroupSize_tooltip = "Ortaya çýkacak haydutlar? say??
+
+    Sandbox_Hitmans.GroupName = "Grup T??
+    Sandbox_Hitmans.GroupName_tooltip = "Ortaya Çýkan Gruplar? Davranýþ Modelleri"
+    Sandbox_Hitmans.GroupName_option1 = "Umutsuz Vatanda?ar                                                     \n K?ametin ilk kurtulanlar? Hayatta kalmalar??daha ?k ?nsa bor?ular, beceriye de?l."
+    Sandbox_Hitmans.GroupName_option2 = "Psikopatlar                                                                   \n Hi?ir korku ya da ac?hissetmeyen, Louisville hastanesinden di?rleri panikte ??ken sessizce çýkanlar."
+    Sandbox_Hitmans.GroupName_option3 = "Yamyamlar                                                                       \n ?k ba?a bir sat??ustaca kullanma becerisiyle, sonra ise y?sek proteinli g?alara eri?mle hayatta kalanlar."
+    Sandbox_Hitmans.GroupName_option4 = "Su?ular                                                                       \n Gereksiz vicdan ve ahlaki k??lamalar olmadan, pandemiden sonra yeni ko?llara kolayca uyum sa?ad?ar."
+    Sandbox_Hitmans.GroupName_option5 = "Mahk?lar                                                                           \n Knox hapishanesindeki salg?dan sonra ka?ay?ba?ran ve yeni topluma uyum sa?ayanlar."
+    Sandbox_Hitmans.GroupName_option6 = "Polis                                                                             \n Hizmet etmek ve korumak i?n ???d?ar, ilk g?den itibaren silahlara eri?mleri vard? h?la bir ?te kurma f?sat??de?rlendirdiler."
+    Sandbox_Hitmans.GroupName_option7 = "Haz?l?çýlar                                                                         \n D?yan? sonu hakk?da hakl?olduklar?ortaya çýkan çýlg?lar, asl?da k?ametin ilk g???memnuniyetle karþýlad?ar."
+    Sandbox_Hitmans.GroupName_option8 = "Gaziler                                                                         \n Vatanseverler, sava?a sertle?i?olanlar, yeni düþmanla nas? ba? çýkacaklar??ve onurlar??nas? kaybetmeyeceklerini biliyorlard?"
+    Sandbox_Hitmans.GroupName_option9 = "Sarho?ar Tugay?                                                  \n Yerel tavernedeki g?l? ziyaretler arkada??lar??peki?irdi, birlikte hayatta kal? grup olarak ?lýþt?ar."
+    Sandbox_Hitmans.GroupName_option10 = "Avc?ar                                                                          \n Yeni av sezonunu memnuniyetle karþýlayan, avc?lisans?a ihtiya?duymayan bir grup."
+    Sandbox_Hitmans.GroupName_option11 = "Kutsal Kurtar??ar                                                          \n Yepyeni bir 10 Emir setine sahip dini bir tarikat."
+    Sandbox_Hitmans.GroupName_option12 = "H??et Bilim ?sanlar?                                             \n Retroviral ila?ara ve ?el koruyucu k?afetlere eri?mleri sayesinde hayatta kald?ar, art? kimseyi iyile?irme arzusu taþým?orlar."
+    Sandbox_Hitmans.GroupName_option13 = "K?amet S???eri                                                            \n Aðýrl?l?olarak ya?aya odaklanan, yolda birileri ??se vicdan azab??kmeyen iyi organize olmu?bir ?te."
+    Sandbox_Hitmans.GroupName_option14 = "?el Milis                                                          \n H??et çökmeden hemen ?ce ordudan firar eden, s??s? silah ve m?immata eri?mi olan bir grup."
+    Sandbox_Hitmans.GroupName_option15 = "?? Lejyonu                                                            \n En kalabal?, en tehlikeli ve en iyi donan?l?klan, Louisville’in en zengin adam?taraf?dan destekleniyor."
+    Sandbox_Hitmans.GroupName_option16 = "Yeni Umut D?eni                                                            \n Yeni bir D?ya H??eti giri?mi, yeniden in? ve d?eni geri getirme amac?taþýyor."
+
+    Sandbox_Hitmans.HasPistolChance = "Tabanca ?ns?[%]"
+    Sandbox_Hitmans.HasPistolChance_tooltip = "Haydutlar? dolu bir tabanca taþýma ?ns?
+
+    Sandbox_Hitmans.PistolMagCount = "Tabanca ?rj? Say??
+    Sandbox_Hitmans.PistolMagCount_tooltip = "Haydutun tabanca i?n taþýyacaðý ekstra ?rj? say??
+
+    Sandbox_Hitmans.HasRifleChance = "T?ek ?ns?[%]"
+    Sandbox_Hitmans.HasRifleChance_tooltip = "Haydutlar? dolu bir t?ek taþýma ?ns?
+
+    Sandbox_Hitmans.RifleMagCount = "T?ek ?rj? Say??
+    Sandbox_Hitmans.RifleMagCount_tooltip = "Haydutun t?ek i?n taþýyacaðý ekstra ?rj? say??
+
+
+
+}

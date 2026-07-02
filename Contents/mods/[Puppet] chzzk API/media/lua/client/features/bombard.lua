@@ -127,11 +127,11 @@ local function doExplosion(a, b, handler, afterExplode)
     local radius = 55
     sendClientCommand("Schedule", "Kaboom", {r = radius})
 
-    local bandits = BanditZombie and BanditZombie.GetAll and BanditZombie.GetAll() or {}
+    local bandits = HitmanZombie and HitmanZombie.GetAll and HitmanZombie.GetAll() or {}
     for n, o in pairs(bandits) do
         local dist = math.sqrt(math.pow(o.x - e, 2) + math.pow(o.y - f, 2))
         if dist < radius then
-            local q = BanditZombie.GetInstanceById(n)
+            local q = HitmanZombie.GetInstanceById(n)
             if q and q:isOutside() then
                 q:setCrawler(true)
                 q:setHealth(0)
