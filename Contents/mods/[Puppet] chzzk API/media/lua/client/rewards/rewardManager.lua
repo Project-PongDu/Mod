@@ -23,6 +23,31 @@ local function handleZombieSpawn(amount, sprint, sender)
     global.b(" handleZombieSpawn FUNCTION END")
 end
 
+-- 랜덤 스킬 물약(random_skill_potion) 확률 테이블. weight 합계 = 10000 (0.01% 단위).
+--   serum_supreme   : 1%   고정 (잭팟)
+--   나머지 99% 는 Sprinting/Lightfoot/Nimble/Sneak 가 각 2유닛, Strength/Fitness 가 각 1유닛
+--   비율로 분배 -> 10유닛 = 9.9%/유닛 -> Str/Fit 9.9%씩, 나머지 4개 19.8%씩.
+local skillPotionTable = {
+    { id = "serum_supreme",   weight = 100 },   -- 1.00%
+    { id = "serum_strength",  weight = 990 },   -- 9.90%
+    { id = "serum_fitness",   weight = 990 },   -- 9.90%
+    { id = "serum_sprinting", weight = 1980 },  -- 19.80%
+    { id = "serum_lightfoot", weight = 1980 },  -- 19.80%
+    { id = "serum_nimble",    weight = 1980 },  -- 19.80%
+    { id = "serum_sneak",     weight = 1980 },  -- 19.80%
+}
+
+local function pickSerum()
+    local roll = ZombRand(10000)
+    local acc = 0
+    for _, entry in ipairs(skillPotionTable) do
+        acc = acc + entry.weight
+        if roll < acc then return entry.id end
+    end
+    return skillPotionTable[#skillPotionTable].id   -- 안전망
+end
+
+
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
 -- immediate=true 인 기능은 안전지대 안에서도 즉시 발동 (백신/추방/백룸/미사일 원래 특성 유지).
@@ -112,6 +137,16 @@ local rewardHandlers = {
             global.b(" DONATION EXPLOSION END")
         end,
     },
+    ["random_skill_potion"] = {
+        immediate = false,
+        fn = function(sender)
+            local itemId = pickSerum()
+            local item = global.player:getInventory():AddItem("t3chzzkDonation." .. itemId)
+            if item then item:setName((sender or "") .. "'s " .. item:getDisplayName()) end
+            global.processingEvent = false
+        end,
+    },
+
 
     -- ── 신규 기획 (스텁, 미구현) ──────────────────────────────────────────────
     -- 각 fn은 필요한 로직으로 채우면 됨. processingEvent 해제 잊지 말 것.
@@ -119,13 +154,6 @@ local rewardHandlers = {
         immediate = false,
         fn = function(sender)
             -- TODO: 랜덤 무기 뽑기
-            global.processingEvent = false
-        end,
-    },
-    ["random_skill_potion"] = {
-        immediate = false,
-        fn = function(sender)
-            -- TODO: 랜덤 스킬레벨업 물약 지급 (시크릿z 참조)
             global.processingEvent = false
         end,
     },

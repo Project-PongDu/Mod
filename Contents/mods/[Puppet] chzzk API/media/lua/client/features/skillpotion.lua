@@ -54,7 +54,7 @@ function OnEat_serum_supreme(food, player, percent)
     end
 
     grantUsedSerum(player)
-    player:Say("Oh my...")   -- 원본 연출 유지
+    player:Say(getText("IGUI_serum_supreme_say"))   -- 원본 연출 유지
 end
 
 -- ── 미니 세럼 6종 (Passive 2 + Agility 4, 각 +2레벨) ─────────────────────────

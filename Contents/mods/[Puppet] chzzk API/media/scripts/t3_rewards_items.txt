@@ -20,7 +20,7 @@ item serum_supreme
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum Supreme,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_supreme,
     Medical             = TRUE,
@@ -29,8 +29,6 @@ item serum_supreme
     OnEat               = OnEat_serum_supreme,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -39,31 +37,26 @@ item serum_used
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Normal,
-    DisplayName         = Serum Supreme (Used),
+    DisplayName         = Enhancement Serum (used),
     Icon                = serum_used,
     Tooltip             = Tooltip_serum_supreme,
     WorldStaticModel    = serum_used_model,
 }
-
--- ── 미니 세럼 6종 : Passive 2 + Agility 4, 각각 해당 스킬 +2레벨 확정 지급 ──────────
--- 텍스처/모델/사운드/사용후 트래시(serum_used)는 전부 serum_supreme 것을 그대로 재사용.
 
 item serum_strength
 {
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Strength,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_Tooltip_serum_normal,
+    Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
     CustomContextMenu   = serum_useInjector,
     EatType             = popcan,
     OnEat               = OnEat_serum_strength,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -72,7 +65,7 @@ item serum_fitness
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Fitness,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
@@ -81,8 +74,6 @@ item serum_fitness
     OnEat               = OnEat_serum_fitness,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -91,7 +82,7 @@ item serum_sprinting
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Sprinting,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
@@ -100,8 +91,6 @@ item serum_sprinting
     OnEat               = OnEat_serum_sprinting,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -110,7 +99,7 @@ item serum_lightfoot
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Lightfooted,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
@@ -119,8 +108,6 @@ item serum_lightfoot
     OnEat               = OnEat_serum_lightfoot,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -129,7 +116,7 @@ item serum_nimble
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Nimble,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
@@ -138,8 +125,6 @@ item serum_nimble
     OnEat               = OnEat_serum_nimble,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
@@ -148,7 +133,7 @@ item serum_sneak
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
-    DisplayName         = Serum: Sneak,
+    DisplayName         = Enhancement Serum,
     Icon                = serum_supreme,
     Tooltip             = Tooltip_serum_normal,
     Medical             = TRUE,
@@ -157,8 +142,6 @@ item serum_sneak
     OnEat               = OnEat_serum_sneak,
     CustomEatSound      = serum_inject,
     WorldStaticModel    = serum_supreme_model,
-    DaysFresh           = 7,
-    DaysTotallyRotten   = 7,
     Tags                = CMP,
 }
 
