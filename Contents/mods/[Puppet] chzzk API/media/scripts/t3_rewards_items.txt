@@ -45,4 +45,122 @@ item serum_used
     WorldStaticModel    = serum_used_model,
 }
 
+-- ── 미니 세럼 6종 : Passive 2 + Agility 4, 각각 해당 스킬 +2레벨 확정 지급 ──────────
+-- 텍스처/모델/사운드/사용후 트래시(serum_used)는 전부 serum_supreme 것을 그대로 재사용.
+
+item serum_strength
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Strength,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_strength,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
 }
+
+item serum_fitness
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Fitness,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_fitness,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+item serum_sprinting
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Sprinting,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_sprinting,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+item serum_lightfoot
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Lightfooted,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_lightfoot,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+item serum_nimble
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Nimble,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_nimble,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+item serum_sneak
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum: Sneak,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_normal,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_sneak,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+}
+

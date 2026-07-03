@@ -1,24 +1,29 @@
--- Serum Supreme (구 CMP V-SZ9000) : random_skill_potion 리워드의 "잭팟" 아이템.
--- 원본: SecretZ_Core (OnEat_LabsTest15) — 효과 로직은 그대로 이식,
--- 단 원본은 AddXP(360000)라 Passive(Str/Fit)는 Lv9에서 멈추는 문제가 있었음.
--- 여기서는 LevelPerk() 반복 호출로 3개 스킬 전부 100% 확정 만렙(10) 처리.
+-- 세럼 계열 아이템(serum_*) OnEat 핸들러 모음.
+--   serum_supreme          : "잭팟" — Passive 2종 + Sprinting 확정 만렙, 트레잇 전면 교체
+--   serum_strength/fitness/sprinting/lightfoot/nimble/sneak : 미니 세럼 — 해당 스킬만 +2레벨
+-- 원본: SecretZ_Core (OnEat_LabsTest15) — Passive/Agility 만렙 로직만 이식, XP 직접주입 대신
+-- LevelPerk() 반복 호출 방식 사용 (원본은 AddXP(360000)라 Passive가 Lv9에서 멈추는 문제가 있었음).
 --
 -- LevelPerk()는 호출 1회당 정확히 +1레벨이며 이미 만렙이면 그냥 무시됨
 -- (엔진 네이티브 메서드, Lua wrapper 없음 — pz41 vanilla 소스 확인됨).
--- 그래서 시작 레벨이 몇이든 10번 호출하면 항상 만렙에 도달한다.
-local function maxPerk(player, perk)
-    for i = 1, 10 do
+local function addLevels(player, perk, levels)
+    for i = 1, levels do
         player:LevelPerk(perk)
     end
 end
 
+local function grantUsedSerum(player)
+    player:getInventory():AddItem("t3chzzkDonation.serum_used")
+end
+
+-- ── serum_supreme (잭팟) ──────────────────────────────────────────────────
 function OnEat_serum_supreme(food, player, percent)
     -- Passive: Strength / Fitness 확정 만렙
-    maxPerk(player, Perks.Strength)
-    maxPerk(player, Perks.Fitness)
+    addLevels(player, Perks.Strength, 10)
+    addLevels(player, Perks.Fitness, 10)
 
-    -- Agility: Sprinting만 확정 만렙 (요청 스펙 — Sprinting 외 다른 Agility 스킬은 건드리지 않음)
-    maxPerk(player, Perks.Sprinting)
+    -- Agility: Sprinting만 확정 만렙 (요청 스펙 — 다른 Agility 스킬은 건드리지 않음)
+    addLevels(player, Perks.Sprinting, 10)
 
     -- 나쁜 특성 싹 제거
     player:getTraits():remove("Weak")
@@ -48,10 +53,43 @@ function OnEat_serum_supreme(food, player, percent)
         player:getTraits():add("Athletic")
     end
 
-    -- 사용 후 빈 세럼을 인벤토리에 남긴다.
-    -- (원본 시크릿Z는 D 아이템을 루팅/랩머신 재료로만 쓰고 먹은 뒤엔 아무것도 안 남김 —
-    --  ReplaceOnEat 류 필드도 미사용. 여기선 Lua에서 직접 지급하는 방식이 B41에서 가장 확실.)
-    player:getInventory():AddItem("t3chzzkDonation.serum_used")
-
+    grantUsedSerum(player)
     player:Say("Oh my...")   -- 원본 연출 유지
+end
+
+-- ── 미니 세럼 6종 (Passive 2 + Agility 4, 각 +2레벨) ─────────────────────────
+function OnEat_serum_strength(food, player, percent)
+    addLevels(player, Perks.Strength, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
+end
+
+function OnEat_serum_fitness(food, player, percent)
+    addLevels(player, Perks.Fitness, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
+end
+
+function OnEat_serum_sprinting(food, player, percent)
+    addLevels(player, Perks.Sprinting, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
+end
+
+function OnEat_serum_lightfoot(food, player, percent)
+    addLevels(player, Perks.Lightfoot, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
+end
+
+function OnEat_serum_nimble(food, player, percent)
+    addLevels(player, Perks.Nimble, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
+end
+
+function OnEat_serum_sneak(food, player, percent)
+    addLevels(player, Perks.Sneak, 2)
+    grantUsedSerum(player)
+    player:Say("...!")
 end
