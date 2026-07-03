@@ -1,0 +1,48 @@
+module t3chzzkDonation
+{
+
+model serum_supreme_model
+{
+    mesh    = WorldItems/Candle,
+    texture = WorldItems/serum_supreme_world,
+    scale   = 0.4,
+}
+
+model serum_used_model
+{
+    mesh    = WorldItems/Candle,
+    texture = WorldItems/serum_used_world,
+    scale   = 0.4,
+}
+
+item serum_supreme
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Food,
+    DisplayName         = Serum Supreme,
+    Icon                = serum_supreme,
+    Tooltip             = Tooltip_serum_supreme,
+    Medical             = TRUE,
+    CustomContextMenu   = serum_useInjector,
+    EatType             = popcan,
+    OnEat               = OnEat_serum_supreme,
+    CustomEatSound      = serum_inject,
+    WorldStaticModel    = serum_supreme_model,
+    DaysFresh           = 7,
+    DaysTotallyRotten   = 7,
+    Tags                = CMP,
+}
+
+item serum_used
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.2,
+    Type                = Normal,
+    DisplayName         = Serum Supreme (Used),
+    Icon                = serum_used,
+    Tooltip             = Tooltip_serum_supreme,
+    WorldStaticModel    = serum_used_model,
+}
+
+}

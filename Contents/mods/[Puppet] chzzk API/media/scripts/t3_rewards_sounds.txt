@@ -1,0 +1,14 @@
+module Base
+{
+
+    sound serum_inject
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/serum_inject.ogg,
+        }
+    }
+
+}
