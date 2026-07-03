@@ -54,38 +54,54 @@ local activeEntries = {}
 -- Effect labels are resolved via getText() at render time (see buildLabel),
 -- so the Korean text lives in media/lua/shared/Translate/KO/IG_UI_KO.txt,
 -- never as raw/escaped Korean in this file.
+-- ※ featureId 키. random_weapon 이하 8개는 번역 문자열이 아직 없어서 getText가
+-- 키 이름을 그대로 보여줌 -- 기능 구현할 때 KO 번역 파일에 같이 추가할 것.
 local labelKey = {
-    ["1000"]    = "IGUI_donation_debuff_roulette",
-    ["2000"]    = "IGUI_donation_buff_roulette",
-    ["5000"]    = "IGUI_donation_zombie_roulette",
-    ["10000"]   = "IGUI_donation_sprinter",
-    ["20000"]   = "IGUI_donation_bandit_melee",
-    ["35000"]   = "IGUI_donation_vaccine",
-    ["40000"]   = "IGUI_donation_bandit_ranged",
-    ["50000"]   = "IGUI_donation_exile",
-    ["100000"]  = "IGUI_donation_backroom",
-    ["150000"]  = "IGUI_donation_bombard",
+    ["debuff_roulette"]      = "IGUI_donation_debuff_roulette",
+    ["buff_roulette"]        = "IGUI_donation_buff_roulette",
+    ["zombie_roulette"]      = "IGUI_donation_zombie_roulette",
+    ["sprinter5"]            = "IGUI_donation_sprinter",
+    ["bandit_melee"]         = "IGUI_donation_bandit_melee",
+    ["vaccine"]              = "IGUI_donation_vaccine",
+    ["bandit_ranged"]        = "IGUI_donation_bandit_ranged",
+    ["exile"]                = "IGUI_donation_exile",
+    ["backroom"]             = "IGUI_donation_backroom",
+    ["missile"]              = "IGUI_donation_bombard",
+    ["random_weapon"]        = "IGUI_donation_random_weapon",
+    ["random_skill_potion"]  = "IGUI_donation_random_skill_potion",
+    ["vehicle_kit"]          = "IGUI_donation_vehicle_kit",
+    ["revive_ticket"]        = "IGUI_donation_revive_ticket",
+    ["cdda_spawn"]           = "IGUI_donation_cdda_spawn",
+    ["secret_passage_kit"]   = "IGUI_donation_secret_passage_kit",
+    ["horde_night"]          = "IGUI_donation_horde_night",
+    ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
 }
 
 local colorMap = {
-    ["1000"]    = {0.6, 0.3, 0.9},
-    ["2000"]    = {0.3, 0.6, 1.0},
-    ["3000"]    = {0.3, 0.9, 0.3},
-    ["5000"]    = {0.3, 0.9, 0.3},
-    ["10000"]   = {0.9, 0.9, 0.3},
-    ["20000"]   = {1.0, 0.4, 0.2},
-    ["30000"]   = {1.0, 0.4, 0.2},
-    ["35000"]   = {0.3, 0.9, 0.9},
-    ["40000"]   = {1.0, 0.2, 0.2},
-    ["50000"]   = {0.9, 0.7, 0.1},
-    ["100000"]  = {0.9, 0.7, 0.1},
-    ["150000"]  = {1.0, 0.3, 0.0},
+    ["debuff_roulette"]      = {0.6, 0.3, 0.9},
+    ["buff_roulette"]        = {0.3, 0.6, 1.0},
+    ["zombie_roulette"]      = {0.3, 0.9, 0.3},
+    ["sprinter5"]            = {0.9, 0.9, 0.3},
+    ["bandit_melee"]         = {1.0, 0.4, 0.2},
+    ["vaccine"]              = {0.3, 0.9, 0.9},
+    ["bandit_ranged"]        = {1.0, 0.2, 0.2},
+    ["exile"]                = {0.9, 0.7, 0.1},
+    ["backroom"]             = {0.9, 0.7, 0.1},
+    ["missile"]              = {1.0, 0.3, 0.0},
+    ["random_weapon"]        = {0.8, 0.8, 0.2},
+    ["random_skill_potion"]  = {0.5, 0.9, 0.5},
+    ["vehicle_kit"]          = {0.6, 0.6, 1.0},
+    ["revive_ticket"]        = {1.0, 0.8, 0.8},
+    ["cdda_spawn"]           = {0.7, 0.2, 0.2},
+    ["secret_passage_kit"]   = {0.6, 0.4, 0.2},
+    ["horde_night"]          = {0.9, 0.1, 0.1},
+    ["rise_up_dead_man"]     = {0.4, 0.1, 0.5},
 }
 
-local function buildLabel(amount, sender, message)
-    local key   = labelKey[amount]
-    local label = key and getText(key) or ("Effect " .. amount)
-    if amount == "35000" and message and message ~= "" then
+local function buildLabel(featureId, sender, message)
+    local key   = labelKey[featureId]
+    local label = key and getText(key) or ("Effect " .. tostring(featureId))
+    if featureId == "vaccine" and message and message ~= "" then
         return label .. ", " .. message
     end
     return label
@@ -114,7 +130,7 @@ function DonationEntryPanel:render()
     local rem   = math.max(0, e.remaining_ms)
     local prog  = rem / PANEL_DURATION_MS
     local secs  = math.max(0, math.ceil(rem / 1000))
-    local col   = colorMap[e.amount] or {0.5, 0.5, 0.5}
+    local col   = colorMap[e.featureId] or {0.5, 0.5, 0.5}
     local icon  = sc(BASE_ICON_W)
     local im    = sc(BASE_IMARGIN)
     local textX = im + icon + im
@@ -270,20 +286,24 @@ if ISPauseMenu then
 end
 
 -- ── Apply one donation locally (panel + reward) ──────────────────────────────
-local function applyDonation(amount, sender, message)
-    amount = tostring(amount or "")
+-- amount는 통계/로그용, featureId가 실제 디스패치 키 (퍼펫 API가 amount->featureId
+-- 매핑을 보고 rewards.txt에 같이 실어 보낸다).
+local function applyDonation(amount, featureId, sender, message)
+    amount    = tostring(amount or "")
+    featureId = tostring(featureId or "")
     local entry = {
-        label        = buildLabel(amount, sender, message),
+        label        = buildLabel(featureId, sender, message),
         sender       = sender,
         remaining_ms = PANEL_DURATION_MS,
         amount       = amount,
+        featureId    = featureId,
         applied      = false,   -- false = prep countdown running; true = effect already fired
     }
     -- Fired by onTick when the prep countdown reaches 0. rewardManager.a keeps
     -- processingEvent held through the effect, then its callback re-shows the
     -- panel as an "applied" confirmation for another PANEL_DURATION_MS.
     entry.fire = function()
-        rewardManager.a(entry.amount, entry.sender, function()
+        rewardManager.a(entry.featureId, entry.sender, function()
             removePanel(entry)
             entry.remaining_ms = PANEL_DURATION_MS
             local found = false
@@ -301,7 +321,9 @@ end
 -- Each client reads ITS OWN queue file from this machine's Zomboid/Lua folder,
 -- so on a dedicated server every streamer's donations affect only themselves.
 -- The external donation program writes lines to:  Zomboid/Lua/<config.filePath>
---   line format:  amount,sender,message   (sender & message optional)
+--   line format:  amount,featureId,sender,message   (featureId/sender/message optional)
+--   featureId는 퍼펫 API(GUI)가 유저의 amount->featureId 매핑을 보고 채워 넣는다.
+--   매핑에 없는 금액이면 featureId가 빈 문자열로 오고, 통계에만 잡힌다 (게임 효과 없음).
 -- In-memory FIFO queue. Donations are applied ONE AT A TIME, gated by
 -- global.processingEvent, so a burst of simultaneous donations is never
 -- dropped -- they queue up and fire strictly in order (oldest first).
@@ -329,18 +351,20 @@ local function pollDonationFile()
     if w then w:write("") w:close() end
 
     for _, raw in ipairs(lines) do
-        local amount, sender, message = raw:match("^([^,]+),?([^,]*),?(.*)$")
+        local amount, featureId, sender, message = raw:match("^([^,]*),?([^,]*),?([^,]*),?(.*)$")
         if amount and amount ~= "" then
-            amount = tostring(amount)
+            amount    = tostring(amount)
+            featureId = featureId or ""
             -- Stats: forward the raw line to the host for aggregation (ALL donations,
             -- valid or not -- the Python report decides what to count).
             sendClientCommand("DonationStats", "Record", { line = raw })
-            -- Effect: only queue valid tiers (invalid amounts do nothing in-game).
-            if rewardManager.isValid(amount) then
+            -- Effect: only queue valid featureIds (unmapped amounts do nothing in-game).
+            if rewardManager.isValid(featureId) then
                 table.insert(donationQueue, {
-                    amount  = amount,
-                    sender  = urldecode(sender or ""),
-                    message = urldecode(message or ""),
+                    amount    = amount,
+                    featureId = featureId,
+                    sender    = urldecode(sender or ""),
+                    message   = urldecode(message or ""),
                 })
             end
         end
@@ -355,7 +379,7 @@ local function consumeDonationQueue()
     if global.processingEvent then return end
     if #donationQueue == 0 then return end
     local entry = table.remove(donationQueue, 1)
-    applyDonation(entry.amount, entry.sender, entry.message)
+    applyDonation(entry.amount, entry.featureId, entry.sender, entry.message)
 end
 
 -- Kept as a harmless fallback if a server ever pushes Donation/Apply directly.
@@ -363,6 +387,7 @@ local function onServerCommand(module, command, data)
     if module ~= "Donation" or command ~= "Apply" then return end
     applyDonation(
         tostring(data.amount or ""),
+        tostring(data.featureId or ""),
         urldecode(tostring(data.sender  or "")),
         urldecode(tostring(data.message or ""))
     )
