@@ -174,7 +174,10 @@ _a.b = function(a)
     end
 
     local function startBomb()
-        b.bombTimer         = _b.KaboomTime
+        -- 대기시간: Donation_BombardDelay(초, 10~300, 기본 60) * 60틱. 없으면 config 기본값(3600틱).
+        local sv  = SandboxVars and SandboxVars.Hitmans
+        local sec = sv and tonumber(sv.Donation_BombardDelay)
+        b.bombTimer         = sec and (sec * 60) or _b.KaboomTime
         b.timeBombActivated = true
 
         local handler
