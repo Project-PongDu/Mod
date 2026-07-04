@@ -61,6 +61,32 @@ local function spawnZombies(x, y, z, amount, useHighStats, sprint, sender)
     end
 end
 
+-- ── 뮤턴트 소환 (mutant_spawn) ────────────────────────────────────────────────
+-- 스크리머/브루트/로치. CDDA 모드 의존 없음 — 서버는 스폰 + modData 마킹만
+-- 하고, 스탯·행동(HP/스프린트/괴력/비명/밀치기/3배속 크롤)은 각 클라이언트의
+-- 적용기(features/mutantspawn.lua, OnZombieUpdate)가 처리한다 (좀비 클라 권한).
+local function spawnSpecialZombie(x, y, z, kind, sender)
+    local zeds = addZombiesInOutfit(x, y, z, 1, nil, nil)
+    if not zeds or zeds:size() == 0 then return false end
+    local zed = zeds:get(0)
+    zed:DoZombieStats()
+    zed:makeInactive(true)
+    zed:makeInactive(false)
+    zed:getModData()["PuppetMutant"] = kind
+    if sender and sender ~= "" then
+        zed:getModData()["_cs"] = sender .. getText("IGUI_donation_zombie_owner")
+    end
+    zed:transmitModData()
+    -- 서버발 zombie transmitModData는 클라에 전달이 안 되므로(스프린터의
+    -- SpawnedSprinter 죽은 코드와 같은 함정) 폭격과 동일한 검증된 채널로
+    -- 전 클라에 zedId+kind를 브로드캐스트 -> 클라 적용기가 onlineID로 매칭.
+    sendServerCommand("PEvents", "MutantMark", {
+        ["zedId"] = zed:getOnlineID(),
+        ["kind"]  = kind,
+    })
+    return true
+end
+
 -- Handle "PEvents / ZedSpawn" client command.
 local function srvlog(msg)
     local w = getFileWriter("server_log.txt", true, true)
@@ -87,6 +113,19 @@ local function onClientCommand(module, command, player, data)
         end)
         if ok then srvlog("spawnZombies OK")
         else srvlog("spawnZombies ERROR: " .. tostring(err)) end
+    elseif module == "PEvents" and command == "MutantSpawn" then
+        local x    = tonumber(data["ZedX"])
+        local y    = tonumber(data["ZedY"])
+        local z    = tonumber(data["ZedZ"]) or 0
+        local kind = tostring(data["kind"] or "roach")
+        srvlog("MutantSpawn kind=" .. kind .. " x=" .. tostring(x) .. " y=" .. tostring(y))
+        if x and y then
+            local ok, err = pcall(function()
+                spawnSpecialZombie(x, y, z, kind, data["sender"] or "")
+            end)
+            if ok then srvlog("MutantSpawn OK")
+            else srvlog("MutantSpawn ERROR: " .. tostring(err)) end
+        end
     end
 end
 Events.OnClientCommand.Add(onClientCommand)

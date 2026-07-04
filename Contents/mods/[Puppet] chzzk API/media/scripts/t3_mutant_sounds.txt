@@ -1,0 +1,34 @@
+module Base
+{
+
+    sound mutant_scream1
+    {
+        category = Object,
+        loop = false,
+        is3D = true,
+        clip
+        {
+            file = media/sound/mutant_scream1.wav,
+            distanceMin = 1,
+            distanceMax = 50,
+            reverbFactor = 0.3,
+            volume = 0.9,
+        }
+    }
+
+    sound mutant_scream2
+    {
+        category = Object,
+        loop = false,
+        is3D = true,
+        clip
+        {
+            file = media/sound/mutant_scream2.wav,
+            distanceMin = 1,
+            distanceMax = 50,
+            reverbFactor = 0.3,
+            volume = 0.9,
+        }
+    }
+
+}
