@@ -149,7 +149,10 @@ local function doExplosion(a, b, handler, afterExplode)
     DOTex.alpha = 2
     getSoundManager():PlaySound("day_one_kaboom", false, 1.0)
 
-    local radius = 55
+    -- 폭격 전용 반경 (Donation_BombardRadius, 5~60, 기본 55). 부활 반경과는 별개 변수.
+    -- SandboxVars는 파일 로드 시점엔 비어있을 수 있으므로 사용 시점에 읽는다.
+    local sv = SandboxVars and SandboxVars.Hitmans
+    local radius = (sv and tonumber(sv.Donation_BombardRadius)) or 55
     sendClientCommand("Schedule", "Kaboom", {r = radius})
 
     killZombiesAround(e, f, radius)

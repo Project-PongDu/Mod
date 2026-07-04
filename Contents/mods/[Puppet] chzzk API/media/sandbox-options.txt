@@ -12,6 +12,16 @@ option Hitmans.Donation_PrepDelay = {
     page = Hitmans_Donation, translation = Hitmans_Donation_PrepDelay,
 }
 
+option Hitmans.Donation_BombardRadius = {
+    type = integer, min = 5, max = 60, default = 55,
+    page = Hitmans_Donation, translation = Hitmans_Donation_BombardRadius,
+}
+
+option Hitmans.Donation_RiseUpRadius = {
+    type = integer, min = 5, max = 60, default = 55,
+    page = Hitmans_Donation, translation = Hitmans_Donation_RiseUpRadius,
+}
+
 
 
 /***** GENERAL *****/
