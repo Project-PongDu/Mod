@@ -1,2 +1,3 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+Contents/mods/*/media/lua/shared/Translate/KO/*.txt text working-tree-encoding=UTF-16BE-BOM eol=crlf
