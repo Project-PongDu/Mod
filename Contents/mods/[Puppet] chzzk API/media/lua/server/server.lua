@@ -260,6 +260,9 @@ end
 -- 클라이언트별 중복 부활을 원천 차단한다. reanimateNow()는 바닐라 디버그 메뉴
 -- "Reanimate (Zombie)"가 쓰는 강제 부활 API — 샌드박스 Reanimate 설정과 무관하게
 -- 즉시 부활시킨다 (DebugContextMenu.OnReanimateCorpse 와 동일).
+-- 라이즈 업 후처리 스윕 대상 목록 (아래 EveryOneMinute 스윕에서 소비)
+local _riseSweeps = {}
+
 DOServer["Schedule"]["RiseUp"] = function(player, data)
     local cx = tonumber(data["x"]) or player:getX()
     local cy = tonumber(data["y"]) or player:getY()
@@ -328,7 +331,72 @@ DOServer["Schedule"]["RiseUp"] = function(player, data)
     sendServerCommand("PEvents", "MutantReviveDebug", {
         ["total"] = raised, ["readable"] = readable, ["marked"] = marked,
     })
+    -- 부활 예약 청소 스윕 예약 (아래 RiseSweep 참고). 부활 좀비들이 물고 있는
+    -- ReanimateTimer를 지워서 다음 사망 시 시체에 reanimateTime이 예약되는
+    -- 것을 원천 차단한다. 추적 반경은 1분 사이 이동 여유분(+60)을 더한다.
+    if raised > 0 then
+        _riseSweeps[#_riseSweeps + 1] = {
+            x = cx, y = cy, r = r + 60,
+            left = 3,                      -- EveryOneMinute 3회 스윕 후 소멸
+        }
+    end
 end
+
+-- ── 라이즈 업 후처리: 부활 예약 상태 청소 ────────────────────────────────────
+-- 문제: reanimateNow()로 부활한 좀비는 엔진의 ReanimateTimer(>0)를 물고 있고,
+-- 이 상태로 다시 죽으면 새 IsoDeadBody에 reanimateTime(부활 예약 시각)이
+-- 박힌다. reanimateTime은 청크 세이브에 직렬화되므로 서버 재부팅 후 로드되면
+-- 예약 시각이 이미 지나 있어 시체가 다시 일어난다 ("한 번 되살렸던 애들만
+-- 재부팅 후 부활" 증상). 2중 방어로 차단:
+--   ① RiseSweep  : 부활 직후 주변 좀비의 ReanimateTimer를 0으로 — 원천 차단
+--   ② LoadGridsquare : 로드되는 좀비 시체의 reanimateTime을 0으로 —
+--                      이미 세이브에 예약이 박힌 기존 오염 시체까지 소급 무효화
+
+Events.EveryOneMinute.Add(function()
+    if #_riseSweeps == 0 then return end
+    local cell = getCell()
+    if not cell then return end
+    local zeds = cell:getZombieList()
+    if not zeds then return end
+    local cleared = 0
+    for i = 0, zeds:size() - 1 do
+        local z = zeds:get(i)
+        local ok, timer = pcall(function() return z:getReanimateTimer() end)
+        if ok and timer and timer > 0 then
+            local zx, zy = z:getX(), z:getY()
+            for _, m in ipairs(_riseSweeps) do
+                if math.abs(zx - m.x) <= m.r and math.abs(zy - m.y) <= m.r then
+                    z:setReanimateTimer(0)
+                    cleared = cleared + 1
+                    break
+                end
+            end
+        end
+    end
+    if cleared > 0 then
+        srvlog("RiseSweep: cleared ReanimateTimer on " .. cleared .. " zombies")
+    end
+    for i = #_riseSweeps, 1, -1 do
+        _riseSweeps[i].left = _riseSweeps[i].left - 1
+        if _riseSweeps[i].left <= 0 then
+            table.remove(_riseSweeps, i)
+        end
+    end
+end)
+
+-- ② 시체 로드 시 부활 예약 무효화. 플레이어 시체(감염 사망 -> 좀비화)는
+--    바닐라의 정상 부활 경로이므로 건드리지 않는다. 좀비 시체는 바닐라에서
+--    부활 예약이 걸릴 일이 없으므로 0으로 밀어도 부작용 없음.
+Events.LoadGridsquare.Add(function(sq)
+    local smo = sq and sq:getStaticMovingObjects()
+    if not smo then return end
+    for i = 0, smo:size() - 1 do
+        local o = smo:get(i)
+        if instanceof(o, "IsoDeadBody") and not o:isPlayer() then
+            pcall(function() o:setReanimateTime(0) end)
+        end
+    end
+end)
 
 local function onClientCommandDOServer(module, command, player, data)
     if DOServer[module] and DOServer[module][command] then

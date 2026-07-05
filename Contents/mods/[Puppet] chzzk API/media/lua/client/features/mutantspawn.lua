@@ -40,10 +40,13 @@ local haloKey = {
 local SWEAR_KEYS = {
     "IGUI_mutant_swear_1", "IGUI_mutant_swear_2", "IGUI_mutant_swear_3",
     "IGUI_mutant_swear_4", "IGUI_mutant_swear_5", "IGUI_mutant_swear_6",
+    "IGUI_mutant_swear_7", "IGUI_mutant_swear_8", "IGUI_mutant_swear_9",
+    "IGUI_mutant_swear_10",
 }
 local ENDMENT_KEYS = {
     "IGUI_mutant_endment_1", "IGUI_mutant_endment_2", "IGUI_mutant_endment_3",
-    "IGUI_mutant_endment_4", "IGUI_mutant_endment_5",
+    "IGUI_mutant_endment_4", "IGUI_mutant_endment_5", "IGUI_mutant_endment_6",
+    "IGUI_mutant_endment_7",
 }
 
 -- 비명 쿨다운(ms, 실시간). CDDA는 인게임 5분(기본 낮길이 기준 실시간 ~12.5초)
@@ -69,7 +72,8 @@ function _a.a(sender)
         local swear   = getText(SWEAR_KEYS[ZombRand(#SWEAR_KEYS) + 1])
         local endment = getText(ENDMENT_KEYS[ZombRand(#ENDMENT_KEYS) + 1])
         local msg = swear .. ", " .. getText(key) .. endment
-        player:setHaloNote(msg, 255, 70, 70, 300)
+        processShoutMessage(msg)
+        addSound(player, player:getX(), player:getY(), player:getZ(), 30, 30)
     end
 end
 
@@ -332,7 +336,7 @@ end)
 --  ③ 좀비가 로컬 플레이어 공격  ④ 좀비를 타격
 --  표기: 후원자가 있으면 "%1의 %2" ("테스트후원자의 브루트"), 없으면 이름만.
 -- ═══════════════════════════════════════════════════════════════════════════
-local TAG_TTL = 100
+local TAG_TTL = 300
 
 local NAME_KEY = {
     screamer = "IGUI_mutant_name_screamer",
