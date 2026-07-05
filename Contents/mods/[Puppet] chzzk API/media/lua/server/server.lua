@@ -1,3 +1,31 @@
+-- ── 특수좀비 영속 레지스트리 (부활 유지의 핵심) ──────────────────────────────
+-- persistentOutfitID는 좀비 외형을 사망->시체(reanimated.bin)->부활 내내
+-- 유지시키는 영속 ID다. 단, 원시값은 모자 상태가 16번 비트로 박혀 있어
+-- 모자가 벗겨지면 값이 변한다 -> 밴딧과 동일하게 HitmanUtils.GetZombieID로
+-- 모자 비트를 마스킹한 정규화 ID를 키로 쓴다 (등록/조회 양쪽 동일 함수).
+-- 글로벌 ModData는 서버 세이브에 저장되므로 서버 재시작 후 부활에도 유효.
+local function mutantKey(zed)
+    if HitmanUtils and HitmanUtils.GetZombieID then
+        return tostring(HitmanUtils.GetZombieID(zed))
+    end
+    return tostring(zed:getPersistentOutfitID())
+end
+
+-- 레지스트리 항목: {["k"]=종류, ["s"]=후원자}. 구버전 문자열 항목과의
+-- 호환을 위해 읽기는 반드시 regEntry를 거친다.
+local function regEntry(v)
+    if type(v) == "table" then return v["k"], v["s"] end
+    return v, nil
+end
+
+local function registerMutant(zed, kind, sender)
+    local key = mutantKey(zed)
+    if not key then return end
+    local reg = ModData.getOrCreate("PuppetMutants")
+    reg[key] = { ["k"] = kind, ["s"] = sender }
+    ModData.transmit("PuppetMutants")
+end
+
 -- Make a zombie into a sprinter.
 local function makeSprinter(a)
     local b = getSandboxOptions():getOptionByName("ZombieLore.Speed"):getValue()
@@ -9,6 +37,7 @@ local function makeSprinter(a)
     a:DoZombieStats()
     getSandboxOptions():set("ZombieLore.Speed", b)
     a:getModData()["isSprinter"] = true
+    registerMutant(a, "sprinter")     -- 부활 유지용 영속 등록
     sendClientCommand("SpawnedSprinter", "isSprinter", {
         ["isSprinter"] = true,
         ["zedId"]      = a:getOnlineID(),
@@ -61,6 +90,53 @@ local function spawnZombies(x, y, z, amount, useHighStats, sprint, sender)
     end
 end
 
+-- ── 뮤턴트 소환 (mutant_spawn) ────────────────────────────────────────────────
+-- 스크리머/브루트/로치. CDDA 모드 의존 없음 — 서버는 스폰 + modData 마킹만
+-- 하고, 스탯·행동(HP/스프린트/괴력/비명/밀치기/3배속 크롤)은 각 클라이언트의
+-- 적용기(features/mutantspawn.lua, OnZombieUpdate)가 처리한다 (좀비 클라 권한).
+local function spawnSpecialZombie(x, y, z, kind, sender)
+    local zeds = addZombiesInOutfit(x, y, z, 1, nil, nil)
+    if not zeds or zeds:size() == 0 then return false end
+    local zed = zeds:get(0)
+    zed:DoZombieStats()
+    zed:makeInactive(true)
+    zed:makeInactive(false)
+    zed:getModData()["PuppetMutant"] = kind
+    if sender and sender ~= "" then
+        zed:getModData()["_cs"] = sender .. getText("IGUI_donation_zombie_owner")
+    end
+    zed:transmitModData()
+    -- 서버발 zombie transmitModData는 클라에 전달이 안 되므로(스프린터의
+    -- SpawnedSprinter 죽은 코드와 같은 함정) 폭격과 동일한 검증된 채널로
+    -- 전 클라에 zedId+kind를 브로드캐스트 -> 클라 적용기가 onlineID로 매칭.
+    sendServerCommand("PEvents", "MutantMark", {
+        ["zedId"]  = zed:getOnlineID(),
+        ["kind"]   = kind,
+        ["sender"] = sender or "",
+    })
+    registerMutant(zed, kind, sender) -- 부활 유지용 영속 등록 (후원자 포함)
+    return true
+end
+
+-- 부활 좀비 재등록: 클라 적용기가 부활 좀비에 능력을 입힌 뒤 그놈의 "새" pid를
+-- 보고하면 레지스트리에 추가 -> 다음 사망->부활 사이클도 자동 유지된다.
+-- 여러 클라가 중복 보고해도 멱등 (값 같으면 transmit 생략).
+Events.OnClientCommand.Add(function(module, command, player, data)
+    if module == "PEvents" and command == "MutantReregister" then
+        local key    = tostring(data and data["key"] or "")
+        local kind   = data and data["kind"]
+        local sender = data and data["sender"]
+        if key ~= "" and key ~= "N/A" and kind then
+            local reg = ModData.getOrCreate("PuppetMutants")
+            local ck, cs = regEntry(reg[key])
+            if ck ~= kind or cs ~= sender then
+                reg[key] = { ["k"] = kind, ["s"] = sender }
+                ModData.transmit("PuppetMutants")
+            end
+        end
+    end
+end)
+
 -- Handle "PEvents / ZedSpawn" client command.
 local function srvlog(msg)
     local w = getFileWriter("server_log.txt", true, true)
@@ -87,6 +163,19 @@ local function onClientCommand(module, command, player, data)
         end)
         if ok then srvlog("spawnZombies OK")
         else srvlog("spawnZombies ERROR: " .. tostring(err)) end
+    elseif module == "PEvents" and command == "MutantSpawn" then
+        local x    = tonumber(data["ZedX"])
+        local y    = tonumber(data["ZedY"])
+        local z    = tonumber(data["ZedZ"]) or 0
+        local kind = tostring(data["kind"] or "roach")
+        srvlog("MutantSpawn kind=" .. kind .. " x=" .. tostring(x) .. " y=" .. tostring(y))
+        if x and y then
+            local ok, err = pcall(function()
+                spawnSpecialZombie(x, y, z, kind, data["sender"] or "")
+            end)
+            if ok then srvlog("MutantSpawn OK")
+            else srvlog("MutantSpawn ERROR: " .. tostring(err)) end
+        end
     end
 end
 Events.OnClientCommand.Add(onClientCommand)
@@ -171,6 +260,9 @@ end
 -- 클라이언트별 중복 부활을 원천 차단한다. reanimateNow()는 바닐라 디버그 메뉴
 -- "Reanimate (Zombie)"가 쓰는 강제 부활 API — 샌드박스 Reanimate 설정과 무관하게
 -- 즉시 부활시킨다 (DebugContextMenu.OnReanimateCorpse 와 동일).
+-- 라이즈 업 후처리 스윕 대상 목록 (아래 EveryOneMinute 스윕에서 소비)
+local _riseSweeps = {}
+
 DOServer["Schedule"]["RiseUp"] = function(player, data)
     local cx = tonumber(data["x"]) or player:getX()
     local cy = tonumber(data["y"]) or player:getY()
@@ -178,6 +270,8 @@ DOServer["Schedule"]["RiseUp"] = function(player, data)
     local cell = player:getCell()
     local r2 = r * r
     local raised = 0
+    local readable = 0
+    local marked = 0
     for floor = 0, 7 do                    -- 다층 건물 내부 시체까지 포함
         for dy = -r, r do
             for dx = -r, r do
@@ -197,8 +291,34 @@ DOServer["Schedule"]["RiseUp"] = function(player, data)
                         end
                         if bodies then
                             for _, b in ipairs(bodies) do
+                                -- 시체 pid는 사망까지 안정(로그로 검증) -> 정규화 키로
+                                -- 레지스트리 조회 = 이 시체가 특수좀비였는지 판정.
+                                -- 부활 좀비는 pid를 새로 발급받아(shared-descriptor)
+                                -- 레지스트리 직조회가 불가하므로, 부활 위치 마크를
+                                -- 전 클라에 브로드캐스트 -> 클라 OnZombieUpdate(발화
+                                -- 100% 검증됨)가 부활 좀비에 능력 재적용한다.
+                                local okN, key = pcall(function()
+                                    return tostring(HitmanUtils.GetZombieID(b))
+                                end)
+                                local kind, sender = nil, nil
+                                if okN and key then
+                                    kind, sender = regEntry(ModData.getOrCreate("PuppetMutants")[key])
+                                end
+                                if okN then readable = readable + 1 end
                                 b:reanimateNow()
                                 raised = raised + 1
+                                if kind then
+                                    marked = marked + 1
+                                    sendServerCommand("PEvents", "MutantRevive", {
+                                        ["x"]      = sq:getX(),
+                                        ["y"]      = sq:getY(),
+                                        ["z"]      = floor,
+                                        ["kind"]   = kind,
+                                        ["sender"] = sender or "",
+                                        ["key"]    = key,
+                                    })
+                                    srvlog("RiseUp revive-mark " .. kind .. " key=" .. key)
+                                end
                             end
                         end
                     end
@@ -206,8 +326,77 @@ DOServer["Schedule"]["RiseUp"] = function(player, data)
             end
         end
     end
-    srvlog("RiseUp: " .. raised .. " corpses reanimated around " .. cx .. "," .. cy .. " r=" .. r)
+    srvlog("RiseUp: " .. raised .. " corpses, " .. readable .. " pid-readable, " .. marked .. " special marks, around " .. cx .. "," .. cy .. " r=" .. r)
+    -- 요약을 클라에도 쏴서 client console.txt만으로 전 과정 관측 가능하게
+    sendServerCommand("PEvents", "MutantReviveDebug", {
+        ["total"] = raised, ["readable"] = readable, ["marked"] = marked,
+    })
+    -- 부활 예약 청소 스윕 예약 (아래 RiseSweep 참고). 부활 좀비들이 물고 있는
+    -- ReanimateTimer를 지워서 다음 사망 시 시체에 reanimateTime이 예약되는
+    -- 것을 원천 차단한다. 추적 반경은 1분 사이 이동 여유분(+60)을 더한다.
+    if raised > 0 then
+        _riseSweeps[#_riseSweeps + 1] = {
+            x = cx, y = cy, r = r + 60,
+            left = 3,                      -- EveryOneMinute 3회 스윕 후 소멸
+        }
+    end
 end
+
+-- ── 라이즈 업 후처리: 부활 예약 상태 청소 ────────────────────────────────────
+-- 문제: reanimateNow()로 부활한 좀비는 엔진의 ReanimateTimer(>0)를 물고 있고,
+-- 이 상태로 다시 죽으면 새 IsoDeadBody에 reanimateTime(부활 예약 시각)이
+-- 박힌다. reanimateTime은 청크 세이브에 직렬화되므로 서버 재부팅 후 로드되면
+-- 예약 시각이 이미 지나 있어 시체가 다시 일어난다 ("한 번 되살렸던 애들만
+-- 재부팅 후 부활" 증상). 2중 방어로 차단:
+--   ① RiseSweep  : 부활 직후 주변 좀비의 ReanimateTimer를 0으로 — 원천 차단
+--   ② LoadGridsquare : 로드되는 좀비 시체의 reanimateTime을 0으로 —
+--                      이미 세이브에 예약이 박힌 기존 오염 시체까지 소급 무효화
+
+Events.EveryOneMinute.Add(function()
+    if #_riseSweeps == 0 then return end
+    local cell = getCell()
+    if not cell then return end
+    local zeds = cell:getZombieList()
+    if not zeds then return end
+    local cleared = 0
+    for i = 0, zeds:size() - 1 do
+        local z = zeds:get(i)
+        local ok, timer = pcall(function() return z:getReanimateTimer() end)
+        if ok and timer and timer > 0 then
+            local zx, zy = z:getX(), z:getY()
+            for _, m in ipairs(_riseSweeps) do
+                if math.abs(zx - m.x) <= m.r and math.abs(zy - m.y) <= m.r then
+                    z:setReanimateTimer(0)
+                    cleared = cleared + 1
+                    break
+                end
+            end
+        end
+    end
+    if cleared > 0 then
+        srvlog("RiseSweep: cleared ReanimateTimer on " .. cleared .. " zombies")
+    end
+    for i = #_riseSweeps, 1, -1 do
+        _riseSweeps[i].left = _riseSweeps[i].left - 1
+        if _riseSweeps[i].left <= 0 then
+            table.remove(_riseSweeps, i)
+        end
+    end
+end)
+
+-- ② 시체 로드 시 부활 예약 무효화. 플레이어 시체(감염 사망 -> 좀비화)는
+--    바닐라의 정상 부활 경로이므로 건드리지 않는다. 좀비 시체는 바닐라에서
+--    부활 예약이 걸릴 일이 없으므로 0으로 밀어도 부작용 없음.
+Events.LoadGridsquare.Add(function(sq)
+    local smo = sq and sq:getStaticMovingObjects()
+    if not smo then return end
+    for i = 0, smo:size() - 1 do
+        local o = smo:get(i)
+        if instanceof(o, "IsoDeadBody") and not o:isPlayer() then
+            pcall(function() o:setReanimateTime(0) end)
+        end
+    end
+end)
 
 local function onClientCommandDOServer(module, command, player, data)
     if DOServer[module] and DOServer[module][command] then

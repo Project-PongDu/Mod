@@ -27,6 +27,11 @@ option Hitmans.Donation_RiseUpRadius = {
     page = Hitmans_Donation, translation = Hitmans_Donation_RiseUpRadius,
 }
 
+option Hitmans.Donation_MutantNameTag = {
+    type = boolean, default = true,
+    page = Hitmans_Donation, translation = Hitmans_Donation_MutantNameTag,
+}
+
 
 
 /***** GENERAL *****/

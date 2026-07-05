@@ -8,6 +8,7 @@ local eventUtils = require("utils/Event")
 local zone       = require("utils/zone")
 local zombie     = require("features/zombie")
 local riseup     = require("features/riseup")
+local mutantspawn = require("features/mutantspawn")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -179,10 +180,10 @@ local rewardHandlers = {
             global.processingEvent = false
         end,
     },
-    ["cdda_spawn"] = {
+    ["mutant_spawn"] = {
         immediate = false,
         fn = function(sender)
-            -- TODO: CDDA 스크리머/브루트 소환
+            mutantspawn.a(sender)            -- 스크리머/브루트/로치 중 1마리
             global.processingEvent = false
         end,
     },
