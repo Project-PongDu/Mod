@@ -76,10 +76,11 @@ local function initMutant(zombie, kind)
     elseif kind == "roach" then
         zombie:setHealth(1.0)
         zombie:setVariable("PuppetRoach", true)
-        -- 타입2 크롤 변형 노드(CrawlerType==2, 조건 2개)와의 조건 수 동률을
-        -- 없애기 위해 크롤 타입을 1로 고정 -> roach 노드가 항상 최다 조건.
-        zombie:setVariable("CrawlerType", "1")
+    elseif kind == "sprinter" then
+        -- 부활한 뛰좀 재적용 경로 (원 스폰은 서버 makeSprinter가 처리)
+        zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
     end
+    print("[PuppetMutant] init " .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
     zombie:setVariable("PuppetMutantInit", true)
 end
 
@@ -133,22 +134,129 @@ end
 -- modData 경로는 SP/호스트 겸용 폴백으로 유지.
 local _pending = {}   -- [onlineID] = kind
 
-Events.OnServerCommand.Add(function(module, command, args)
-    if module == "PEvents" and command == "MutantMark" then
-        local zid  = args and tonumber(args["zedId"])
-        local kind = args and args["kind"]
-        if zid and kind then
-            _pending[zid] = kind
+-- 영속 레지스트리: 서버가 특수좀비 탄생 시 글로벌 ModData "PuppetMutants"에
+-- 정규화ID -> kind 로 등록해둔다 (server.lua registerMutant 참고). 이 ID는
+-- 사망->시체->부활 내내 유지되므로 부활 좀비도 조회에 걸려 자동 재적용된다.
+-- 모자 비트 마스킹까지 등록/조회가 같은 함수(HitmanUtils.GetZombieID)를 쓴다.
+local _registry = {}  -- [정규화ID 문자열] = kind 또는 {k=종류, s=후원자}
+
+-- 레지스트리/펜딩 항목 겸용 리더 (구버전 문자열 항목 호환)
+local function regEntry(v)
+    if type(v) == "table" then return v["k"], v["s"] end
+    return v, nil
+end
+
+local function mutantKey(zombie)
+    if HitmanUtils and HitmanUtils.GetZombieID then
+        return tostring(HitmanUtils.GetZombieID(zombie))
+    end
+    return tostring(zombie:getPersistentOutfitID())
+end
+
+Events.OnReceiveGlobalModData.Add(function(name, data)
+    if name == "PuppetMutants" and type(data) == "table" then
+        _registry = data
+        print("[PuppetMutant] registry received, entries follow")
+        for k, v in pairs(_registry) do
+            print("[PuppetMutant]   " .. tostring(k) .. " = " .. tostring(v))
         end
     end
 end)
+Events.OnGameStart.Add(function()
+    ModData.request("PuppetMutants")
+end)
+
+-- 부활 마크: 서버 RiseUp이 특수좀비 시체를 판별하면 부활 위치+종류를
+-- 브로드캐스트한다. 부활 좀비는 pid가 새로 발급돼 레지스트리 직조회가
+-- 불가하므로, 클라가 마크 스퀘어(±1)의 미적용 좀비에게 능력을 재적용한다.
+local _reviveMarks = {}   -- { {x,y,z,kind,expire}, ... }
+local REVIVE_MARK_MS = 20000
+
+Events.OnServerCommand.Add(function(module, command, args)
+    if module ~= "PEvents" then return end
+    if command == "MutantMark" then
+        local zid  = args and tonumber(args["zedId"])
+        local kind = args and args["kind"]
+        if zid and kind then
+            _pending[zid] = { ["k"] = kind, ["s"] = args["sender"] }
+        end
+    elseif command == "MutantRevive" then
+        local x, y = tonumber(args and args["x"]), tonumber(args and args["y"])
+        local kind = args and args["kind"]
+        if x and y and kind then
+            _reviveMarks[#_reviveMarks + 1] = {
+                x = x, y = y, z = tonumber(args["z"]) or 0,
+                kind = kind, sender = args["sender"],
+                expire = getTimestampMs() + REVIVE_MARK_MS,
+            }
+            print("[PuppetMutant] revive mark " .. tostring(kind)
+                .. " @" .. tostring(x) .. "," .. tostring(y)
+                .. " key=" .. tostring(args["key"]))
+        end
+    elseif command == "MutantReviveDebug" then
+        print("[PuppetMutant] riseup total=" .. tostring(args and args["total"])
+            .. " pid-readable=" .. tostring(args and args["readable"])
+            .. " special=" .. tostring(args and args["marked"]))
+    end
+end)
+
+-- 마크 매칭: 마크 스퀘어 ±1 안의 좀비면 소모하고 종류 반환.
+-- 같은 스퀘어에 이종 시체가 동시 부활하면 클라별 배정이 어긋날 수 있는
+-- 알려진 한계가 있으나(드묾), 재등록으로 이후 사이클부터는 pid로 고정된다.
+local function matchReviveMark(zombie)
+    if #_reviveMarks == 0 then return nil end
+    local zx = math.floor(zombie:getX())
+    local zy = math.floor(zombie:getY())
+    local zz = math.floor(zombie:getZ())
+    local now = getTimestampMs()
+    for i = #_reviveMarks, 1, -1 do
+        local m = _reviveMarks[i]
+        if now > m.expire then
+            table.remove(_reviveMarks, i)
+        elseif math.abs(m.x - zx) <= 1 and math.abs(m.y - zy) <= 1 and m.z == zz then
+            table.remove(_reviveMarks, i)
+            return m.kind, m.sender
+        end
+    end
+    return nil
+end
 
 local function applyMutant(zombie)
-    local kind = zombie:getModData()["PuppetMutant"] or _pending[zombie:getOnlineID()]
+    local md = zombie:getModData()
+    local kind, sender = md["PuppetMutant"], md["PuppetMutantSender"]
+    if not kind then
+        local p = _pending[zombie:getOnlineID()]
+        if p then kind, sender = regEntry(p) end
+    end
+    if not kind then
+        kind, sender = regEntry(_registry[mutantKey(zombie)])
+    end
+    if not kind and zombie:isAlive()
+        and not zombie:getVariableBoolean("PuppetMutantInit") then
+        kind, sender = matchReviveMark(zombie)
+        if kind then
+            -- 새 pid를 서버 레지스트리에 재등록 (후원자 포함)
+            sendClientCommand("PEvents", "MutantReregister", {
+                ["key"] = mutantKey(zombie), ["kind"] = kind,
+                ["sender"] = sender,
+            })
+        end
+    end
     if not kind then return end
+    -- 클라 로컬 캐시: 이후 조회/네임태그 렌더가 modData만 보면 되게
+    if not md["PuppetMutant"] then md["PuppetMutant"] = kind end
+    if sender and not md["PuppetMutantSender"] then md["PuppetMutantSender"] = sender end
     if zombie:getVariableBoolean("Hitman") then return end   -- NPC 오염 방지
     if not zombie:getVariableBoolean("PuppetMutantInit") then
         initMutant(zombie, kind)
+        _a.pokeTag(zombie)                             -- 소환/부활 직후 잠깐 표기
+    end
+    _a.pokeTagOnHover(zombie)                          -- 조준+마우스 올림
+    if zombie:isAttacking() then                       -- 나를 공격 중일 때
+        local t = zombie:getTarget()
+        if t and instanceof(t, "IsoPlayer") and t:isLocalPlayer() then
+            _a.pokeTag(zombie)
+        end
     end
     if kind == "screamer" then
         updateScreamer(zombie)
@@ -160,11 +268,132 @@ local function applyMutant(zombie)
 end
 Events.OnZombieUpdate.Add(applyMutant)
 
--- 죽으면 로컬 마크/쿨다운 정리
+-- 죽으면 로컬 마크/쿨다운 정리 (+ 진단: 사망 시점 키 로깅 — 등록 키와
+-- 비교해서 죽는 과정에서 pid 비트가 변형되는지 판별하기 위함)
 Events.OnZombieDead.Add(function(zombie)
     local zid = zombie:getOnlineID()
+    local kind = zombie:getModData()["PuppetMutant"]
+        or regEntry(_pending[zid])
+        or regEntry(_registry[mutantKey(zombie)])
+    if kind then
+        print("[PuppetMutant] dead " .. tostring(kind)
+            .. " key=" .. mutantKey(zombie) .. " zid=" .. tostring(zid))
+    end
     _pending[zid] = nil
     _nextScream[zid] = nil
 end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  네임태그: 특수좀비 머리 위 표기 (CDDA CDDA_ShowZombieType 이식)
+--  트리거(각 100프레임 페이드): ① 소환/부활 직후  ② 조준 중 마우스 올림
+--  ③ 좀비가 로컬 플레이어 공격  ④ 좀비를 타격
+--  표기: 후원자가 있으면 "%1의 %2" ("테스트후원자의 브루트"), 없으면 이름만.
+-- ═══════════════════════════════════════════════════════════════════════════
+local TAG_TTL = 100
+
+local NAME_KEY = {
+    screamer = "IGUI_mutant_name_screamer",
+    brute    = "IGUI_mutant_name_brute",
+    roach    = "IGUI_mutant_name_roach",
+    sprinter = "IGUI_mutant_name_sprinter",
+}
+
+local TAG_COLOR = {      -- 스크리머/브루트는 CDDA 원본 색, 로치는 바퀴 갈색
+    brute    = {255, 0, 0},
+    screamer = {139, 0, 81},
+    roach    = {181, 101, 29},
+    sprinter = {255, 165, 0},
+}
+
+local _showTags = {}     -- [onlineID] = { zombie=, ttl=, tdo=TextDrawObject }
+
+-- 서버 샌드박스 스위치. 기존 Donation_ShowPanel/PrepDelay와 동일하게
+-- 사용 시점에 읽는다 (SandboxVars는 파일 로드 시점엔 비어있음).
+local function nameTagEnabled()
+    local sv = SandboxVars and SandboxVars.Hitmans
+    if sv and sv.Donation_MutantNameTag == false then return false end
+    return true      -- 옵션 없음(구버전 세이브) -> 기본값: 표시
+end
+
+-- CDDA_GetScreenXY 이식: 월드좌표 -> 화면좌표 (줌 보정 포함)
+local function screenXY(zombie, offY)
+    local sx = IsoUtils.XToScreen(zombie:getX(), zombie:getY(), zombie:getZ(), 0)
+    local sy = IsoUtils.YToScreen(zombie:getX(), zombie:getY(), zombie:getZ(), 0)
+    sx = sx - IsoCamera.getOffX() - zombie:getOffsetX()
+    sy = sy - IsoCamera.getOffY() - zombie:getOffsetY() - offY
+    local zoom = getCore():getZoom(0)
+    return sx / zoom, sy / zoom
+end
+
+local function pokeTag(zombie)
+    if not nameTagEnabled() then return end
+    local zid = zombie:getOnlineID()
+    local t = _showTags[zid]
+    if t then
+        t.ttl = TAG_TTL
+        t.zombie = zombie
+    else
+        _showTags[zid] = { zombie = zombie, ttl = TAG_TTL }
+    end
+end
+_a.pokeTag = pokeTag
+
+local function tagText(kind, sender)
+    local name = getText(NAME_KEY[kind] or NAME_KEY.roach)
+    if sender and sender ~= "" then
+        return getText("IGUI_mutant_tag_owned", sender, name)
+    end
+    return name
+end
+
+-- 트리거 ②: 조준 중 마우스 올림 (applyMutant에서 특수좀비에 한해 호출)
+local function pokeTagOnHover(zombie)
+    local player = getPlayer()
+    if not player or not player:IsAiming() then return end
+    if not zombie:isAlive() or not player:CanSee(zombie) then return end
+    local zx, zy = screenXY(zombie, 90)
+    local mx, my = getMouseX(), getMouseY()
+    if math.abs(zx - mx) < 15 and math.abs(zy - my) < 30 then
+        pokeTag(zombie)
+    end
+end
+_a.pokeTagOnHover = pokeTagOnHover
+
+-- 트리거 ④: 타격 시 (CDDA_FuncOnHit과 동일 이벤트)
+Events.OnWeaponHitCharacter.Add(function(attacker, target, _weapon, _damage)
+    if not instanceof(target, "IsoZombie") then return end
+    if not (attacker and instanceof(attacker, "IsoPlayer") and attacker:isLocalPlayer()) then return end
+    if target:getModData()["PuppetMutant"] then
+        pokeTag(target)
+    end
+end)
+
+-- 렌더: CDDA와 동일하게 OnTick에서 배치드로우, ttl로 페이드아웃
+local function renderTags()
+    local player = getPlayer()
+    for zid, t in pairs(_showTags) do
+        local zombie = t.zombie
+        local kind, sender = nil, nil
+        if zombie and player and t.ttl > 0
+            and zombie:isAlive() and player:CanSee(zombie) then
+            kind   = zombie:getModData()["PuppetMutant"]
+            sender = zombie:getModData()["PuppetMutantSender"]
+        end
+        if kind then
+            local sx, sy = screenXY(zombie, 190)
+            t.tdo = t.tdo or TextDrawObject.new()
+            local c = TAG_COLOR[kind] or {255, 255, 255}
+            local a = t.ttl / TAG_TTL
+            t.tdo:setDefaultColors(c[1] / 255, c[2] / 255, c[3] / 255, a)
+            t.tdo:setOutlineColors(0, 0, 0, a)
+            t.tdo:ReadString(UIFont.Small, tagText(kind, sender), -1)
+            t.tdo:AddBatchedDraw(sx, sy - t.tdo:getHeight(), true)
+            t.ttl = t.ttl - 1
+        else
+            _showTags[zid] = nil
+        end
+    end
+end
+Events.OnTick.Add(renderTags)
 
 return _a
