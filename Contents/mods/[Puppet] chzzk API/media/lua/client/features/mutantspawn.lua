@@ -30,9 +30,20 @@ local global = require("global")
 local KINDS = { "screamer", "brute", "roach" }
 
 local haloKey = {
-    screamer = "IGUI_donation_mutant_screamer",
-    brute    = "IGUI_donation_mutant_brute",
-    roach    = "IGUI_donation_mutant_roach",
+    screamer = "IGUI_mutant_name_screamer",
+    brute    = "IGUI_mutant_name_brute",
+    roach    = "IGUI_mutant_name_roach",
+}
+
+-- 소환 외침: 욕(SWEAR) + 종류(mutateType) + 마무리(ENDMENT) 3파트를 랜덤 조합.
+-- 예) "시발, 브루트잖아!" / "젠장, 로치 출현!"  (ENDMENT 쪽에 필요한 공백을 미리 포함시켜둠)
+local SWEAR_KEYS = {
+    "IGUI_mutant_swear_1", "IGUI_mutant_swear_2", "IGUI_mutant_swear_3",
+    "IGUI_mutant_swear_4", "IGUI_mutant_swear_5", "IGUI_mutant_swear_6",
+}
+local ENDMENT_KEYS = {
+    "IGUI_mutant_endment_1", "IGUI_mutant_endment_2", "IGUI_mutant_endment_3",
+    "IGUI_mutant_endment_4", "IGUI_mutant_endment_5",
 }
 
 -- 비명 쿨다운(ms, 실시간). CDDA는 인게임 5분(기본 낮길이 기준 실시간 ~12.5초)
@@ -55,7 +66,10 @@ function _a.a(sender)
     })
     local key = haloKey[kind]
     if key then
-        player:setHaloNote(getText(key), 255, 70, 70, 300)
+        local swear   = getText(SWEAR_KEYS[ZombRand(#SWEAR_KEYS) + 1])
+        local endment = getText(ENDMENT_KEYS[ZombRand(#ENDMENT_KEYS) + 1])
+        local msg = swear .. ", " .. getText(key) .. endment
+        player:setHaloNote(msg, 255, 70, 70, 300)
     end
 end
 
