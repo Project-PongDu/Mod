@@ -490,7 +490,11 @@ HitmanZombieActions.Smack.onStart = function(hitman, task)
             attacks = {"AttackChainsaw1", "AttackChainsaw2"}
         elseif meleeItemType == WeaponType.knife then
             soundVoice = female and "VoiceFemaleMeleeStab" or "VoiceMaleMeleeStab"
-            attacks = {"AttackKnife"} -- , "AttackKnifeMiss"
+            if Hitman.HasExpertise(hitman, Hitman.Expertise.Knifemaster) then
+                attacks = {"AttackKnife", "Attack1H1", "Attack1H2", "Attack1H3", "Attack1H4", "Attack1H5"}
+            else
+                attacks = {"AttackKnife"} -- , "AttackKnifeMiss"
+            end
         else -- two handed / knife ?
             attacks = {"Attack2H1", "Attack2H2", "Attack2H3", "Attack2H4"}
             if task.shm then
@@ -525,7 +529,7 @@ HitmanZombieActions.Smack.onStart = function(hitman, task)
         task.anim = anim
         -- Hitman.UpdateTask(hitman, task)
         hitman:setBumpType(anim)
-        hitman:setVariable("CombatSpeed", Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker) and Hitman.BerserkerSpeedMult or 1.0)
+        hitman:setVariable("CombatSpeed", Hitman.HasExpertise(hitman, Hitman.Expertise.Knifemaster) and Hitman.KnifemasterSpeedMult or 1.0)
     else
         return false
     end
