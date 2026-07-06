@@ -1588,7 +1588,7 @@ local function ProcessTask(hitman, task)
         -- normalize time speed
         local decrement = 1 / ((getAverageFPS() + 0.5) * 0.01666667)
         if task.action == "Smack" and Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker) then
-            decrement = decrement * 3
+            decrement = decrement * Hitman.BerserkerSpeedMult
         end
         task.time = task.time - decrement
 

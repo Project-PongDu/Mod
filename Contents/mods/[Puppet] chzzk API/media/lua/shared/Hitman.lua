@@ -67,6 +67,7 @@ Hitman.Expertise.Berserker = 17
 Hitman.Expertise.Sharpshooter = 18
 
 Hitman.Engine = true
+Hitman.BerserkerSpeedMult = 3.0
 
 local function predicateAll(item)
     return true

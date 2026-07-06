@@ -525,6 +525,7 @@ HitmanZombieActions.Smack.onStart = function(hitman, task)
         task.anim = anim
         -- Hitman.UpdateTask(hitman, task)
         hitman:setBumpType(anim)
+        hitman:setVariable("CombatSpeed", Hitman.HasExpertise(hitman, Hitman.Expertise.Berserker) and Hitman.BerserkerSpeedMult or 1.0)
     else
         return false
     end
