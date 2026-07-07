@@ -160,9 +160,15 @@ local rewardHandlers = {
     -- ── 신규 기획 (스텁, 미구현) ──────────────────────────────────────────────
     -- 각 fn은 필요한 로직으로 채우면 됨. processingEvent 해제 잊지 말 것.
     ["random_weapon"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
-            -- TODO: 랜덤 무기 뽑기
+            -- 50/50: 근접무기상자 / 원거리무기상자. 상자를 열면 t3RandomWeapon 확률표로 무기 1개.
+            local boxId = (ZombRand(100) < 50) and "weapon_box_melee" or "weapon_box_ranged"
+            local item = global.player:getInventory():AddItem("t3chzzkDonation." .. boxId)
+            if item then
+                item:setName((sender or "") .. "'s " .. item:getDisplayName())
+                item:getModData().t3Donor = sender or ""
+            end
             global.processingEvent = false
         end,
     },

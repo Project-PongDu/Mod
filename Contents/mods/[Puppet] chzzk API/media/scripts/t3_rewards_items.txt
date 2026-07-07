@@ -145,5 +145,48 @@ item serum_sneak
     Tags                = CMP,
 }
 
+/* random_weapon donation: weapon gacha boxes */
+item weapon_box_melee
+{
+    DisplayCategory     = Container,
+    Weight              = 3,
+    Type                = Normal,
+    DisplayName         = Melee Weapon Box,
+    Icon                = Toolbox,
+    Tooltip             = Tooltip_weapon_box,
+}
+
+item weapon_box_ranged
+{
+    DisplayCategory     = Container,
+    Weight              = 3,
+    Type                = Normal,
+    DisplayName         = Ranged Weapon Box,
+    Icon                = Toolbox,
+    Tooltip             = Tooltip_weapon_box,
+}
+
+recipe Open Weapon Box
+{
+    weapon_box_melee,
+    Result:PistolCase1,
+    RemoveResultItem:true,
+    OnCreate:t3RandomWeapon.OpenMeleeBox,
+    CanBeDoneFromFloor:true,
+    Time:150.0,
+    Sound:PutItemInBag,
+}
+
+recipe Open Weapon Box
+{
+    weapon_box_ranged,
+    Result:PistolCase1,
+    RemoveResultItem:true,
+    OnCreate:t3RandomWeapon.OpenRangedBox,
+    CanBeDoneFromFloor:true,
+    Time:150.0,
+    Sound:PutItemInBag,
+}
+
 }
 
