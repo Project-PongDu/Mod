@@ -105,8 +105,17 @@ local function spawnSpecialZombie(x, y, z, kind, sender)
     zed:makeInactive(true)
     zed:makeInactive(false)
     zed:getModData()["PuppetMutant"] = kind
+    -- 서버측 소유 zid 스탬프: B41은 죽은 좀비의 IsoZombie 객체를 풀에 반환 후
+    -- 재사용하는데 modData가 안 지워진다. 죽은 특좀 객체가 호드매니저 등으로
+    -- 재활용되면 PuppetMutant가 딸려와 그 좀비 시체가 특좀으로 부활한다.
+    -- 소유 zid를 박아두면, 살아있는 동안 아래 stale-스윕이 "md의 zid ≠ 현재
+    -- zid"로 재활용 좀비를 판별해 md를 지운다 -> 시체가 깨끗해짐.
+    zed:getModData()["PuppetMutantZid"] = zed:getOnlineID()
     if sender and sender ~= "" then
         zed:getModData()["_cs"] = sender .. getText("IGUI_donation_zombie_owner")
+        -- 원본 sender도 modData에 저장 -> 시체에 계승되어 RiseUp이 부활 시
+        -- 좌표 없이도 후원자 이름표를 복원할 수 있다 (이동-무관).
+        zed:getModData()["PuppetMutantSender"] = sender
     end
     zed:transmitModData()
     -- 서버발 zombie transmitModData는 클라에 전달이 안 되므로(스프린터의
@@ -356,13 +365,23 @@ DOServer["Schedule"]["RiseUp"] = function(player, data)
                         end
                         if bodies then
                             for _, b in ipairs(bodies) do
-                                -- ★버그① 수정: pid 대신 좌표 기반 death-mark로 kind 판별.
-                                -- GetZombieID(b)는 IsoDeadBody에 없는 메서드라 100% 예외였음
-                                -- (제거 — 매 시체마다 스택트레이스 찍던 낭비도 같이 해결됨).
-                                local kind, sender = matchDeathMark(sq, floor)
+                                -- ★이동-무관 판별: 시체(IsoDeadBody) 자신의 modData를
+                                -- 직독한다. 소환 때 서버가 박은 PuppetMutant/Sender가
+                                -- 좀비->시체 전환에 자동 계승됨(프로브로 확증:
+                                -- getOK=true, PuppetMutant=brute/roach). modData는
+                                -- 객체를 따라가므로 시체를 어디로 옮겨도 정확히 판별.
+                                local cmd = b:getModData()
+                                local kind = cmd and cmd["PuppetMutant"]
+                                local sender = cmd and (cmd["PuppetMutantSender"] or "")
+                                -- 좌표 death-mark 폴백 제거: 일반좀비 시체는 modData가
+                                -- 없어 폴백으로 넘어갔고, 그 자리에 남은 특좀 마크에 걸려
+                                -- 일반좀비가 특좀으로 부활하는 역방향 오탐이 났다(로그:
+                                -- kind=... from fallback). 시체 modData는 진짜 특좀이면
+                                -- 100% 계승되므로(from modData 검증됨) 폴백은 순수
+                                -- 오탐원이라 삭제. 일반좀비 시체 -> kind=nil -> 일반 부활.
                                 print("[PongDu][RiseUp] corpse @" .. tostring(sq:getX())
                                     .. "," .. tostring(sq:getY())
-                                    .. " deathMarkHit=" .. tostring(kind))
+                                    .. " kind=" .. tostring(kind))
                                 if kind then readable = readable + 1 end
                                 b:reanimateNow()
                                 raised = raised + 1
@@ -441,6 +460,46 @@ end
 --   ① RiseSweep  : 부활 직후 주변 좀비의 ReanimateTimer를 0으로 — 원천 차단
 --   ② LoadGridsquare : 로드되는 좀비 시체의 reanimateTime을 0으로 —
 --                      이미 세이브에 예약이 박힌 기존 오염 시체까지 소급 무효화
+
+-- ── stale md 정리 (서버 풀 재활용 방어) ──────────────────────────────────────
+-- B41은 죽은 좀비의 IsoZombie 객체를 풀에 반환 후 재사용하는데 modData를
+-- 안 지운다. 죽은 특좀 객체가 호드매니저 등으로 재활용되면 PuppetMutant가
+-- 딸려와 그 좀비 시체가 특좀으로 부활한다.
+--
+-- 왜 폴링인가(설계 근거): 바닐라엔 좀비/시체 '생성 순간' 훅이 없고
+-- (OnZombieCreate 부재, OnObjectAdded는 플레이어 설치물 전용), OnZombieUpdate는
+-- MP에서 '클라 권한' 좀비(플레이어 근처)엔 서버측 발화를 안 한다(로그로 확인:
+-- 스트리머 근처 재활용 5마리가 새어나감). getCell():getZombieList()만이 권한과
+-- 무관하게 셀의 전 좀비를 포함하므로, 이 리스트를 촘촘히 순회하는 것이 서버가
+-- 재활용 좀비를 잡을 수 있는 유일한 신뢰 경로다. 좀비가 죽기 전에 정리되면
+-- 시체가 깨끗해져 RiseUp이 일반좀비로 판정한다.
+local _lastStaleSweep = 0
+local STALE_SWEEP_MS = 500       -- 0.5초. 스폰~사살 사이에 1회 이상 걸리게.
+local function staleSweep()
+    local now = getTimestampMs()
+    if now - _lastStaleSweep < STALE_SWEEP_MS then return end
+    _lastStaleSweep = now
+    local cell = getCell()
+    if not cell then return end
+    local zeds = cell:getZombieList()
+    if not zeds then return end
+    local wiped = 0
+    for i = 0, zeds:size() - 1 do
+        local z = zeds:get(i)
+        local md = z:getModData()
+        if md["PuppetMutant"] and md["PuppetMutantZid"] ~= z:getOnlineID() then
+            md["PuppetMutant"] = nil
+            md["PuppetMutantSender"] = nil
+            md["PuppetMutantZid"] = nil
+            md["_cs"] = nil
+            wiped = wiped + 1
+        end
+    end
+    if wiped > 0 then
+        print("[PongDu][StaleSweep] wiped stale PuppetMutant from " .. wiped .. " recycled zombies")
+    end
+end
+Events.OnTick.Add(staleSweep)
 
 Events.EveryOneMinute.Add(function()
     if #_riseSweeps == 0 then return end

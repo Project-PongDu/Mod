@@ -257,52 +257,65 @@ end
 
 local function applyMutant(zombie)
     local md = zombie:getModData()
+    local curZid = zombie:getOnlineID()
+    -- ★풀 재활용 방어 (호드매니저 둔갑 근본원인): B41은 죽은 좀비의 IsoZombie
+    -- 객체를 풀에 반환 후 새 좀비에 재사용하는데 modData가 안 지워진다. 죽은
+    -- 특좀 객체가 호드 좀비로 재활용되면 md["PuppetMutant"]가 그대로 딸려와
+    -- 새 좀비가 특좀으로 둔갑한다(서버 로그: 호드 시점 REG/MutantMark 전무인데
+    -- 클라는 resolution 경로 없이 바로 init). md에 소유 onlineID를 함께 박아,
+    -- 현재 좀비 zid와 다르면 스테일(재활용)로 간주하고 폐기한다.
+    if md["PuppetMutant"] and md["PuppetMutantZid"] ~= curZid then
+        print("[PuppetMutant] STALE md rejected kind=" .. tostring(md["PuppetMutant"])
+            .. " mdZid=" .. tostring(md["PuppetMutantZid"]) .. " curZid=" .. tostring(curZid))
+        md["PuppetMutant"] = nil
+        md["PuppetMutantSender"] = nil
+        md["PuppetMutantZid"] = nil
+        zombie:setVariable("PuppetMutantInit", false)
+    end
     local kind, sender = md["PuppetMutant"], md["PuppetMutantSender"]
     -- 서버 MutantMark(pending)가 권위값. 좀비 스트림-인이 MutantMark보다 먼저
-    -- 도착한 경우 레지스트리 pid 충돌·스테일 pending으로 오배정된 kind가
-    -- md에 캐시될 수 있는데, 진짜 마크가 도착하는 즉시 여기서 교정한다.
-    local p = pendingEntry(zombie:getOnlineID())
+    -- 도착한 경우 스테일 pending으로 오배정된 kind가 md에 캐시될 수 있는데,
+    -- 진짜 마크가 도착하는 즉시 여기서 교정한다.
+    local p = pendingEntry(curZid)
     if p then
         local pk, ps = regEntry(p)
         if pk and kind and pk ~= kind then
             print("[PuppetMutant] corrected " .. tostring(kind) .. " -> " .. tostring(pk)
-                .. " zid=" .. tostring(zombie:getOnlineID()))
+                .. " zid=" .. tostring(curZid))
             kind, sender = pk, ps
             md["PuppetMutant"] = pk
             md["PuppetMutantSender"] = ps
+            md["PuppetMutantZid"] = curZid
             zombie:setVariable("PuppetMutantInit", false)   -- 올바른 kind로 재초기화
         elseif not kind then
             kind, sender = pk, ps
         end
+        -- ★1회용 소비: MutantMark는 "방금 스폰한 그 좀비"를 지목하는 일회성
+        -- 신호다. 적용 즉시 항목을 지워야 onlineID 재활용으로 새 좀비가 죽은
+        -- 특좀의 스테일 항목에 걸려 같은 종류로 둔갑하는 것을 막는다.
+        _pending[curZid] = nil
     end
-    if not kind then
-        kind, sender = regEntry(_registry[mutantKey(zombie)])
-        -- ★버그1(정상 케이스): 부활 좀비가 registry(서버 pid)로 잡히면 여기.
-        --   서버 [REG] 로그의 key와 이 key가 같아야 정상. 2회차 부활이
-        --   여기서 잡히면(=서버 재등록이 먹었으면) 수정 성공.
-        if kind then
-            print("[PuppetMutant] resolved via REGISTRY key=" .. tostring(mutantKey(zombie))
-                .. " kind=" .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
-        end
-    end
+    -- pid(persistentOutfitID) 레지스트리 조회 경로 제거.
+    -- persistentOutfitID는 좀비 고유 ID가 아니라 '옷차림' 공유 ID라, 이전에
+    -- 등록된 특좀과 같은 옷을 입은 일반좀비(예: 호드매니저 소환분)가 같은
+    -- key로 조회에 걸려 그 특좀 종류로 둔갑하는 오탐이 났다. 부활 판별은
+    -- 서버가 시체 modData로 정확히 하고, 클라 능력적용은 아래 revive-mark로
+    -- 처리하므로 pid 경로는 순수 오탐원 -> 완전 삭제.
     if not kind and zombie:isAlive()
         and not zombie:getVariableBoolean("PuppetMutantInit") then
         kind, sender = matchReviveMark(zombie)
         if kind then
-            -- 새 pid를 서버 레지스트리에 재등록 (후원자 포함)
-            print("[PuppetMutant] resolved via REVIVE-MARK -> reregister key="
+            print("[PuppetMutant] resolved via REVIVE-MARK key="
                 .. tostring(mutantKey(zombie)) .. " kind=" .. tostring(kind)
                 .. " zid=" .. tostring(zombie:getOnlineID()))
-            sendClientCommand("PEvents", "MutantReregister", {
-                ["key"] = mutantKey(zombie), ["kind"] = kind,
-                ["sender"] = sender,
-            })
         end
     end
     if not kind then return end
-    -- 클라 로컬 캐시: 이후 조회/네임태그 렌더가 modData만 보면 되게
+    -- 클라 로컬 캐시: 이후 조회/네임태그 렌더가 modData만 보면 되게.
+    -- 소유 zid를 함께 박아 풀 재활용 스테일 판별의 기준으로 삼는다.
     if not md["PuppetMutant"] then md["PuppetMutant"] = kind end
     if sender and not md["PuppetMutantSender"] then md["PuppetMutantSender"] = sender end
+    md["PuppetMutantZid"] = curZid
     if zombie:getVariableBoolean("Hitman") then return end   -- NPC 오염 방지
     if not zombie:getVariableBoolean("PuppetMutantInit") then
         initMutant(zombie, kind)
@@ -326,34 +339,12 @@ end
 Events.OnZombieUpdate.Add(applyMutant)
 
 -- 죽으면 로컬 마크/쿨다운 정리 + 서버에 사망 좌표 리포트.
--- ★버그① 근본 수정: 서버 RiseUp은 시체(IsoDeadBody)에 GetZombieID를 호출해
--- 왔는데 IsoDeadBody엔 getPersistentOutfitID 자체가 없어 100% 예외
--- (Object tried to call nil in GetZombieID) -> 시체→kind 판별이 원천 불가능했다
--- (서버 로그로 확인: readable=0, marked=0 항상). kind를 아는 유일한 시점은
--- "죽는 순간"의 클라이언트뿐이므로, 여기서 좌표+kind+sender를 서버로 보고하고
--- 서버는 이걸 좌표 기반 _deathMarks에 저장해뒀다가 RiseUp이 시체 위치로 조회한다.
+-- 죽을 때 로컬 캐시만 정리한다.
+-- (예전엔 좌표 death-mark를 서버로 보고했지만, 서버가 시체 modData를 직접
+--  읽는 방식으로 바뀌어 death-mark 자체가 불필요해졌다. registry 폴백도
+--  옷차림 pid 충돌로 일반좀비의 잘못된 death-mark를 유발하던 오탐원이라 제거.)
 Events.OnZombieDead.Add(function(zombie)
     local zid = zombie:getOnlineID()
-    local kind, sender = regEntry(zombie:getModData()["PuppetMutant"])
-    if not sender then sender = zombie:getModData()["PuppetMutantSender"] end
-    if not kind then
-        local pk, ps = regEntry(_pending[zid])
-        kind, sender = pk, ps
-    end
-    if not kind then
-        local rk, rs = regEntry(_registry[mutantKey(zombie)])
-        kind, sender = rk, rs
-    end
-    if kind then
-        print("[PuppetMutant] dead " .. tostring(kind)
-            .. " key=" .. mutantKey(zombie) .. " zid=" .. tostring(zid))
-        sendClientCommand("PEvents", "MutantDeathMark", {
-            ["x"] = zombie:getX(), ["y"] = zombie:getY(), ["z"] = zombie:getZ(),
-            ["kind"] = kind, ["sender"] = sender or "",
-        })
-        print("[PuppetMutant] death-mark reported @" .. tostring(zombie:getX())
-            .. "," .. tostring(zombie:getY()) .. " kind=" .. tostring(kind))
-    end
     _pending[zid] = nil
     _nextScream[zid] = nil
 end)
