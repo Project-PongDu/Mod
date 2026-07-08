@@ -213,7 +213,6 @@ recipe Open Vehicle Drop Kit
     OnCreate:t3VehicleDrop.OpenKit,
     CanBeDoneFromFloor:true,
     Time:150.0,
-    Sound:PutItemInBag,
 }
 
 item t3DeployedParachute
