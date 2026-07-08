@@ -178,6 +178,7 @@ item weapon_box_ranged
 recipe Open Weapon Box
 {
     weapon_box_melee,
+    Result:Toolbox,
     RemoveResultItem:true,
     OnCreate:t3RandomWeapon.OpenMeleeBox,
     CanBeDoneFromFloor:true,
@@ -188,6 +189,7 @@ recipe Open Weapon Box
 recipe Open Weapon Box
 {
     weapon_box_ranged,
+    Result:Toolbox,
     RemoveResultItem:true,
     OnCreate:t3RandomWeapon.OpenRangedBox,
     CanBeDoneFromFloor:true,
@@ -210,6 +212,7 @@ item vehicle_drop_kit
 recipe Open Vehicle Drop Kit
 {
     vehicle_drop_kit,
+    Result:vehicle_drop_kit,
     RemoveResultItem:true,
     OnCreate:t3VehicleDrop.OpenKit,
     CanBeDoneFromFloor:true,
