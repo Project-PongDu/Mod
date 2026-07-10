@@ -99,14 +99,13 @@ local function initMutant(zombie, kind)
         -- 부활한 뛰좀 재적용 경로 (원 스폰은 서버 makeSprinter가 처리)
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
     elseif kind == "tracer" then
-        -- 트레이서: 스프린터 워크타입 + 실제 이동속도.
-        -- ※주의(2차 정정): zombie.speedType = 1 은 크래시남(x13 리포트) -
-        -- speedType은 registerVariableCallbacks()에 안 걸린 순수 Java int
-        -- 필드라 Lua 점(dot) 대입 자체가 불가(Kahlua tableSet 실패, non-table).
-        -- 실이동속도의 진짜 원인은 speedType이 아니라 DoZombieSpeeds()가
-        -- 갱신하는 AnimFrameIncrease였으므로 그쪽만 직접 호출하면 충분하다.
+        -- 트레이서: 스프린터 워크타입.
+        -- ※3차 정정: DoZombieSpeeds()도 무효 - 이 함수가 만지는
+        -- def.AnimFrameIncrease는 구세대 2D 스프라이트 프레임 전진에만 읽히는
+        -- 레거시 필드로(B41 3D 좀비 이동은 advanced animator의 루트모션이 전담),
+        -- 이속에 아무 영향이 없다. 실제 이속 조절은 locomotion 애님 노드의
+        -- m_SpeedScale 오버라이드로만 가능(TR locomotion 노드, 별도 작업).
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
-        zombie:DoZombieSpeeds(2)
     end
     print("[PuppetMutant] init " .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
     zombie:setVariable("PuppetMutantInit", true)
@@ -309,6 +308,12 @@ local function updateTracer(zombie)
     -- climbfence/climbwindow TR* 애님 노드 게이팅용 (매 틱 세팅)
     zombie:setVariable("PuppetTracer", true)
 
+    -- 이속 배율: TR locomotion 노드(walktoward/lunge/pathfind + network 변형)의
+    -- m_SpeedScale이 이 변수들을 읽는다. 재생배속=루트모션 이속이므로 이 값이
+    -- 곧 이동속도. 바닐라 스프린터 0.80, 런지 0.90 기준 x1.2 배속.
+    zombie:setVariable("TracerSpeed", 1.2)
+    zombie:setVariable("TracerLungeSpeed", 1.08)
+
     -- 밀치기/약한 피격 넉다운 면역 (브루트 keepstand와 동일 기법).
     -- 엔진이 넉다운을 강한 피격과 구분하는 별도 플래그를 안 두므로
     -- 전체 넉다운 면역이 된다.
@@ -320,8 +325,19 @@ local function updateTracer(zombie)
         zombie:setVariable("bHardFall", false)
     end
 
+    -- 다리걸기(lunge) 공격 제거: 모드에 이미 있는 검증된 인프라 사용 -
+    -- fenceLungePatched/windowLungePatched 노드는 NoLungeAttack==true 조건이
+    -- 추가된(조건 수 우위로 바닐라 lunge 노드를 이기는) CheckAttack 이벤트
+    -- 제거 변형이다 (HitmanUpdate.UpdateZombies와 동일 패턴). 스폰 직후부터
+    -- 매 틱 세팅되므로 climb enter() 시점에 이미 true - 레이스 없음.
+    zombie:setVariable("NoLungeAttack", true)
+
     -- 파쿠르 실패 0%: 스테이트 enter()가 확정한 outcome(lunge/fall/obstacle)을
-    -- 매 틱 success로 덮어쓴다 (OnZombieUpdate는 enter() 이후 실행 - 검증됨).
+    -- 매 틱 success로 덮어쓴다. ※주의: 이 덮어쓰기는 enter() '다음 틱'에야
+    -- 반영되므로(enter 당일 틱의 애님 평가엔 늦음) lunge의 CheckAttack처럼
+    -- 애님 초반에 터지는 이벤트는 이걸로 못 막는다 - 실측으로 다리걸기가
+    -- 100% 발동했음. lunge 공격 억제는 위 NoLungeAttack이 전담하고, 이
+    -- 블록은 트립/장애물 실패를 성공으로 전환하는 역할만 담당한다.
     -- 단 "falling"(반대편 바닥 없음)은 실패가 아니라 지형 낙하이므로 유지 -
     -- 덮어쓰면 허공에서 착지 모션이 재생된다.
     local state = zombie:getCurrentState()
