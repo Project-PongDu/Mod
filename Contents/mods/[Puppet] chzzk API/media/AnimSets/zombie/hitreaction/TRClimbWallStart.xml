@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 트레이서 높은담장(FenceTypeHigh) 클라임 전반부.
+     ZombieClimbsWall(SportXAI)의 ZombieClimbWallStart.xml 포팅 - 노드명/변수명/
+     애님명을 전부 TR 네임스페이스로 교체해 원본 모드와 동시 구동 시에도 충돌 없음.
+     애님 에셋: anims_X/Zombie/TR_ClimbWall_Start.X (원본 사본, AnimationSet명 변경). -->
+<animNode>
+	<m_Name>TRClimbWallStart</m_Name>
+	<m_AnimName>TR_ClimbWall_Start</m_AnimName>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_SpeedScale>1.04</m_SpeedScale>
+	<m_BlendTime>0.10</m_BlendTime>
+	<m_Conditions>
+		<m_Name>hitreaction</m_Name>
+		<m_Type>STRING</m_Type>
+		<m_StringValue>TRClimbWallReactionStart</m_StringValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>TRClimbWallStarted</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>false</m_BoolValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>TRClimbWallStarted=true</m_ParameterValue>
+	</m_Events>
+</animNode>

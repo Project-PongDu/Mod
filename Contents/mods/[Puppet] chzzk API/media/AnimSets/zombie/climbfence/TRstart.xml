@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 트레이서 낮은담장 볼트: Vaulting Zombies의 climbfence/start.xml 구조에
+     PuppetTracer 게이트 + m_Priority를 얹고, 애님만 Run -> Sprint로 교체.
+     (Bob_ValultOver_Sprint: 바닐라 오타 그대로가 실제 애님명 - DTW에서 확인) -->
+<animNode>
+	<m_Name>TRclimbFenceStart</m_Name>
+	<m_AnimName>Bob_ValultOver_Sprint</m_AnimName>
+	<m_Priority>5</m_Priority>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_EarlyTransitionOut>true</m_EarlyTransitionOut>
+	<m_SpeedScale>0.80</m_SpeedScale>
+	<m_BlendTime>0.20</m_BlendTime>
+	<m_Conditions>
+		<m_Name>PuppetTracer</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>ClimbFenceStarted</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>false</m_BoolValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>ClimbFenceStarted=true</m_ParameterValue>
+	</m_Events>
+	<m_Events>
+		<m_EventName>PlayFenceSound</m_EventName>
+		<m_Time>Start</m_Time>
+		<m_ParameterValue>ClimbOverFenceLow</m_ParameterValue>
+	</m_Events>
+</animNode>

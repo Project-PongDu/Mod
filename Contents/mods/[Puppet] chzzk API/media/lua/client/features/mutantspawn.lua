@@ -27,12 +27,13 @@ local global = require("global")
 --  풀리면 PuppetMutantInit 가드가 리셋되므로 다음 틱에 자동 재적용된다.
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local KINDS = { "screamer", "brute", "roach" }
+local KINDS = { "screamer", "brute", "roach", "tracer" }
 
 local haloKey = {
     screamer = "IGUI_mutant_name_screamer",
     brute    = "IGUI_mutant_name_brute",
     roach    = "IGUI_mutant_name_roach",
+    tracer   = "IGUI_mutant_name_tracer",
 }
 
 -- 소환 외침: 욕(SWEAR) + 종류(mutateType) + 마무리(ENDMENT) 3파트를 랜덤 조합.
@@ -97,6 +98,12 @@ local function initMutant(zombie, kind)
     elseif kind == "sprinter" then
         -- 부활한 뛰좀 재적용 경로 (원 스폰은 서버 makeSprinter가 처리)
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
+    elseif kind == "tracer" then
+        -- 트레이서: 스프린터 워크타입. ※주의: 좀비는 bSprinting이 아닌 bRunning
+        -- 기반이라 VaultOverSprint 플래그가 자동으로 붙지 않는다(1차 시도의 오판).
+        -- Sprint 볼트 애님은 PuppetTracer 조건의 TR* 애님 노드가 강제하고,
+        -- 파쿠르 로직 전체는 아래 트레이서 파쿠르 시스템 절이 담당.
+        zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
     end
     print("[PuppetMutant] init " .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
     zombie:setVariable("PuppetMutantInit", true)
@@ -135,6 +142,185 @@ local function updateBrute(zombie)
     end
 end
 
+-- ── 트레이서: 파쿠르 시스템 ─────────────────────────────────────────────────
+-- 검증된 워크샵 모드 3종을 트레이서 전용으로 게이팅해 이식:
+--   Vaulting Zombies      : 낮은담장/창문 클라임 애님을 볼트로 교체
+--                           (climbfence·climbwindow TR* 노드, 여기선 Sprint 버전)
+--   Stay Away From Windows: 충돌한 닫힌 창문 즉시 파괴 (OnObjectCollide)
+--   ZombieClimbsWall      : 높은담장(FenceTypeHigh) 클라임 (hitreaction TR* 노드
+--                           + anims_X/Zombie/TR_ClimbWall_*.X 에셋)
+-- + DiveThroughWindows의 창문 볼트 트릭: 창문을 깬 직후 climbOverFence를 직접
+--   호출하면 climbfence 스테이트가 창문 개구부를 '담장'처럼 취급해 볼트로
+--   관통한다 (스테이트의 isIgnoreCollide가 시작-도착 스퀘어 간 충돌을 무시).
+-- 파쿠르 실패는 전 구간 0%: climbfence/climbwindow outcome을 매 틱 success로
+-- 강제하고(트립·런지 차단), 높은담장 클라임은 확률 굴림 없이 무조건 Success.
+
+-- 이벤트 핸들러(OnObjectCollide 등)용 트레이서 판별. applyMutant 경로 밖에서도
+-- 쓰이므로 modData 직조회 + 풀 재활용 스테일 가드(Zid 대조)를 그대로 적용.
+local function isTracer(zombie)
+    local md = zombie:getModData()
+    return md["PuppetMutant"] == "tracer"
+        and md["PuppetMutantZid"] == zombie:getOnlineID()
+end
+
+-- ── 트레이서: 높은담장 클라임 (ZombieClimbsWall 이식) ───────────────────────
+-- 원본 흐름: 충돌 프레임에 hitreaction=Start 세팅 -> Start 애님 종료 시
+-- TRClimbWallStarted=true -> 확률 굴림 후 Success/Fail 분기. 트레이서는 100%
+-- 성공이므로 굴림을 제거하고 Started=true 확인 즉시 Success로 전환한다.
+-- 원본에서 setCollidable(false) 복구가 OnHitZombie에만 있던 결함은 Success
+-- 애님 종료(Started=false 복귀) 시점에 반드시 복구하는 것으로 보강.
+local function updateTracerWallClimb(zombie)
+    local hr = zombie:getVariableString("hitreaction")
+    if hr == "TRClimbWallReactionStart" then
+        if zombie:getVariableBoolean("TRClimbWallStarted") then
+            -- Start 애님 종료 -> 담장 관통 허용 + 성공 애님으로 전환 (100%)
+            if zombie:isCollidable() then zombie:setCollidable(false) end
+            zombie:setVariable("hitreaction", "TRClimbWallReactionSuccess")
+        end
+        return
+    elseif hr == "TRClimbWallReactionSuccess" then
+        if not zombie:getVariableBoolean("TRClimbWallStarted") then
+            -- Success 애님 종료 -> 정리. collidable 복구는 여기서 반드시 수행
+            zombie:setCollidable(true)
+            zombie:setVariable("hitreaction", nil)
+        end
+        return
+    end
+
+    -- 트리거 판정 (원본 ClimbWallFunction 이식: 전방 3타일 박스에서
+    -- FenceTypeHigh 오브젝트 탐색 -> 정면 응시 유도 -> 충돌 프레임에 발동)
+    if zombie:isOnFloor() or zombie:isStaggerBack() then return end
+    if not zombie:getTarget() then return end
+    local baseSq = zombie:getCurrentSquare()
+    if not baseSq then return end
+
+    local fdx, fdy, countX, countY
+    if zombie:getForwardDirection():getX() >= 0 then
+        fdx, countX = math.ceil(zombie:getForwardDirection():getX()), 1
+    else
+        fdx, countX = math.floor(zombie:getForwardDirection():getX()), -1
+    end
+    if zombie:getForwardDirection():getY() >= 0 then
+        fdy, countY = math.ceil(zombie:getForwardDirection():getY()), 1
+    else
+        fdy, countY = math.floor(zombie:getForwardDirection():getY()), -1
+    end
+
+    local cell = getCell()
+    for x = 0, fdx + countX * 3, countX do
+        for y = 0, fdy + countY * 3, countY do
+            local square = cell:getGridSquare(baseSq:getX() + x, baseSq:getY() + y, baseSq:getZ())
+            if square then
+                local objects = square:getObjects()
+                for i = 0, objects:size() - 1 do
+                    local object = objects:get(i)
+                    local properties = object:getProperties()
+                    if properties and properties:Val("FenceTypeHigh") then
+                        -- 경로탐색이 담장을 우회하지 않도록 직진 상태로 고정
+                        if zombie:getVariableBoolean("bPathfind")
+                            or not zombie:getVariableBoolean("bMoving") then
+                            zombie:setVariable("bPathfind", false)
+                            zombie:setVariable("bMoving", true)
+                        end
+                        if not zombie:isFacingObject(object, 0.5)
+                            and not zombie:getVariableBoolean("TRClimbWallStarted") then
+                            zombie:faceThisObject(object)
+                        end
+                        if zombie:isCollidedThisFrame()
+                            and zombie:isFacingObject(object, 0.5)
+                            and not zombie:getVariableBoolean("TRClimbWallStarted") then
+                            zombie:setVariable("hitreaction", "TRClimbWallReactionStart")
+                        end
+                        return
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ── 트레이서: 창문 즉시파괴 + 볼트 관통 ─────────────────────────────────────
+-- Stay Away From Windows(충돌 즉시 파괴) + DiveThroughWindows(볼트 관통) 결합.
+-- 닫힌 창문은 충돌 이벤트가 뜨는 순간 깨고, 같은 프레임에 climbOverFence를
+-- 호출해 thump/climbwindow를 거치지 않고 바로 Sprint 볼트로 통과한다.
+-- (열린/이미 깨진 창문은 충돌이 발생하지 않고 AI가 climbwindow 스테이트로
+--  진입 -> climbwindow/TR* 노드가 같은 Sprint 볼트 애님을 재생.)
+local function onTracerCollide(character, collider)
+    if not instanceof(character, "IsoZombie") then return end
+    if not instanceof(collider, "IsoWindow") then return end
+    if not isTracer(character) then return end
+    if character:getVariableBoolean("ClimbingFence") then return end -- 볼트 중 재트리거 방지
+    if collider:isBarricaded() then return end   -- 바리케이드는 바닐라 thump에 위임
+
+    if not collider:IsOpen() and not collider:isSmashed() then
+        if collider:isInvincible() then return end
+        collider:smashWindow()
+        collider:update()
+    end
+
+    -- 창문의 부착 방향(N창/W창)과 좀비 위치로 클라임 방향을 산출해 담장 볼트
+    -- 강제. climbOverFence는 목적지 walkable만 검사하는 제네릭 경로라 좀비에
+    -- 안전하다 (ClimbOverWallState 하드캐스트 크래시 경로와 무관).
+    local wsq = collider:getSquare()
+    local zsq = character:getCurrentSquare()
+    if not wsq or not zsq or wsq:getZ() ~= zsq:getZ() then return end
+    local dir
+    if collider:getNorth() then
+        dir = (zsq:getY() >= wsq:getY()) and IsoDirections.N or IsoDirections.S
+    else
+        dir = (zsq:getX() >= wsq:getX()) and IsoDirections.W or IsoDirections.E
+    end
+    character:climbOverFence(dir)
+end
+Events.OnObjectCollide.Add(onTracerCollide)
+
+-- 피격 시 클라임 강제 해제 (ZombieClimbsWall FixClimbHit 이식) - 애님이 끊겨도
+-- collidable=false로 남아 영구 관통 상태가 되는 것을 차단.
+Events.OnHitZombie.Add(function(zombie)
+    if zombie:isVariable("hitreaction", "TRClimbWallReactionStart")
+        or zombie:isVariable("hitreaction", "TRClimbWallReactionSuccess") then
+        zombie:setCollidable(true)
+        zombie:setVariable("TRClimbWallStarted", false)
+        zombie:setVariable("hitreaction", nil)
+    end
+end)
+
+-- ── 트레이서: 매 틱 적용기 ──────────────────────────────────────────────────
+local function updateTracer(zombie)
+    -- climbfence/climbwindow TR* 애님 노드 게이팅용 (매 틱 세팅)
+    zombie:setVariable("PuppetTracer", true)
+
+    -- 낙하 무력화: DoLand()가 fallTime>50이면 확률로 bHardFall을 세워 엎어짐
+    -- 분기를 태운다. 매 틱 억제해 착지 후 즉시 추격을 잇는다.
+    if zombie:getVariableBoolean("bHardFall") then
+        zombie:setVariable("bHardFall", false)
+    end
+
+    -- 파쿠르 실패 0%: 스테이트 enter()가 확정한 outcome(lunge/fall/obstacle)을
+    -- 매 틱 success로 덮어쓴다 (OnZombieUpdate는 enter() 이후 실행 - 검증됨).
+    -- 단 "falling"(반대편 바닥 없음)은 실패가 아니라 지형 낙하이므로 유지 -
+    -- 덮어쓰면 허공에서 착지 모션이 재생된다.
+    local state = zombie:getCurrentState()
+    if state == ClimbOverFenceState.instance() then
+        if not zombie:isVariable("ClimbFenceOutcome", "falling") then
+            zombie:setVariable("ClimbFenceOutcome", "success")
+        end
+    elseif state == ClimbThroughWindowState.instance() then
+        if not zombie:isVariable("ClimbWindowOutcome", "falling") then
+            zombie:setVariable("ClimbWindowOutcome", "success")
+        end
+    end
+
+    -- 폴백: 충돌 이벤트를 놓치고 thump 상태로 들어간 경우에도 창문은 즉시
+    -- 파괴한다 (다음 프레임 충돌 볼트 or climbwindow로 자연 연결).
+    local thumpTarget = zombie:getThumpTarget()
+    if thumpTarget and instanceof(thumpTarget, "IsoWindow")
+        and not thumpTarget:isDestroyed() then
+        thumpTarget:smashWindow()
+    end
+
+    updateTracerWallClimb(zombie)
+end
 -- ── 로치: 크롤 상태 유지 ─────────────────────────────────────────────────────
 -- CDDA_UpdateZombie의 walktype 4 처리와 동일 패턴 — 상태가 풀려도 매 틱 복구.
 local function updateRoach(zombie)
@@ -334,6 +520,8 @@ local function applyMutant(zombie)
         updateBrute(zombie)
     elseif kind == "roach" then
         updateRoach(zombie)
+    elseif kind == "tracer" then
+        updateTracer(zombie)
     end
 end
 Events.OnZombieUpdate.Add(applyMutant)
@@ -362,6 +550,7 @@ local NAME_KEY = {
     brute    = "IGUI_mutant_name_brute",
     roach    = "IGUI_mutant_name_roach",
     sprinter = "IGUI_mutant_name_sprinter",
+    tracer   = "IGUI_mutant_name_tracer",
 }
 
 local TAG_COLOR = {      -- 스크리머/브루트는 CDDA 원본 색, 로치는 바퀴 갈색
@@ -369,6 +558,7 @@ local TAG_COLOR = {      -- 스크리머/브루트는 CDDA 원본 색, 로치는
     screamer = {139, 0, 81},
     roach    = {181, 101, 29},
     sprinter = {255, 165, 0},
+    tracer   = {0, 200, 180},   -- 파쿠르 테마 청록
 }
 
 local _showTags = {}     -- [onlineID] = { zombie=, ttl=, tdo=TextDrawObject }
