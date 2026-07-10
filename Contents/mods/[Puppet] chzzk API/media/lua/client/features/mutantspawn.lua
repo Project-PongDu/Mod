@@ -172,6 +172,8 @@ end
 local function updateTracerWallClimb(zombie)
     local hr = zombie:getVariableString("hitreaction")
     if hr == "TRClimbWallReactionStart" then
+        zombie:setVariable("bPathfind", false)
+        zombie:setVariable("bMoving", true)
         if zombie:getVariableBoolean("TRClimbWallStarted") then
             -- Start 애님 종료 -> 담장 관통 허용 + 성공 애님으로 전환 (100%)
             if zombie:isCollidable() then zombie:setCollidable(false) end
@@ -179,6 +181,8 @@ local function updateTracerWallClimb(zombie)
         end
         return
     elseif hr == "TRClimbWallReactionSuccess" then
+        zombie:setVariable("bPathfind", false)
+        zombie:setVariable("bMoving", true)
         if not zombie:getVariableBoolean("TRClimbWallStarted") then
             -- Success 애님 종료 -> 정리. collidable 복구는 여기서 반드시 수행
             zombie:setCollidable(true)
@@ -302,10 +306,12 @@ local function updateTracer(zombie)
     -- 덮어쓰면 허공에서 착지 모션이 재생된다.
     local state = zombie:getCurrentState()
     if state == ClimbOverFenceState.instance() then
+        zombie:setVariable("VaultOverSprint", true)
         if not zombie:isVariable("ClimbFenceOutcome", "falling") then
             zombie:setVariable("ClimbFenceOutcome", "success")
         end
     elseif state == ClimbThroughWindowState.instance() then
+        zombie:setVariable("VaultOverSprint", true)
         if not zombie:isVariable("ClimbWindowOutcome", "falling") then
             zombie:setVariable("ClimbWindowOutcome", "success")
         end
