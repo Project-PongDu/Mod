@@ -163,36 +163,48 @@ local function isTracer(zombie)
         and md["PuppetMutantZid"] == zombie:getOnlineID()
 end
 
--- ── 트레이서: 높은담장 클라임 (ZombieClimbsWall 이식) ───────────────────────
--- 원본 흐름: 충돌 프레임에 hitreaction=Start 세팅 -> Start 애님 종료 시
--- TRClimbWallStarted=true -> 확률 굴림 후 Success/Fail 분기. 트레이서는 100%
--- 성공이므로 굴림을 제거하고 Started=true 확인 즉시 Success로 전환한다.
--- 원본에서 setCollidable(false) 복구가 OnHitZombie에만 있던 결함은 Success
--- 애님 종료(Started=false 복귀) 시점에 반드시 복구하는 것으로 보강.
+-- ── 트레이서: 높은담장 클라임 (ZombieClimbsWall 이식, 리키잉 버전) ──────────
+-- ※핵심 교훈: 진행 판정을 hitreaction 문자열로 하면 안 된다. hitreaction은
+--   MP 동기화 변수(NetworkVariables.HitReaction)인 데다 ZombieHitReactionState.
+--   exit()가 ""로 강제 클리어할 수 있어서, 상태 키로 쓰면 지워지는 순간
+--   TRClimbWallStarted=true만 영구 잔류하는 데드락에 빠진다 (담장 앞에서
+--   '아직 넘는 중'처럼 굳는 증상). 원본 ZombieClimbsWall처럼 진행 판정은
+--   Started 변수로만 하고, hitreaction은 매 틱 재주입해 자가복구시킨다.
 local function updateTracerWallClimb(zombie)
-    local hr = zombie:getVariableString("hitreaction")
-    if hr == "TRClimbWallReactionStart" then
+    -- 담장 볼트/창문 통과 스테이트 중에는 벽클라임 로직 전체 배제
+    -- (해당 스테이트도 collidable을 만지므로 아래 정리 분기와 간섭 금지)
+    local st = zombie:getCurrentState()
+    if st == ClimbOverFenceState.instance()
+        or st == ClimbThroughWindowState.instance() then
+        return
+    end
+
+    -- [진행 구간] Start 애님 종료(Started=true) ~ Success 애님 종료
+    if zombie:getVariableBoolean("TRClimbWallStarted") then
         zombie:setVariable("bPathfind", false)
         zombie:setVariable("bMoving", true)
-        if zombie:getVariableBoolean("TRClimbWallStarted") then
-            -- Start 애님 종료 -> 담장 관통 허용 + 성공 애님으로 전환 (100%)
-            if zombie:isCollidable() then zombie:setCollidable(false) end
+        if zombie:isCollidable() then zombie:setCollidable(false) end
+        -- 트레이서는 100% 성공: 굴림 없이 즉시 Success 노드 조건 재주입.
+        -- 엔진이 hitreaction을 지워도 다음 틱에 복구된다.
+        if not zombie:isVariable("hitreaction", "TRClimbWallReactionSuccess") then
             zombie:setVariable("hitreaction", "TRClimbWallReactionSuccess")
         end
         return
-    elseif hr == "TRClimbWallReactionSuccess" then
-        zombie:setVariable("bPathfind", false)
-        zombie:setVariable("bMoving", true)
-        if not zombie:getVariableBoolean("TRClimbWallStarted") then
-            -- Success 애님 종료 -> 정리. collidable 복구는 여기서 반드시 수행
-            zombie:setCollidable(true)
+    end
+
+    -- [정리 구간] Started=false인데 collidable이 꺼져 있으면 Success 애님이
+    -- 방금 끝난 것 -> 관통 상태 복구 + hitreaction 잔여값 제거
+    if not zombie:isCollidable() then
+        zombie:setCollidable(true)
+        if zombie:isVariable("hitreaction", "TRClimbWallReactionSuccess") then
             zombie:setVariable("hitreaction", nil)
         end
         return
     end
 
-    -- 트리거 판정 (원본 ClimbWallFunction 이식: 전방 3타일 박스에서
-    -- FenceTypeHigh 오브젝트 탐색 -> 정면 응시 유도 -> 충돌 프레임에 발동)
+    -- [트리거 스캔] 전방 3타일 박스에서 FenceTypeHigh 탐색 -> 정면 응시 유도
+    -- -> 충돌 프레임에 발동 (원본 ClimbWallFunction 이식). 이 지점은
+    -- Started=false 확정 구간이므로 재트리거가 항상 열려 있다.
     if zombie:isOnFloor() or zombie:isStaggerBack() then return end
     if not zombie:getTarget() then return end
     local baseSq = zombie:getCurrentSquare()
@@ -226,13 +238,11 @@ local function updateTracerWallClimb(zombie)
                             zombie:setVariable("bPathfind", false)
                             zombie:setVariable("bMoving", true)
                         end
-                        if not zombie:isFacingObject(object, 0.5)
-                            and not zombie:getVariableBoolean("TRClimbWallStarted") then
+                        if not zombie:isFacingObject(object, 0.5) then
                             zombie:faceThisObject(object)
                         end
                         if zombie:isCollidedThisFrame()
-                            and zombie:isFacingObject(object, 0.5)
-                            and not zombie:getVariableBoolean("TRClimbWallStarted") then
+                            and zombie:isFacingObject(object, 0.5) then
                             zombie:setVariable("hitreaction", "TRClimbWallReactionStart")
                         end
                         return
@@ -281,7 +291,9 @@ Events.OnObjectCollide.Add(onTracerCollide)
 -- 피격 시 클라임 강제 해제 (ZombieClimbsWall FixClimbHit 이식) - 애님이 끊겨도
 -- collidable=false로 남아 영구 관통 상태가 되는 것을 차단.
 Events.OnHitZombie.Add(function(zombie)
-    if zombie:isVariable("hitreaction", "TRClimbWallReactionStart")
+    -- hitreaction은 피격 순간 엔진이 먼저 지웠을 수 있으므로 Started도 함께 본다
+    if zombie:getVariableBoolean("TRClimbWallStarted")
+        or zombie:isVariable("hitreaction", "TRClimbWallReactionStart")
         or zombie:isVariable("hitreaction", "TRClimbWallReactionSuccess") then
         zombie:setCollidable(true)
         zombie:setVariable("TRClimbWallStarted", false)
@@ -306,12 +318,10 @@ local function updateTracer(zombie)
     -- 덮어쓰면 허공에서 착지 모션이 재생된다.
     local state = zombie:getCurrentState()
     if state == ClimbOverFenceState.instance() then
-        zombie:setVariable("VaultOverSprint", true)
         if not zombie:isVariable("ClimbFenceOutcome", "falling") then
             zombie:setVariable("ClimbFenceOutcome", "success")
         end
     elseif state == ClimbThroughWindowState.instance() then
-        zombie:setVariable("VaultOverSprint", true)
         if not zombie:isVariable("ClimbWindowOutcome", "falling") then
             zombie:setVariable("ClimbWindowOutcome", "success")
         end

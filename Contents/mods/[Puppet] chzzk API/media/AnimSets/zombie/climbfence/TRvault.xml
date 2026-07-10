@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 트레이서 낮은담장/창문개구부 Sprint 볼트 - 바닐라 플레이어
+     player/climbfence/vaultOverSprint.xml의 단일노드 구조를 그대로 미러링.
+     핵심: ClimbFenceStarted를 절대 true로 세우지 않는다. Started=true가 되면
+     ClimbOverFenceState.execute()의 좀비 슬라이드/클램프 블록이 깨어나 위치를
+     시작칸+1타일로 강제 견인해 플레이어보다 1타일 짧게 착지한다(구 TRstart/
+     TRend 2노드 구조의 결함). 플레이어처럼 이동은 100% 루트모션에 맡기고
+     ClimbFenceFinished를 클립 50% 지점에 쏴서 스테이트를 조기 종료한다.
+     (VaultOverSprint 조건만 PuppetTracer로 치환 - 좀비는 bSprinting이 안 서서
+     엔진이 VaultOverSprint 변수를 세워주지 않기 때문.) -->
+<animNode>
+	<m_Name>TRvault</m_Name>
+	<m_AnimName>Bob_ValultOver_Sprint</m_AnimName>
+	<m_Priority>5</m_Priority>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_SpeedScale>0.80</m_SpeedScale>
+	<m_BlendTime>0.30</m_BlendTime>
+	<m_Conditions>
+		<m_Name>PuppetTracer</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>ClimbFenceStarted</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>false</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>ClimbFenceOutcome</m_Name>
+		<m_Type>STRING</m_Type>
+		<m_StringValue>success</m_StringValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_TimePc>0.5</m_TimePc>
+		<m_ParameterValue>ClimbFenceFinished=true</m_ParameterValue>
+	</m_Events>
+	<m_Events>
+		<m_EventName>SetCollidable</m_EventName>
+		<m_TimePc>0.5</m_TimePc>
+		<m_ParameterValue>true</m_ParameterValue>
+	</m_Events>
+	<m_Events>
+		<m_EventName>PlayFenceSound</m_EventName>
+		<m_Time>Start</m_Time>
+		<m_ParameterValue>ClimbOverFenceLow</m_ParameterValue>
+	</m_Events>
+</animNode>
