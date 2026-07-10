@@ -99,11 +99,14 @@ local function initMutant(zombie, kind)
         -- 부활한 뛰좀 재적용 경로 (원 스폰은 서버 makeSprinter가 처리)
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
     elseif kind == "tracer" then
-        -- 트레이서: 스프린터 워크타입. ※주의: 좀비는 bSprinting이 아닌 bRunning
-        -- 기반이라 VaultOverSprint 플래그가 자동으로 붙지 않는다(1차 시도의 오판).
-        -- Sprint 볼트 애님은 PuppetTracer 조건의 TR* 애님 노드가 강제하고,
-        -- 파쿠르 로직 전체는 아래 트레이서 파쿠르 시스템 절이 담당.
+        -- 트레이서: 스프린터 워크타입 + 실제 이동속도.
+        -- ※주의(2차 정정): zombie.speedType = 1 은 크래시남(x13 리포트) -
+        -- speedType은 registerVariableCallbacks()에 안 걸린 순수 Java int
+        -- 필드라 Lua 점(dot) 대입 자체가 불가(Kahlua tableSet 실패, non-table).
+        -- 실이동속도의 진짜 원인은 speedType이 아니라 DoZombieSpeeds()가
+        -- 갱신하는 AnimFrameIncrease였으므로 그쪽만 직접 호출하면 충분하다.
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
+        zombie:DoZombieSpeeds(2)
     end
     print("[PuppetMutant] init " .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
     zombie:setVariable("PuppetMutantInit", true)
@@ -305,6 +308,11 @@ end)
 local function updateTracer(zombie)
     -- climbfence/climbwindow TR* 애님 노드 게이팅용 (매 틱 세팅)
     zombie:setVariable("PuppetTracer", true)
+
+    -- 밀치기/약한 피격 넉다운 면역 (브루트 keepstand와 동일 기법).
+    -- 엔진이 넉다운을 강한 피격과 구분하는 별도 플래그를 안 두므로
+    -- 전체 넉다운 면역이 된다.
+    zombie:setKnockedDown(false)
 
     -- 낙하 무력화: DoLand()가 fallTime>50이면 확률로 bHardFall을 세워 엎어짐
     -- 분기를 태운다. 매 틱 억제해 착지 후 즉시 추격을 잇는다.
