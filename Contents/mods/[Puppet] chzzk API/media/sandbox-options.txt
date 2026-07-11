@@ -34,7 +34,7 @@ option Hitmans.Donation_MutantNameTag = {
 
 option Hitmans.Donation_VehicleDropPool = {
     type = string,
-    default = Base.pickupvan_lights_police;Base.pickupvan_mccoy;Base.pickupvan_smashed;Base.pickupvanlights_smashed;Base.pickuptruck;Base.pickuptruck_lights;Base.pickuptruck_lights_fire;Base.pickuptruck_mccoy;Base.pickuptruck_smashed;Base.pickuptrucklights_smashed;Base.pickupvan;Base.pickupvan_lights;Base.pickupvan_lights_fire,
+    default = Base.PickUpTruck;Base.PickUpTruckLights;Base.PickUpTruckLightsFire;Base.PickUpTruckMccoy;Base.PickUpVan;Base.PickUpVanLights;Base.PickUpVanLightsFire;Base.PickUpVanLightsPolice;Base.PickUpVanMccoy,
     page = Hitmans_Donation, translation = Hitmans_Donation_VehicleDropPool,
 }
 
