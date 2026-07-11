@@ -52,16 +52,17 @@ end
 
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
--- immediate=true 인 기능은 안전지대 안에서도 즉시 발동 (백신/추방/백룸/미사일 원래 특성 유지).
+-- immediate=true 인 기능은 안전지대 안에서도 즉시 발동. zombie_roulette / sprinter5 /
+-- mutant_spawn 이 셋만 예외로 안전지대 밖으로 나갈 때까지 대기(immediate=false).
 local rewardHandlers = {
     ["debuff_roulette"] = {
-        immediate = false,
+        immediate = true,
         fn = function()
             eventUtils.a(false)                           -- Debuff Roulette
         end,
     },
     ["buff_roulette"] = {
-        immediate = false,
+        immediate = true,
         fn = function()
             eventUtils.a(true)                            -- Buff Roulette
         end,
@@ -83,7 +84,7 @@ local rewardHandlers = {
         end,
     },
     ["bandit_melee"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             bandit.a(11, sender)                          -- Bandit
             global.processingEvent = false
@@ -98,7 +99,7 @@ local rewardHandlers = {
         end,
     },
     ["bandit_ranged"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             bandit.a(15, sender)                          -- Bandit (ranged)
             global.processingEvent = false
@@ -140,7 +141,7 @@ local rewardHandlers = {
         end,
     },
     ["random_skill_potion"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             local itemId = pickSerum()
             local item = global.player:getInventory():AddItem("t3chzzkDonation." .. itemId)
@@ -149,7 +150,7 @@ local rewardHandlers = {
         end,
     },
     ["rise_up_dead_man"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             riseup.a(global.player)
             global.processingEvent = false
@@ -173,7 +174,7 @@ local rewardHandlers = {
         end,
     },
     ["vehicle_drop"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             -- 개봉하면 t3VehicleDrop.OpenKit이 실행되어 근처 실외에 차량을 소환한다.
             local item = global.player:getInventory():AddItem("t3chzzkDonation.vehicle_drop_kit")
@@ -199,14 +200,14 @@ local rewardHandlers = {
         end,
     },
     ["secret_passage_kit"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             -- TODO: 비밀통로 공사키트
             global.processingEvent = false
         end,
     },
     ["horde_night"] = {
-        immediate = false,
+        immediate = true,
         fn = function(sender)
             -- TODO: 호드나이트
             global.processingEvent = false
@@ -220,8 +221,8 @@ function rewardManager.isValid(featureId)
 end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]
--- immediate=true 기능(백신/추방/백룸/미사일/부활티켓)은 안전지대 안에서도 즉시 발동.
--- 나머지는 플레이어가 안전지대를 벗어날 때까지 대기 (5초마다 재확인).
+-- immediate=true 기능은 안전지대 안에서도 즉시 발동 (zombie_roulette / sprinter5 /
+-- mutant_spawn 제외 전부). 이 3개만 플레이어가 안전지대를 벗어날 때까지 대기 (5초마다 재확인).
 function rewardManager.a(featureId, sender, callback)
     global.player = getPlayer()
     if not global.player then return end
