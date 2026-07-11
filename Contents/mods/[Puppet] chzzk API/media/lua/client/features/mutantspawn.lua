@@ -159,6 +159,21 @@ end
 
 -- 이벤트 핸들러(OnObjectCollide 등)용 트레이서 판별. applyMutant 경로 밖에서도
 -- 쓰이므로 modData 직조회 + 풀 재활용 스테일 가드(Zid 대조)를 그대로 적용.
+-- 진단 로그 스위치: 콘솔에서 Tracer.Verbose = true 로 켜기 (기본 꺼짐).
+-- trLog는 좀비별x메시지별 0.5초 스로틀 - 콘솔 잠김 방지.
+Tracer = Tracer or {}
+Tracer.Verbose = false
+local trLogLast = {}
+local function trLog(zombie, msg)
+    if not Tracer.Verbose then return end
+    local zid = zombie:getOnlineID()
+    local now = getTimestampMs()
+    local key = tostring(zid) .. msg
+    if trLogLast[key] and now - trLogLast[key] < 500 then return end
+    trLogLast[key] = now
+    print("[Tracer] zid=" .. tostring(zid) .. " " .. msg)
+end
+
 local function isTracer(zombie)
     local md = zombie:getModData()
     return md["PuppetMutant"] == "tracer"
@@ -181,9 +196,8 @@ local function updateTracerWallClimb(zombie)
         return
     end
 
-    -- 벽 클라임(z+1)/낙법 구르기 진행 중에는 높은담장 로직 배제 (상호 배타)
-    if zombie:getVariableBoolean("TRWallUpActive")
-        or zombie:getVariableBoolean("TRFallRolling") then
+    -- 벽 클라임(z+1) 진행 중에는 높은담장 로직 배제 (상호 배타)
+    if zombie:getVariableBoolean("TRWallUpActive") then
         return
     end
 
@@ -278,20 +292,62 @@ local function trWallUpBlockedN(square)
         or square:Is(IsoFlagType.doorN) or square:Is(IsoFlagType.HoppableN)
 end
 
+-- 클라임 중 텔레포트 실시간 감시 큐. 좀비가 hitreaction 상태인 동안
+-- OnZombieUpdate가 멎으므로(IsoZombie:2096 배제 목록), 상태와 무관하게
+-- 매 틱 도는 OnTick으로 TRWallUpDone(애님 30% 지점 발화)을 잡아
+-- 원본 ClimbWall과 동일한 미드애님 텔레포트를 수행한다.
+local trWallUpQueue = {}
+
+local function trWallUpTeleport(zombie)
+    zombie:setVariable("TRWallUpDone", false)
+    zombie:setVariable("TRWallUpActive", false)
+    trLog(zombie, "wallup: DONE teleport z=" .. tostring(zombie:getVariableFloat("TRWallUpZ", -1)))
+    zombie:setX(zombie:getVariableFloat("TRWallUpX", zombie:getX()))
+    zombie:setY(zombie:getVariableFloat("TRWallUpY", zombie:getY()))
+    zombie:setZ(zombie:getVariableFloat("TRWallUpZ", zombie:getZ()))
+end
+
+Events.OnTick.Add(function()
+    for zid, zombie in pairs(trWallUpQueue) do
+        if zombie:isDead() or not zombie:getCurrentSquare()
+            or not zombie:getVariableBoolean("TRWallUpActive") then
+            -- 사망/피격중단/완료 후 잔여 엔트리 정리
+            trWallUpQueue[zid] = nil
+        elseif zombie:getVariableBoolean("TRWallUpDone") then
+            trWallUpTeleport(zombie)
+            trWallUpQueue[zid] = nil
+        end
+    end
+end)
+
 local function updateTracerWallUp(zombie)
     local st = zombie:getCurrentState()
     if st == ClimbOverFenceState.instance()
         or st == ClimbThroughWindowState.instance() then
         return
     end
-    -- 높은담장 관통/낙법 진행 중 배제 (상호 배타)
+    -- 높은담장 관통 진행 중 배제 (상호 배타)
     if zombie:getVariableBoolean("TRClimbWallStarted")
-        or not zombie:isCollidable()
-        or zombie:getVariableBoolean("TRFallRolling") then
+        or not zombie:isCollidable() then
         return
     end
 
-    -- [진행] Start 애님 종료(Started=true) ~ Success 애님 종료: Success 재주입
+    -- [완료 폴백] 정상 경로는 OnTick 큐가 애님 30% 지점에 미드애님 텔레포트를
+    -- 수행한다(위 trWallUpQueue 주석 참고). 이 분기는 OnTick이 어떤 이유로
+    -- 놓쳤을 때의 안전망 - 상태 탈출 후 OnZombieUpdate가 재개되면 잡힌다.
+    if zombie:getVariableBoolean("TRWallUpDone") then
+        trWallUpTeleport(zombie)
+        trWallUpQueue[zombie:getOnlineID()] = nil
+        if zombie:isVariable("hitreaction", "TRWallUpReactionStart")
+            or zombie:isVariable("hitreaction", "TRWallUpReactionSuccess") then
+            zombie:setVariable("hitreaction", nil)
+        end
+        return
+    end
+
+    -- [진행] Start 애님 종료(Started=true) ~ Success 애님 종료: Success 재주입.
+    -- 이 분기는 두 애님 '사이의 틈'(hitreaction 상태가 잠깐 풀리는 프레임)에서
+    -- 실행된다 - 그 틈이 이 흐름이 동작하는 유일한 창구.
     if zombie:getVariableBoolean("TRWallUpStarted") then
         if not zombie:isVariable("hitreaction", "TRWallUpReactionSuccess") then
             zombie:setVariable("hitreaction", "TRWallUpReactionSuccess")
@@ -299,71 +355,90 @@ local function updateTracerWallUp(zombie)
         return
     end
 
-    -- [완료/중단] Active인데 Started=false로 복귀한 프레임
+    -- [중단 감지] Active인데 Done/Started 모두 아님
     if zombie:getVariableBoolean("TRWallUpActive") then
-        zombie:setVariable("TRWallUpActive", false)
-        if zombie:isVariable("hitreaction", "TRWallUpReactionSuccess") then
-            -- 정상 완료: z+1 착지칸으로 텔레포트 (ClimbWall 원본과 동일 방식)
-            zombie:setX(zombie:getVariableFloat("TRWallUpX", zombie:getX()))
-            zombie:setY(zombie:getVariableFloat("TRWallUpY", zombie:getY()))
-            zombie:setZ(zombie:getVariableFloat("TRWallUpZ", zombie:getZ()))
-            zombie:setVariable("hitreaction", nil)
-        elseif zombie:isVariable("hitreaction", "TRWallUpReactionStart") then
-            -- Start 애님이 아직 진행 중인데 Active 플래그만 본 경우: 복원
-            zombie:setVariable("TRWallUpActive", true)
+        if zombie:isVariable("hitreaction", "TRWallUpReactionStart") then
+            return -- Start 애님 대기/재생 중: 정상
         end
-        -- 그 외(hitreaction이 외부 요인으로 지워짐): 텔레포트 없이 중단 -
-        -- 다음 충돌 프레임에 자연 재트리거
+        -- 외부 요인으로 흐름이 끊김: 텔레포트 없이 중단 - 다음 충돌에 재트리거
+        zombie:setVariable("TRWallUpActive", false)
+        trLog(zombie, "wallup: aborted (flow broken)")
         return
     end
 
-    -- [트리거] 충돌 프레임 + 정면 4방향 + z+1 착지칸 유효
+    -- [트리거] 원본 Climb.OnPlayerUpdate + isClimbableWallInBounds 1:1 이식.
+    -- (키 입력 -> 충돌 프레임으로 치환한 것 외에 판정 기하는 동일)
     if zombie:isOnFloor() or zombie:isStaggerBack() then return end
     if not zombie:getTarget() then return end
     if not zombie:isCollidedThisFrame() then return end
     local baseSq = zombie:getCurrentSquare()
     if not baseSq then return end
+    if baseSq:HasStairs() then return end -- 원본: 계단 위 발동 금지
     if baseSq:getZ() >= 7 then return end -- B41 최상층 한계
 
-    -- 전방 지배축으로 4방향 결정 (대각 애매 구간은 스킵 - 원본도 4방향 전제)
-    local fx = zombie:getForwardDirection():getX()
-    local fy = zombie:getForwardDirection():getY()
-    local dx, dy = 0, 0
-    if math.abs(fx) >= math.abs(fy) then
-        if math.abs(fx) < 0.5 then return end
-        dx = (fx > 0) and 1 or -1
-    else
-        if math.abs(fy) < 0.5 then return end
-        dy = (fy > 0) and 1 or -1
-    end
-
+    -- 원본과 동일: float 전방 0.5 지점으로 목표칸 산출 (4방향 스냅 없음)
+    local fwd = zombie:getForwardDirection()
+    local forwardX = zombie:getX() + fwd:getX() * 0.5
+    local forwardY = zombie:getY() + fwd:getY() * 0.5
     local cell = getCell()
-    local sx, sy, sz = baseSq:getX(), baseSq:getY(), baseSq:getZ()
-    local target = cell:getGridSquare(sx + dx, sy + dy, sz + 1)
-    if not target then return end
-    -- 착지칸: 바닥 있고 비점유 (원본 isClimbableWallInBounds 판정)
-    if not target:TreatAsSolidFloor() then return end
-    if target:isSolid() or target:isSolidTrans() or target:HasStairs() then return end
-    -- 머리 위 칸: 바닥/장애물 없어야 통과 가능
-    local up = cell:getGridSquare(sx, sy, sz + 1)
-    if up and (up:TreatAsSolidFloor() or up:isSolid() or up:isSolidTrans()) then return end
-    -- 이동 방향별 모서리 차단 플래그 (원본 blocked 판정 그대로)
-    if dx > 0 then
-        if trWallUpBlockedW(target) then return end
-    elseif dx < 0 then
-        if trWallUpBlockedW(up) then return end
-    elseif dy > 0 then
-        if trWallUpBlockedN(target) then return end
-    else
-        if trWallUpBlockedN(up) then return end
+    local target = cell:getGridSquare(forwardX, forwardY, baseSq:getZ() + 1)
+    if not target then
+        trLog(zombie, "wallup: no target square z+1")
+        return
+    end
+    if not target:TreatAsSolidFloor() then
+        trLog(zombie, "wallup: target no solid floor")
+        return
+    end
+    if target:isSolidTrans() or target:isSolid() or target:HasStairs() then
+        trLog(zombie, "wallup: target occupied/stairs")
+        return
+    end
+    local sx, sy = baseSq:getX(), baseSq:getY()
+    local tx, ty = target:getX(), target:getY()
+    if sx == tx and sy == ty then return end -- 같은 수직선상 (원본 동일)
+    local up = cell:getGridSquare(sx, sy, baseSq:getZ() + 1)
+    if up and (up:TreatAsSolidFloor() or up:isSolid() or up:isSolidTrans()) then
+        trLog(zombie, "wallup: blocked overhead")
+        return
     end
 
-    -- 발동: 착지 좌표 저장 후 Start 애님
-    zombie:setVariable("TRWallUpX", (sx + dx) + 0.5)
-    zombie:setVariable("TRWallUpY", (sy + dy) + 0.5)
-    zombie:setVariable("TRWallUpZ", sz + 1)
+    -- 방향별 모서리 차단 플래그 (원본 분기 구조 그대로).
+    -- ※대각 접근(X,Y 둘 다 다름)은 두 분기 어디에도 안 걸려 canClimb=true
+    -- 초기값 그대로 통과한다 - 원본의 동작을 의도적으로 보존. 플레이어가
+    -- 2층 울타리(Hoppable) 가장자리도 각도만 틀면 타고 오르는 이유가 이
+    -- 루프홀이며, "원본과 100% 동일" 요구사항의 핵심.
+    local canClimb = true
+    if ty == sy then
+        if tx > sx then
+            canClimb = not trWallUpBlockedW(target)
+        elseif tx < sx then
+            canClimb = not up or not trWallUpBlockedW(up)
+        else
+            canClimb = false
+        end
+    elseif tx == sx then
+        if ty > sy then
+            canClimb = not trWallUpBlockedN(target)
+        elseif ty < sy then
+            canClimb = not up or not trWallUpBlockedN(up)
+        else
+            canClimb = false
+        end
+    end
+    if not canClimb then
+        trLog(zombie, "wallup: edge flag blocked")
+        return
+    end
+
+    -- 발동: 원본과 동일하게 float 전방 좌표를 착지점으로 저장
+    zombie:setVariable("TRWallUpX", forwardX)
+    zombie:setVariable("TRWallUpY", forwardY)
+    zombie:setVariable("TRWallUpZ", baseSq:getZ() + 1)
     zombie:setVariable("TRWallUpActive", true)
     zombie:setVariable("hitreaction", "TRWallUpReactionStart")
+    trWallUpQueue[zombie:getOnlineID()] = zombie
+    trLog(zombie, "wallup: TRIGGER -> (" .. forwardX .. "," .. forwardY .. "," .. (baseSq:getZ() + 1) .. ")")
 end
 
 -- ── 트레이서: 창문 즉시파괴 + 볼트 관통 ─────────────────────────────────────
@@ -417,15 +492,9 @@ Events.OnHitZombie.Add(function(zombie)
         or zombie:getVariableBoolean("TRWallUpStarted") then
         zombie:setVariable("TRWallUpActive", false)
         zombie:setVariable("TRWallUpStarted", false)
+        zombie:setVariable("TRWallUpDone", false)
         if zombie:isVariable("hitreaction", "TRWallUpReactionStart")
             or zombie:isVariable("hitreaction", "TRWallUpReactionSuccess") then
-            zombie:setVariable("hitreaction", nil)
-        end
-    end
-    -- 낙법 구르기 피격 중단
-    if zombie:getVariableBoolean("TRFallRolling") then
-        zombie:setVariable("TRFallRolling", false)
-        if zombie:isVariable("hitreaction", "TRFallRoll") then
             zombie:setVariable("hitreaction", nil)
         end
     end
@@ -485,38 +554,6 @@ local function updateTracer(zombie)
     if thumpTarget and instanceof(thumpTarget, "IsoWindow")
         and not thumpTarget:isDestroyed() then
         thumpTarget:smashWindow()
-    end
-
-    -- ── 낙법 구르기 (Dash 모드 롤 애님 이식) ──
-    -- 낙하 궤적 추적: fallTime은 층당 약 48씩 누적(엔진 낙하속도 0.125z/틱 x
-    -- 증가율 6/틱). 2층 이상 = 70 기준. 착지 프레임(fallTime 0 복귀)에
-    -- 낙하 데미지를 롤백(낙법 컨셉)하고 구르기 발동. bHardFall 억제는
-    -- 위에서 이미 매 틱 수행 중이라 엎어짐 없이 구르기로 이어진다.
-    local ft = zombie:getFallTime()
-    local peak = zombie:getVariableFloat("TRFallPeak", 0)
-    if ft > 2 then
-        if peak == 0 then
-            -- 낙하 시작: 착지 데미지 롤백용 체력 스냅샷
-            zombie:setVariable("TRFallHP", zombie:getHealth())
-        end
-        if ft > peak then
-            zombie:setVariable("TRFallPeak", ft)
-        end
-    elseif peak > 0 then
-        zombie:setVariable("TRFallPeak", 0)
-        if peak >= 70 and not zombie:getVariableBoolean("TRFallRolling") then
-            zombie:setHealth(zombie:getVariableFloat("TRFallHP", zombie:getHealth()))
-            zombie:setVariable("TRFallRolling", true)
-            zombie:setVariable("hitreaction", "TRFallRoll")
-        end
-    end
-    -- 구르기 진행 중 hitreaction 재주입(자가복구) / 종료 후 잔여값 정리
-    if zombie:getVariableBoolean("TRFallRolling") then
-        if not zombie:isVariable("hitreaction", "TRFallRoll") then
-            zombie:setVariable("hitreaction", "TRFallRoll")
-        end
-    elseif zombie:isVariable("hitreaction", "TRFallRoll") then
-        zombie:setVariable("hitreaction", nil)
     end
 
     updateTracerWallClimb(zombie)
