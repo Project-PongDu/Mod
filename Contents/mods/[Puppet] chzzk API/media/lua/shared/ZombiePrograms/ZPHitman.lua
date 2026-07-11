@@ -66,7 +66,7 @@ HitmanZombiePrograms.Hitman.Main = function(hitman)
         config.hearDist = 20
 
     elseif Hitman.HasExpertise(hitman, Hitman.Expertise.Tracker) then
-        config.hearDist = 60
+            config.hearDist = 60
     end
 
     local target, enemy = HitmanUtils.GetTarget(hitman, config)

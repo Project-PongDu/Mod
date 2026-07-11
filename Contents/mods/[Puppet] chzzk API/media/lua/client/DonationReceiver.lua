@@ -41,14 +41,13 @@ end
 -- Hitmans.Donation_PrepDelay (0..10s) -- see prepDurationMs().
 local PANEL_DURATION_MS = 5000
 
-local BASE_W       = 320
-local BASE_H       = 84
-local BASE_PAD_X   = 20
-local BASE_PAD_Y   = 80
-local BASE_GAP     = 6
-local BASE_ICON_W  = 60
-local BASE_IMARGIN = 12
-local BASE_CLOSE_W = 20      -- close ("X") hit area, top-right corner of each panel
+-- 쿨다운 아이콘 슬롯 레이아웃 (우하단 앵커, 옆으로 다다다 늘어남).
+-- 슬롯 하나 = 정사각형. 안에 약어 태그 + 큰 카운트다운 숫자 + 쿨다운 오버레이.
+local ICON_SIZE     = 46
+local BASE_PAD_X    = 20     -- 화면 우측 여백
+local BASE_PAD_Y    = 20     -- 화면 하단 여백
+local BASE_GAP      = 6      -- 슬롯 사이 간격
+local BASE_CLOSE_W  = 12     -- close ("X") hit area, top-right corner of each slot
 
 local function sc(v)
     return math.floor(v * uiSettings.panelScale)
@@ -125,6 +124,29 @@ local colorMap = {
     ["rise_up_dead_man"]     = {0.4, 0.1, 0.5},
 }
 
+-- 슬롯 상단에 찍는 짧은 약어 태그. 이미지 에셋 없이 색상+텍스트만으로 효과를
+-- 구분하기 위함 (저작권 이슈 없는 순수 텍스트).
+local glyphKey = {
+    ["debuff_roulette"]      = "디버프",
+    ["buff_roulette"]        = "버프",
+    ["zombie_roulette"]      = "좀비",
+    ["sprinter5"]            = "질주",
+    ["bandit_melee"]         = "근접",
+    ["vaccine"]              = "백신",
+    ["bandit_ranged"]        = "원거리",
+    ["exile"]                = "추방",
+    ["backroom"]             = "백룸",
+    ["missile"]              = "폭격",
+    ["random_weapon"]        = "무기",
+    ["random_skill_potion"]  = "포션",
+    ["vehicle_drop"]         = "공수",
+    ["revive_ticket"]        = "부활",
+    ["mutant_spawn"]         = "변종",
+    ["secret_passage_kit"]   = "통로",
+    ["horde_night"]          = "호드",
+    ["rise_up_dead_man"]     = "기상",
+}
+
 local function buildLabel(featureId, sender, message)
     local key   = labelKey[featureId]
     local label = key and getText(key) or ("Effect " .. tostring(featureId))
@@ -143,7 +165,8 @@ local DonationEntryPanel = ISPanel:derive("DonationEntryPanel")
 local panelList = {}
 
 function DonationEntryPanel:new(entry)
-    local b = ISPanel:new(BASE_PAD_X, BASE_PAD_Y, sc(BASE_W), sc(BASE_H))
+    local sz = sc(ICON_SIZE)
+    local b = ISPanel:new(BASE_PAD_X, BASE_PAD_Y, sz, sz)
     setmetatable(b, self)
     self.__index = self
     b.background  = false
@@ -159,39 +182,44 @@ end
 
 function DonationEntryPanel:render()
     local e     = self.entry
+    local isActive = (activeEntries[1] == e)   -- 실제로 카운트다운 중인 건 맨 앞 슬롯뿐
     local rem   = math.max(0, e.remaining_ms)
     local dur   = e.duration_ms or PANEL_DURATION_MS
     if dur <= 0 then dur = 1 end
-    local prog  = rem / dur
+    local prog  = rem / dur              -- 1 = 방금 시작(쿨다운 꽉 참), 0 = 발동/종료 직전
     local secs  = math.max(0, math.ceil(rem / 1000))
     local col   = colorMap[e.featureId] or {0.5, 0.5, 0.5}
-    local icon  = sc(BASE_ICON_W)
-    local im    = sc(BASE_IMARGIN)
-    local textX = im + icon + im
+    local w, h  = self.width, self.height
 
-    self:drawRect(0, 0, self.width, self.height, 0.85, 0.06, 0.06, 0.08)
-    self:drawRect(0, 0, 4, self.height, 1, col[1], col[2], col[3])
+    -- 슬롯 베이스 (바닐라 인벤토리 슬롯 톤) + 효과색 옅은 틴트 (대기 슬롯은 더 흐리게)
+    self:drawRect(0, 0, w, h, 0.9, 0.05, 0.05, 0.05)
+    self:drawRect(0, 0, w, h, isActive and 0.16 or 0.07, col[1], col[2], col[3])
 
-    local iconY = math.floor((self.height - icon) / 2) - sc(6)
-    self:drawRect(im, iconY, icon, icon, 1, col[1], col[2], col[3])
-    self:drawRectBorder(im, iconY, icon, icon, 0.6, 1, 1, 1)
+    -- 상단 약어 태그
+    local glyph = glyphKey[e.featureId] or "?"
+    self:drawTextCentre(glyph, w / 2, sc(3), col[1], col[2], col[3], isActive and 1 or 0.5, UIFont.Small)
 
-    self:drawText(e.label or "?", textX, sc(12), 1, 1, 1, 1, UIFont.Medium)
-    if e.sender and e.sender ~= "" then
-        self:drawText("from " .. e.sender, textX, sc(34), 0.7, 0.7, 0.7, 1, UIFont.Small)
+    if isActive then
+        -- 쿨다운 오버레이: 남은 비율만큼 위에서 어둡게 덮고, 시간이 지날수록
+        -- 아래에서부터 원래 색이 드러난다 (게이지 아이콘처럼 슬롯 자체가 진행바 역할).
+        local overlayH = math.floor(h * prog)
+        if overlayH > 0 then
+            self:drawRect(0, 0, w, overlayH, 0.55, 0, 0, 0)
+        end
+        self:drawRectBorder(0, 0, w, h, 0.9, col[1], col[2], col[3])
+        -- 카운트다운 숫자 (오버레이 위에도 항상 보이도록 마지막에 그림)
+        self:drawTextCentre(tostring(secs), w / 2, h / 2 - sc(6), 1, 0.95, 0.35, 1, UIFont.Medium)
+    else
+        -- 대기 슬롯: 아직 시작 안 함 -- 전체를 어둡게 덮고 "대기중"만 표시,
+        -- 카운트다운 숫자는 안 보여준다 (진짜로 안 세고 있으니까).
+        self:drawRect(0, 0, w, h, 0.6, 0, 0, 0)
+        self:drawRectBorder(0, 0, w, h, 0.5, col[1], col[2], col[3])
+        self:drawTextCentre("대기중", w / 2, h / 2 - sc(6), 0.75, 0.75, 0.75, 1, UIFont.Small)
     end
-    self:drawText(tostring(secs) .. "s", self.width - sc(56), sc(10), 1, 0.95, 0.35, 1, UIFont.Large)
 
-    -- close button (top-right corner)
-    self:drawText("X", self.width - sc(15), sc(2), 0.6, 0.6, 0.6, 1, UIFont.Small)
+    -- close (우상단 작은 히트영역)
+    self:drawText("x", w - sc(11), sc(1), 0.7, 0.7, 0.7, 0.8, UIFont.Small)
 
-    local barX = textX
-    local barY = self.height - sc(16)
-    local barW = self.width - barX - sc(12)
-    local barH = math.max(1, sc(6))
-    self:drawRect(barX, barY, barW, barH, 1, 0.15, 0.15, 0.15)
-    self:drawRect(barX, barY, math.floor(barW * prog), barH, 1, col[1], col[2], col[3])
-    self:drawRectBorder(barX, barY, barW, barH, 0.4, 1, 1, 1)
     ISPanel.render(self)
 end
 
@@ -235,24 +263,26 @@ end
 DonationEntryPanel.onMouseUpOutside = DonationEntryPanel.onMouseUp
 
 -- ── Panel stack ───────────────────────────────────────────────────────────────
+-- 슬롯 1(가장 오래된 항목)이 앵커에 고정되고, 새 항목이 들어올수록 왼쪽으로
+-- 다다다 늘어난다. anchorX/anchorY는 "슬롯 1의 좌상단" 좌표로 취급.
 repositionPanels = function()
-    local sw = getCore():getScreenWidth()
-    local sh = getCore():getScreenHeight()
-    local x, y
+    local sw  = getCore():getScreenWidth()
+    local sh  = getCore():getScreenHeight()
+    local sz  = sc(ICON_SIZE)
+    local x0, y0
     if uiSettings.anchorX ~= nil then
-        x, y = uiSettings.anchorX, uiSettings.anchorY or BASE_PAD_Y
+        x0, y0 = uiSettings.anchorX, uiSettings.anchorY
     else
-        x, y = sw - sc(BASE_W) - BASE_PAD_X, BASE_PAD_Y
+        x0, y0 = sw - BASE_PAD_X - sz, sh - BASE_PAD_Y - sz
     end
     -- keep the stack on screen (resolution change / bad ini values)
-    x = math.max(0, math.min(x, sw - sc(BASE_W)))
-    y = math.max(0, math.min(y, sh - sc(BASE_H)))
-    for _, p in ipairs(panelList) do
-        p:setX(x)
-        p:setY(y)
-        p:setWidth(sc(BASE_W))
-        p:setHeight(sc(BASE_H))
-        y = y + sc(BASE_H) + sc(BASE_GAP)
+    x0 = math.max(0, math.min(x0, sw - sz))
+    y0 = math.max(0, math.min(y0, sh - sz))
+    for i, p in ipairs(panelList) do
+        p:setX(x0 - (i - 1) * (sz + sc(BASE_GAP)))
+        p:setY(y0)
+        p:setWidth(sz)
+        p:setHeight(sz)
     end
 end
 
@@ -399,9 +429,14 @@ local function applyDonation(amount, featureId, sender, message)
         featureId    = featureId,
         applied      = false,   -- false = prep countdown running; true = effect already fired
     }
-    -- Fired by onTick when the prep countdown reaches 0. rewardManager.a keeps
-    -- processingEvent held through the effect, then its callback re-shows the
-    -- panel as an "applied" confirmation for another PANEL_DURATION_MS.
+    -- Fired by onTick when the prep countdown reaches 0 -- the slot is already
+    -- freed by that point (see onTick), so the next queued donation can slide
+    -- in immediately. rewardManager.a's own processingEvent flag still governs
+    -- its internal safe-zone-wait retries, but no longer gates this file's queue
+    -- (see consumeDonationQueue / MAX_QUEUE_SLOTS). If the player is standing in
+    -- a safe zone, rewardManager.a's callback below re-shows this same panel
+    -- every ~5s as a "still waiting to leave the safe zone" indicator until the
+    -- effect actually fires.
     entry.fire = function()
         rewardManager.a(entry.featureId, entry.sender, function()
             removePanel(entry)
@@ -409,7 +444,10 @@ local function applyDonation(amount, featureId, sender, message)
             entry.duration_ms  = PANEL_DURATION_MS
             local found = false
             for _, e in ipairs(activeEntries) do if e == entry then found = true break end end
-            if not found then table.insert(activeEntries, entry) end
+            -- 맨 앞(활성 슬롯)에 다시 꽂는다 -- 이건 새 대기열 항목이 아니라
+            -- "안전지대 벗어날 때까지 대기 중"인 기존 항목의 연장이라, 뒤로
+            -- 밀리면 다른 대기 항목들에 가려서 재확인이 영영 안 될 수 있음.
+            if not found then table.insert(activeEntries, 1, entry) end
             addPanel(entry)
         end)
     end
@@ -430,9 +468,9 @@ end
 --   line format:  amount,featureId,sender,message   (featureId/sender/message optional)
 --   featureId는 퍼펫 API(GUI)가 유저의 amount->featureId 매핑을 보고 채워 넣는다.
 --   매핑에 없는 금액이면 featureId가 빈 문자열로 오고, 통계에만 잡힌다 (게임 효과 없음).
--- In-memory FIFO queue. Donations are applied ONE AT A TIME, gated by
--- global.processingEvent, so a burst of simultaneous donations is never
--- dropped -- they queue up and fire strictly in order (oldest first).
+-- In-memory FIFO queue. Up to MAX_QUEUE_SLOTS donations can be active (counting
+-- down / firing) at once -- see consumeDonationQueue below. A burst larger than
+-- that just waits its turn in this array; nothing is ever dropped.
 local donationQueue = {}   -- index 1 = oldest
 
 local pollTimer = 0
@@ -477,15 +515,16 @@ local function pollDonationFile()
     end
 end
 
--- Drain the queue one donation at a time, only while nothing is processing.
--- FIFO: the oldest queued donation fires first, none are ever skipped.
--- applyDonation sets processingEvent, so the next donation waits through this
--- one's prep countdown + effect.
+local MAX_QUEUE_SLOTS = 5   -- 도네큐박스 최대 슬롯 수. 5개는 각자 독립적으로 카운트다운.
+
+-- Drain the queue as long as the queue box has a free slot. Multiple donations
+-- can now count down (and fire) concurrently -- a slot frees the instant its
+-- own countdown hits 0, and the next waiting donation slides in immediately.
 local function consumeDonationQueue()
-    if global.processingEvent then return end
-    if #donationQueue == 0 then return end
-    local entry = table.remove(donationQueue, 1)
-    applyDonation(entry.amount, entry.featureId, entry.sender, entry.message)
+    while #activeEntries < MAX_QUEUE_SLOTS and #donationQueue > 0 do
+        local entry = table.remove(donationQueue, 1)
+        applyDonation(entry.amount, entry.featureId, entry.sender, entry.message)
+    end
 end
 
 -- Kept as a harmless fallback if a server ever pushes Donation/Apply directly.
@@ -503,26 +542,25 @@ Events.OnServerCommand.Add(onServerCommand)
 -- ── OnTick: countdown + queues ────────────────────────────────────────────────
 local function onTick()
     local dt = getGameTime():getTimeDelta() * 1000
-    local toFire = nil
-    for _, entry in ipairs(activeEntries) do
-        entry.remaining_ms = entry.remaining_ms - dt
-        if entry.remaining_ms <= 0 then
-            removePanel(entry)
-            if not entry.applied then
-                entry.applied = true   -- prep countdown finished: fire the effect now
-                toFire = toFire or {}
-                toFire[#toFire + 1] = entry
+    -- 큐박스에서 실제로 카운트다운하는 건 맨 앞(= 화면 우하단 앵커, 가장 먼저
+    -- 들어온) 슬롯 하나뿐. 나머지는 자기 차례가 될 때까지 대기 상태로 그대로 있음
+    -- (remaining_ms를 안 건드리니 값이 원본 그대로 유지됨).
+    local head = activeEntries[1]
+    local fired = nil
+    if head then
+        head.remaining_ms = head.remaining_ms - dt
+        if head.remaining_ms <= 0 then
+            removePanel(head)
+            table.remove(activeEntries, 1)   -- 뒤에 있던 항목들이 한 칸씩 당겨짐
+            if not head.applied then
+                head.applied = true   -- prep countdown finished: fire the effect now
+                fired = head
             end
         end
     end
-    for i = #activeEntries, 1, -1 do
-        if activeEntries[i].remaining_ms <= 0 then table.remove(activeEntries, i) end
-    end
-    -- Fire after the loops so the reward callback's panel/queue mutations don't
-    -- run mid-iteration over activeEntries.
-    if toFire then
-        for _, e in ipairs(toFire) do e.fire() end
-    end
+    -- Fire after touching the list so the reward callback's panel/queue
+    -- mutations don't run mid-iteration.
+    if fired then fired.fire() end
     if bandit then bandit.b() end
     if zombie then zombie.a() end
     pollDonationFile()
