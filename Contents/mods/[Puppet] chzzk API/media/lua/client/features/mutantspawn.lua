@@ -435,6 +435,7 @@ local function updateTracerWallUp(zombie)
     zombie:setVariable("TRWallUpX", forwardX)
     zombie:setVariable("TRWallUpY", forwardY)
     zombie:setVariable("TRWallUpZ", baseSq:getZ() + 1)
+    zombie:setVariable("TRWallUpTop", false) -- 이전 클라임의 후반 페이즈 잔여값 리셋
     zombie:setVariable("TRWallUpActive", true)
     zombie:setVariable("hitreaction", "TRWallUpReactionStart")
     trWallUpQueue[zombie:getOnlineID()] = zombie
@@ -493,6 +494,7 @@ Events.OnHitZombie.Add(function(zombie)
         zombie:setVariable("TRWallUpActive", false)
         zombie:setVariable("TRWallUpStarted", false)
         zombie:setVariable("TRWallUpDone", false)
+        zombie:setVariable("TRWallUpTop", false)
         if zombie:isVariable("hitreaction", "TRWallUpReactionStart")
             or zombie:isVariable("hitreaction", "TRWallUpReactionSuccess") then
             zombie:setVariable("hitreaction", nil)

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 트레이서 벽 클라임 성공 후반부(위층, 30%~). 텔레포트 직후 이 노드로
+     전환되어 낮은담장 볼트(Bob_ValultOver_Sprint)가 위층 가장자리에서
+     재생된다 - 난간을 짚고 넘어오는 파쿠르 마무리 연출. 루트모션(Y축)이
+     좀비를 가장자리에서 플로어 안쪽으로 밀어넣는다. End에서 Started=false로
+     클라임 흐름 종료(완료 신호). TRWallUpTop 해제는 Lua(트리거/피격)가 담당. -->
+<animNode>
+	<m_Name>TRWallUpTop</m_Name>
+	<m_AnimName>Bob_ValultOver_Sprint</m_AnimName>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_SpeedScale>0.80</m_SpeedScale>
+	<m_BlendTime>0.20</m_BlendTime>
+	<m_Conditions>
+		<m_Name>hitreaction</m_Name>
+		<m_Type>STRING</m_Type>
+		<m_StringValue>TRWallUpReactionSuccess</m_StringValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>TRWallUpStarted</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>TRWallUpTop</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>TRWallUpStarted=false</m_ParameterValue>
+	</m_Events>
+</animNode>
