@@ -44,7 +44,7 @@ local PANEL_DURATION_MS = 5000
 
 -- 쿨다운 아이콘 슬롯 레이아웃 (우하단 앵커, 옆으로 다다다 늘어남).
 -- 슬롯 하나 = 정사각형. 안에 약어 태그 + 큰 카운트다운 숫자 + 쿨다운 오버레이.
-local ICON_SIZE     = 60
+local ICON_SIZE     = 80
 local BASE_PAD_X    = 20     -- 화면 우측 여백
 local BASE_PAD_Y    = 20     -- 화면 상단 여백 (기본 위치 = 우측 최상단일 때)
 local BASE_GAP      = 6      -- 슬롯 사이 간격
@@ -155,6 +155,24 @@ local iconTexPath = {
 }
 local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
 
+-- ── 둥근모서리 슬롯 마스크 텍스처 ──────────────────────────────────────────────
+-- PZ 바닐라 drawRect/drawRectBorder는 각진 사각형만 그릴 수 있어서, 둥근 모서리는
+-- 미리 만든 알파마스크 PNG(흰색 도형 + 라운드 처리된 알파 채널)를 r,g,b로 틴트해서
+-- 그리는 방식으로 구현한다. 텍스처 원본 해상도는 슬롯 크기와 무관하게 128x128 고정.
+local SLOT_MASK_SIZE = 128
+local slotFillMaskTex, slotBorderMaskTex
+local function getSlotMasks()
+    if slotFillMaskTex == nil then
+        slotFillMaskTex   = getTexture("media/textures/donation/ui/slot_fill_mask.png") or false
+        slotBorderMaskTex = getTexture("media/textures/donation/ui/slot_border_mask.png") or false
+    end
+    if slotFillMaskTex == false then return nil, nil end
+    return slotFillMaskTex, slotBorderMaskTex
+end
+
+-- 슬롯 테두리는 이제 효과색이 아니라 항상 고정된 검회색 (col과 무관).
+local BORDER_COL = {0.13, 0.13, 0.15}
+
 local function getIconTexture(featureId)
     local path = iconTexPath[featureId]
     if not path then return nil end
@@ -215,22 +233,35 @@ function DonationEntryPanel:render()
     local col   = colorMap[e.featureId] or {0.5, 0.5, 0.5}
     local w, h  = self.width, self.height
     local tex   = getIconTexture(e.featureId)
+    local fillMask, borderMask = getSlotMasks()
 
-    -- 슬롯 베이스: 테두리와 같은 효과색으로 꽉 채움
-    self:drawRect(0, 0, w, h, 0.9, col[1], col[2], col[3])
+    -- 슬롯 베이스: 효과색으로 꽉 채움 (둥근모서리 마스크 사용, 마스크 없으면 각진 사각형 폴백)
+    if fillMask then
+        self:drawTextureScaledAspect(fillMask, 0, 0, w, h, 0.9, col[1], col[2], col[3])
+    else
+        self:drawRect(0, 0, w, h, 0.9, col[1], col[2], col[3])
+    end
 
     if tex then
         -- 실제 아이콘 이미지가 있으면 그걸 슬롯에 맞춰 그림
         self:drawTextureScaledAspect(tex, 0, 0, w, h, 1, 1, 1, 1)
     else
         -- 이미지 없을 때 폴백: 효과색 옅은 틴트만 (텍스트는 호버 시에만, 아래 참고)
-        self:drawRect(0, 0, w, h, 0.16, col[1], col[2], col[3])
+        if fillMask then
+            self:drawTextureScaledAspect(fillMask, 0, 0, w, h, 0.16, col[1], col[2], col[3])
+        else
+            self:drawRect(0, 0, w, h, 0.16, col[1], col[2], col[3])
+        end
     end
 
     if e.locked then
         -- 안전지대 락: 진행 오버레이 대신 전체를 어둡게 덮고 자물쇠 아이콘 표시.
         -- 안전지대를 벗어나는 즉시 locked가 풀리며(병렬 레인으로 승격) 진행 오버레이로 전환.
-        self:drawRect(0, 0, w, h, 0.6, 0, 0, 0)
+        if fillMask then
+            self:drawTextureScaledAspect(fillMask, 0, 0, w, h, 0.6, 0, 0, 0)
+        else
+            self:drawRect(0, 0, w, h, 0.6, 0, 0, 0)
+        end
         local cx    = math.floor(w / 2)
         local bodyW = sc(14)
         local bodyH = sc(10)
@@ -239,19 +270,37 @@ function DonationEntryPanel:render()
         self:drawRectBorder(cx - sc(4), bodyY - sc(7), sc(8), sc(8), 0.95, 0.95, 0.85, 0.4)
         -- 몸통 (채움)
         self:drawRect(cx - math.floor(bodyW / 2), bodyY, bodyW, bodyH, 0.95, 0.95, 0.85, 0.4)
-        self:drawRectBorder(0, 0, w, h, 0.7, col[1], col[2], col[3])
     elseif e.counting then
         -- 쿨다운 오버레이: 남은 비율만큼 위에서 어둡게 덮고, 시간이 지날수록
         -- 아래에서부터 원래 색이 드러난다 (게이지 아이콘처럼 슬롯 자체가 진행바 역할).
+        -- 마스크 텍스처의 "위쪽 prog 비율" 영역만 잘라서 그리면, 사각형으로 대충
+        -- 덮을 때와 달리 둥근 위쪽 모서리가 깨지지 않는다 (javaObject 직접 호출:
+        -- ISUIElement엔 안 감싸져 있지만 Java UIElement의 public 메서드라 호출 가능).
         local overlayH = math.floor(h * prog)
         if overlayH > 0 then
-            self:drawRect(0, 0, w, overlayH, 0.55, 0, 0, 0)
+            if fillMask and self.javaObject then
+                self.javaObject:DrawSubTextureRGBA(
+                    fillMask, 0, 0, SLOT_MASK_SIZE, SLOT_MASK_SIZE * prog,
+                    0, 0, w, overlayH, 0, 0, 0, 0.55
+                )
+            else
+                self:drawRect(0, 0, w, overlayH, 0.55, 0, 0, 0)
+            end
         end
-        self:drawRectBorder(0, 0, w, h, 0.9, col[1], col[2], col[3])
     else
         -- 대기 슬롯: 직렬 레인에서 자기 차례를 기다리는 중 (카운트다운 정지 상태).
-        self:drawRect(0, 0, w, h, 0.6, 0, 0, 0)
-        self:drawRectBorder(0, 0, w, h, 0.5, col[1], col[2], col[3])
+        if fillMask then
+            self:drawTextureScaledAspect(fillMask, 0, 0, w, h, 0.6, 0, 0, 0)
+        else
+            self:drawRect(0, 0, w, h, 0.6, 0, 0, 0)
+        end
+    end
+
+    -- 테두리: 상태와 무관하게 항상 고정 검회색 (예전엔 효과색 + 상태별 굵기/투명도였음)
+    if borderMask then
+        self:drawTextureScaledAspect(borderMask, 0, 0, w, h, 0.9, BORDER_COL[1], BORDER_COL[2], BORDER_COL[3])
+    else
+        self:drawRectBorder(0, 0, w, h, 0.9, BORDER_COL[1], BORDER_COL[2], BORDER_COL[3])
     end
 
     -- 스택 개수 (좌하단, 참고 이미지 스타일). 진행 상황은 오버레이가 보여주니
