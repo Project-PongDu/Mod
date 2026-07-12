@@ -216,7 +216,7 @@ function DonationEntryPanel:render()
     local w, h  = self.width, self.height
     local tex   = getIconTexture(e.featureId)
 
-    -- 슬롯 베이스 (회색빛이 도는 톤 -> 동일한색 꽉채우기)
+    -- 슬롯 베이스: 테두리와 같은 효과색으로 꽉 채움
     self:drawRect(0, 0, w, h, 0.9, col[1], col[2], col[3])
 
     if tex then
@@ -314,29 +314,25 @@ DonationEntryPanel.onMouseUpOutside = DonationEntryPanel.onMouseUp
 -- 슬롯 1(가장 오래된 항목)이 앵커에 고정되고, 새 항목이 들어올수록 왼쪽으로
 -- 다다다 늘어난다. anchorX/anchorY는 "슬롯 1의 좌상단" 좌표로 취급.
 -- 드래그로 위치를 옮긴 적 없을 때(anchorX == nil) 쓰는 기본 위치.
--- 좌우는 화면 우측, 높이는 화면 세로 정중앙. 단, 그 위치가 무들 표시 영역과
--- 겹치면 무들 아래로 피해서 배치한다.
-local function getMoodlesInstance()
-    return MoodlesUI.getInstance()
+-- 좌우는 화면 정중앙, 높이는 아이템 핫바(ISHotbar) 바로 위.
+local function getHotbarInstance()
+    local pd = getPlayerData(0)
+    return pd and pd.playerHotbar
 end
 
 local function defaultAnchor(sz)
     local sw = getCore():getScreenWidth()
     local sh = getCore():getScreenHeight()
-    local x0 = sw - BASE_PAD_X - sz
-    local y0 = math.floor(sh / 2 - sz / 2)   -- 화면 세로 정중앙
+    local x0 = math.floor(sw / 2 - sz / 2)   -- 화면 좌우 정중앙
 
-    -- 무들 패널의 x/y/width/height는 활성 무들 개수와 무관하게 고정된 값
-    -- (바닐라 MoodlesUI는 항상 같은 영역을 씀, 무들이 없을 때만 안 보일 뿐).
-    -- 그래서 isVisible() 여부와 상관없이 "무들이 차지할 수 있는 영역"을
-    -- 항상 피해야 한다 -- 지금 안 보인다고 방심하면 무들 뜨는 순간 가려짐.
-    local ok, moodle = pcall(getMoodlesInstance)
-    if ok and moodle then
-        local my, mh = moodle:getY(), moodle:getHeight()
-        if my and mh and y0 < my + mh and y0 + sz > my then
-            y0 = my + mh + sc(10)   -- 무들 영역과 겹치면 그 아래로 피함
-        end
+    -- 핫바 인스턴스에서 실제 y좌표를 가져와 그 바로 위에 배치.
+    -- 아직 핫바가 준비 안 됐거나(로딩 중 등) 못 구했을 땐 화면 하단 기준 폴백값 사용.
+    local hotbarY = sh - sc(90)
+    local ok, hotbar = pcall(getHotbarInstance)
+    if ok and hotbar and hotbar.getY then
+        hotbarY = hotbar:getY()
     end
+    local y0 = hotbarY - sz - sc(10)   -- 핫바 바로 위 (여백 10px)
     return x0, y0
 end
 
