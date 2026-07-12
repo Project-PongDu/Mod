@@ -44,7 +44,7 @@ local PANEL_DURATION_MS = 5000
 
 -- 쿨다운 아이콘 슬롯 레이아웃 (우하단 앵커, 옆으로 다다다 늘어남).
 -- 슬롯 하나 = 정사각형. 안에 약어 태그 + 큰 카운트다운 숫자 + 쿨다운 오버레이.
-local ICON_SIZE     = 46
+local ICON_SIZE     = 70
 local BASE_PAD_X    = 20     -- 화면 우측 여백
 local BASE_PAD_Y    = 20     -- 화면 상단 여백 (기본 위치 = 우측 최상단일 때)
 local BASE_GAP      = 6      -- 슬롯 사이 간격
@@ -133,7 +133,26 @@ local colorMap = {
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
 -- render()가 기존 색상 틴트 + 약어 태그로 폴백함. 나중에 실제 아이콘 이미지를
 -- 준비하면 여기에 경로만 채우면 됨 (예: ["missile"] = "media/textures/donation/missile.png").
-local iconTexPath = {}
+local iconTexPath = {
+    ["debuff_roulette"]      = "media/textures/donation/debuff_roulette.png",
+    ["buff_roulette"]        = "media/textures/donation/buff_roulette.png",
+    ["zombie_roulette"]      = "media/textures/donation/zombie_roulette.png",
+    ["sprinter5"]            = "media/textures/donation/sprinter5.png",
+    -- ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
+    -- ["vaccine"]              = "media/textures/donation/vaccine.png",
+    -- ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
+    -- ["exile"]                = "media/textures/donation/exile.png",
+    -- ["backroom"]             = "media/textures/donation/backroom.png",
+    -- ["missile"]              = "media/textures/donation/missile.png",
+    -- ["random_weapon"]        = "media/textures/donation/random_weapon.png",
+    -- ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
+    -- ["vehicle_drop"]         = "media/textures/donation/vehicle_drop.png",
+    -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
+    -- ["mutant_spawn"]         = "media/textures/donation/mutant_spawn.png",
+    -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
+    -- ["horde_night"]          = "media/textures/donation/horde_night.png",
+    -- ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
+}
 local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
 
 local function getIconTexture(featureId)
@@ -197,8 +216,8 @@ function DonationEntryPanel:render()
     local w, h  = self.width, self.height
     local tex   = getIconTexture(e.featureId)
 
-    -- 슬롯 베이스 (회색빛이 도는 톤)
-    self:drawRect(0, 0, w, h, 0.9, 0.16, 0.16, 0.17)
+    -- 슬롯 베이스 (회색빛이 도는 톤 -> 동일한색 꽉채우기)
+    self:drawRect(0, 0, w, h, 0.9, col[1], col[2], col[3])
 
     if tex then
         -- 실제 아이콘 이미지가 있으면 그걸 슬롯에 맞춰 그림
