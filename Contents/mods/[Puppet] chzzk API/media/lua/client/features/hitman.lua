@@ -1,5 +1,4 @@
 local _a = {}
-local _b = require("utils/zone")
 local _c = {}
 local _d = false
 local _e = {
@@ -23,14 +22,13 @@ local function _f(a, player)
     }
 end
 function _a.a(a, sender)
-    local b = getPlayer()
     table.insert(_c, {wave = a, sender = sender or ""})
-    if not _b.a(b) then _a.b() end
+    _a.b()
 end
 function _a.b()
     if _d or #_c == 0 then return end
     local a = getPlayer()
-    if not a or _b.a(a) then return end
+    if not a then return end
     _d = true
     local b = table.remove(_c, 1)
     local c = _e[b.wave]
