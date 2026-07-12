@@ -896,7 +896,7 @@ local function renderTags()
             local a = t.ttl / TAG_TTL
             t.tdo:setDefaultColors(c[1] / 255, c[2] / 255, c[3] / 255, a)
             t.tdo:setOutlineColors(0, 0, 0, a)
-            t.tdo:ReadString(UIFont.Small, tagText(kind, sender), -1)
+            t.tdo:ReadString(UIFont.Medium, tagText(kind, sender), -1)
             t.tdo:AddBatchedDraw(sx, sy - t.tdo:getHeight(), true)
             t.ttl = t.ttl - 1
         else

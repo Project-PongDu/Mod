@@ -80,8 +80,10 @@ local activeEntries = {}
 -- Effect labels are resolved via getText() at render time (see buildLabel),
 -- so the Korean text lives in media/lua/shared/Translate/KO/IG_UI_KO.txt,
 -- never as raw/escaped Korean in this file.
--- ※ featureId 키. random_weapon 이하 8개는 번역 문자열이 아직 없어서 getText가
--- 키 이름을 그대로 보여줌 -- 기능 구현할 때 KO 번역 파일에 같이 추가할 것.
+-- ※ 예전 주석에 "random_weapon 이하 8개는 번역이 없다"고 돼있었는데 실제로 확인해보니
+-- 틀린 얘기였음 -- revive_ticket / secret_passage_kit / horde_night 이 3개만 IG_UI_KO.txt에
+-- 없었고 (getText가 키 이름을 그대로 보여주는 중이었음) 나머지는 전부 이미 번역돼있었다.
+-- 이 3개는 IG_UI_KO.txt에 추가해서 해결함 (부활 티켓 / 비밀 통로 키트 / 호드 나이트).
 local labelKey = {
     ["debuff_roulette"]      = "IGUI_donation_debuff_roulette",
     ["buff_roulette"]        = "IGUI_donation_buff_roulette",
@@ -238,14 +240,14 @@ function DonationEntryPanel:render()
     -- (entry.label은 백신처럼 후원 메시지가 붙을 수 있어서 툴팁엔 안 맞음).
     if self:isMouseOver() then
         local label = effectName(e.featureId)
-        local tw = getTextManager():MeasureStringX(UIFont.Small, label)
-        local boxW = tw + sc(10)
-        local boxH = sc(16)
+        local tw = getTextManager():MeasureStringX(UIFont.Medium, label)
+        local boxW = tw + sc(14)
+        local boxH = sc(25)
         local tx = math.floor(w / 2 - boxW / 2)
         local ty = -boxH - sc(4)
         self:drawRect(tx, ty, boxW, boxH, 0.9, 0.05, 0.05, 0.05)
         self:drawRectBorder(tx, ty, boxW, boxH, 0.8, col[1], col[2], col[3])
-        self:drawTextCentre(label, w / 2, ty + sc(3), col[1], col[2], col[3], 1, UIFont.Small)
+        self:drawTextCentre(label, w / 2, ty + sc(4), col[1], col[2], col[3], 1, UIFont.Medium)
     end
 
     ISPanel.render(self)
