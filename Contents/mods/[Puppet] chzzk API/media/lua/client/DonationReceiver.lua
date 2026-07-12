@@ -139,7 +139,7 @@ local iconTexPath = {
     ["zombie_roulette"]      = "media/textures/donation/zombie_roulette.png",
     ["sprinter5"]            = "media/textures/donation/sprinter5.png",
     -- ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
-    -- ["vaccine"]              = "media/textures/donation/vaccine.png",
+    ["vaccine"]              = "media/textures/donation/vaccine.png",
     -- ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
     -- ["exile"]                = "media/textures/donation/exile.png",
     -- ["backroom"]             = "media/textures/donation/backroom.png",
@@ -148,10 +148,10 @@ local iconTexPath = {
     -- ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
     -- ["vehicle_drop"]         = "media/textures/donation/vehicle_drop.png",
     -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
-    -- ["mutant_spawn"]         = "media/textures/donation/mutant_spawn.png",
+    ["mutant_spawn"]         = "media/textures/donation/mutant_spawn.png",
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     -- ["horde_night"]          = "media/textures/donation/horde_night.png",
-    -- ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
+    ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
 }
 local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
 
