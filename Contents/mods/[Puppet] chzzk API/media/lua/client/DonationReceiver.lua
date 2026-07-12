@@ -74,6 +74,10 @@ local function urldecode(s)
     return (s:gsub("%%(%x%x)", function(b) return string.char(tonumber(b, 16)) end))
 end
 
+local function urlencode(s)
+    return (s:gsub("[^%w%-%.%_%~]", function(c) return string.format("%%%02X", string.byte(c)) end))
+end
+
 local activeEntries = {}
 
 -- ── Label / colour tables ─────────────────────────────────────────────────────
@@ -487,6 +491,7 @@ local function applyDonation(amount, featureId, sender, message)
         duration_ms  = prepMs,   -- 유닛 1개 발동 간격 (스택 소모 주기로도 재사용)
         amount       = amount,
         featureId    = featureId,
+        message      = message or "",   -- 재접속 복원(직렬화) 시 필요
         locked       = false,    -- onTick이 매 틱 갱신 (안전지대 && zone-blocked 타입)
         parallel     = false,    -- 락에서 풀려나면 true로 승격 -> 직렬 순서 무시하고 병렬 소모
         counting     = false,    -- onTick이 갱신: 지금 실제로 카운트다운 중인지 (render 표시용)
@@ -506,6 +511,57 @@ end
 -- down / firing) at once -- see consumeDonationQueue below. A burst larger than
 -- that just waits its turn in this array; nothing is ever dropped.
 local donationQueue = {}   -- index 1 = oldest
+
+-- ── Pending queue persistence ─────────────────────────────────────────────────
+-- 접속 종료/튕김으로 아직 처리 안 된 도네이션이 날아가지 않도록, 대기 중인
+-- 유닛 전부(donationQueue + 큐박스 슬롯의 남은 스택)를 rewards.txt와 같은
+-- 줄 형식(amount,featureId,sender,message / sender·message는 URL 인코딩)으로
+-- 클라이언트 로컬 파일에 저장해두고, 게임 시작 시 다시 읽어 큐에 복원한다.
+-- (플레이어 modData는 캐릭터 사망/재생성 시 같이 날아가므로 파일 방식을 씀.)
+local PENDING_FILE = "PongDuPendingQueue.txt"
+local queueDirty = false
+local function markQueueDirty() queueDirty = true end
+
+local function savePendingQueue()
+    local w = getFileWriter(PENDING_FILE, true, false)
+    if not w then return end
+    -- 큐박스 슬롯에 올라가 있지만 아직 발동 안 된 유닛들 (스택 전체)
+    for _, e in ipairs(activeEntries) do
+        for i = 1, e.stack do
+            local sender = e.senders[i] or e.sender or ""
+            w:write(tostring(e.amount or "") .. "," .. tostring(e.featureId or "") .. ","
+                .. urlencode(tostring(sender)) .. "," .. urlencode(tostring(e.message or "")) .. "\n")
+        end
+    end
+    -- 아직 큐박스에 못 올라간 대기열
+    for _, item in ipairs(donationQueue) do
+        w:write(tostring(item.amount or "") .. "," .. tostring(item.featureId or "") .. ","
+            .. urlencode(tostring(item.sender or "")) .. "," .. urlencode(tostring(item.message or "")) .. "\n")
+    end
+    w:close()
+end
+
+local function loadPendingQueue()
+    local reader = getFileReader(PENDING_FILE, true)
+    if not reader then return end
+    local line = reader:readLine()
+    while line do
+        if line ~= "" then
+            local amount, featureId, sender, message = line:match("^([^,]*),?([^,]*),?([^,]*),?(.*)$")
+            if amount and amount ~= "" and rewardManager.isValid(featureId or "") then
+                table.insert(donationQueue, {
+                    amount    = tostring(amount),
+                    featureId = featureId,
+                    sender    = urldecode(sender or ""),
+                    message   = urldecode(message or ""),
+                })
+            end
+        end
+        line = reader:readLine()
+    end
+    reader:close()
+    markQueueDirty()   -- 복원 후 현재 상태 기준으로 파일 다시 씀
+end
 
 local pollTimer = 0
 local function pollDonationFile()
@@ -544,6 +600,7 @@ local function pollDonationFile()
                     sender    = urldecode(sender or ""),
                     message   = urldecode(message or ""),
                 })
+                markQueueDirty()
             end
         end
     end
@@ -633,6 +690,7 @@ local function onTick()
                 local unitSender = table.remove(e.senders, 1) or e.sender
                 rewardManager.a(e.featureId, unitSender, nil)
                 e.stack = e.stack - 1
+                markQueueDirty()   -- 유닛 하나 소모됨 -> 저장 파일 갱신 필요
                 if e.stack <= 0 then
                     removePanel(e)
                     table.remove(activeEntries, i)
@@ -651,6 +709,12 @@ local function onTick()
     if zombie then zombie.a() end
     pollDonationFile()
     consumeDonationQueue()
+    -- 대기 유닛 구성이 바뀌었으면 저장 -- 접속 종료/튕김이 언제 나도 파일엔
+    -- 항상 최신 대기열이 남아있게.
+    if queueDirty then
+        queueDirty = false
+        savePendingQueue()
+    end
 end
 Events.OnTick.Add(onTick)
 
@@ -665,3 +729,4 @@ end)
 
 -- ── Init ──────────────────────────────────────────────────────────────────────
 Events.OnGameStart.Add(loadUISettings)
+Events.OnGameStart.Add(loadPendingQueue)
