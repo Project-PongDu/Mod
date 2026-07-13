@@ -108,6 +108,7 @@ local labelKey = {
     ["secret_passage_kit"]   = "IGUI_donation_secret_passage_kit",
     ["horde_night"]          = "IGUI_donation_horde_night",
     ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
+    ["zombie_rain"]          = "IGUI_donation_zombie_rain",
 }
 
 local colorMap = {
@@ -130,6 +131,7 @@ local colorMap = {
     ["secret_passage_kit"]   = {0.6, 0.4, 0.2},
     ["horde_night"]          = {0.9, 0.1, 0.1},
     ["rise_up_dead_man"]     = {0.4, 0.1, 0.5},
+    ["zombie_rain"]          = {0.35, 0.55, 0.9},
 }
 
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
@@ -155,6 +157,7 @@ local iconTexPath = {
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
     ["horde_night"]          = "media/textures/donation/horde_night.png",
+    ["zombie_rain"]          = "media/textures/donation/zombie_rain.png",
 }
 local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
 

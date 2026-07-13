@@ -9,6 +9,7 @@ local zone       = require("utils/zone")
 local zombie     = require("features/zombie")
 local riseup     = require("features/riseup")
 local mutantspawn = require("features/mutantspawn")
+local zombierain = require("features/zombierain")
 local randomteleport = require("features/randomteleport")
 local global     = require("global")
 
@@ -222,6 +223,15 @@ local rewardHandlers = {
         fn = function(sender)
             -- TODO: 호드나이트
             global.processingEvent = false
+        end,
+    },
+    ["zombie_rain"] = {
+        immediate = true,
+        fn = function(sender)
+            global.b(" ZOMBIE RAIN START")
+            zombierain.b(global.player)                   -- Zombie Rain (30s / 500)
+            global.processingEvent = false
+            global.b(" ZOMBIE RAIN END")
         end,
     },
 }
