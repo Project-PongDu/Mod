@@ -176,7 +176,7 @@ function _a.b(player)
     local r   = (sv and tonumber(sv.Rain_Radius)) or 55
     local pct = (sv and tonumber(sv.Rain_SprinterPercent)) or 0
     sendClientCommand("PongDuRain", "Start", { ["r"] = r, ["pct"] = pct })
-    getSoundManager():PlaySound("alert", false, 1.0)
+    getSoundManager():PlaySound("zombie_rain", false, 1.0)
     -- 독립 실행: 진행 중 재후원이 오면 서버는 세션을 병행하고,
     -- 클라 타이머는 "가장 늦게 끝나는 세션" 기준으로 30초로 리필한다.
     if _rainTicks < RAIN_DURATION_TICKS then _rainTicks = RAIN_DURATION_TICKS end
