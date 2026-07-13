@@ -9,6 +9,7 @@ local zone       = require("utils/zone")
 local zombie     = require("features/zombie")
 local riseup     = require("features/riseup")
 local mutantspawn = require("features/mutantspawn")
+local randomteleport = require("features/randomteleport")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -113,6 +114,16 @@ local rewardHandlers = {
             teleport.b(global.player)                     -- Exile Teleport
             global.processingEvent = false
             global.b(" exile FUNCTION END")
+        end,
+    },
+    ["random_teleport"] = {
+        immediate = true,
+        fn = function()
+            global.b(" random_teleport FUNCTION START")
+            getSoundManager():PlaySound("exile_enter", false, 1.0)
+            randomteleport.a(global.player)               -- Random Teleport (100~200 tiles)
+            global.processingEvent = false
+            global.b(" random_teleport FUNCTION END")
         end,
     },
     ["backroom"] = {
