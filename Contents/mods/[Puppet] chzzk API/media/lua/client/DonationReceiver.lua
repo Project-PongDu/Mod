@@ -318,14 +318,15 @@ function DonationEntryPanel:render()
     -- (entry.label은 백신처럼 후원 메시지가 붙을 수 있어서 툴팁엔 안 맞음).
     if self:isMouseOver() then
         local label = effectName(e.featureId)
+        local br = { col[1] + (1 - col[1]) * 0.55, col[2] + (1 - col[2]) * 0.55, col[3] + (1 - col[3]) * 0.55 }
         local tw = getTextManager():MeasureStringX(UIFont.Medium, label)
         local boxW = tw + sc(14)
         local boxH = sc(25)
         local tx = math.floor(w / 2 - boxW / 2)
         local ty = -boxH - sc(4)
         self:drawRect(tx, ty, boxW, boxH, 0.9, 0.05, 0.05, 0.05)
-        self:drawRectBorder(tx, ty, boxW, boxH, 0.8, col[1], col[2], col[3])
-        self:drawTextCentre(label, w / 2, ty + sc(4), col[1], col[2], col[3], 1, UIFont.Medium)
+        self:drawRectBorder(tx, ty, boxW, boxH, 0.8, br[1], br[2], br[3])
+        self:drawTextCentre(label, w / 2, ty + sc(4), br[1], br[2], br[3], 1, UIFont.Medium)
     end
 
     ISPanel.render(self)
