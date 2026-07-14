@@ -1,7 +1,12 @@
 -- t3VehicleDrop: vehicle_drop donation feature (vehicle_kit 스텁 대체).
 -- 후원 시 "vehicle_drop_kit" 아이템 지급 -> 플레이어가 우클릭으로 개봉(레시피)
 -- -> 이 파일의 OpenKit이 실행되어 플레이어 기준 가장 가까운 실외 타일을 찾고
--- 그 자리에 VehicleDrop_Pool 목록 중 하나를 무작위로 소환한다.
+-- 그 자리에 차량을 무작위로 소환한다.
+--
+-- 차종 선택 규칙 (pickVehicleType):
+--   1) military 존에 모드가 등록한 차량이 하나라도 있으면 그 목록에서만 선택.
+--      (바닐라 B41에는 military 존 자체가 없으므로, 여기 든 차량은 전부 모드 추가 군용차.)
+--   2) military 존에 등록된 차량이 하나도 없으면 샌드박스 VehicleDrop_Pool에서 선택.
 --
 -- 실제 addVehicleDebug 호출(t3VehicleDrop.spawnVehicle)은
 -- server/t3VehicleDropSpawner.lua 에 있다 (솔로/서버에서만 로드됨).
@@ -68,8 +73,23 @@ local function findDropSquare(player)
     return player:getCurrentSquare()
 end
 
+-- military 존에 모드가 등록한 차량 풀네임("Base.67commando" 등) 목록 수집.
+-- 바닐라 B41에는 military 존이 없으므로, 여기 값이 있으면 전부 모드가 추가한 군용차.
+local function collectMilitaryVehicles()
+    local list = {}
+    local vzd = VehicleZoneDistribution
+    local mil = vzd and vzd.military
+    local vehicles = mil and mil.vehicles
+    if vehicles then
+        for fullType, _ in pairs(vehicles) do
+            list[#list + 1] = fullType
+        end
+    end
+    return list
+end
+
 -- VehicleDrop_Pool ("Base.A;Base.B;Base.C") 파싱 후 무작위 선택.
-local function pickVehicleType()
+local function pickFromSandboxPool()
     local sv = SandboxVars and SandboxVars.PongDu
     local pool = sv and sv.VehicleDrop_Pool
 
@@ -87,6 +107,15 @@ local function pickVehicleType()
         return "Base.PickupTruck" -- 샌드박스 값이 비어있을 때의 최후 fallback
     end
     return list[ZombRand(#list) + 1]
+end
+
+-- 차종 선택: military 존 군용차가 있으면 그 목록에서만, 없으면 샌드박스 풀에서.
+local function pickVehicleType()
+    local military = collectMilitaryVehicles()
+    if #military > 0 then
+        return military[ZombRand(#military) + 1]
+    end
+    return pickFromSandboxPool()
 end
 
 -- 소모된 kit 아이템의 modData에 심어둔 후원자 이름을 읽는다 (t3RandomWeapon.lua와 동일 패턴).
