@@ -6,7 +6,8 @@
 
 t3VehicleDrop = t3VehicleDrop or {}
 
-local TARGET_CONDITION = 90 -- 기증 차량 기본 상태 (0~100). 필요하면 조정.
+local TARGET_CONDITION_MIN = 90 -- 기증 차량 컨디션 하한 (0~100)
+local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 
 -- 차량 주변에 펼쳐진 낙하산 데코를 몇 개 뿌린다 (순수 연출용, 실패해도 무시).
 local PARACHUTE_OFFSETS = { {-2, 0}, {2, 0}, {0, 2} }
@@ -60,13 +61,15 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
         vehicle:transmitPartModData(battery)
     end
 
-    -- 부품 상태를 TARGET_CONDITION 이상으로 (이미 그 이상이면 그대로 둠)
+    -- 부품 상태를 90~100 사이 값(차량당 1회 결정)으로 강제 세팅.
+    -- cond가 0(완파)이어도 반드시 세팅해야 하므로 하한 조건(cond >= 1)은 두지 않음.
+    local targetCondition = ZombRand(TARGET_CONDITION_MIN, TARGET_CONDITION_MAX + 1)
     for i = 0, vehicle:getPartCount() - 1 do
         local part = vehicle:getPartByIndex(i)
         if part:getCategory() ~= "nodisplay" then
             local cond = part:getCondition()
-            if cond and cond >= 1 and cond < TARGET_CONDITION then
-                part:setCondition(TARGET_CONDITION)
+            if cond and cond < targetCondition then
+                part:setCondition(targetCondition)
                 vehicle:transmitPartCondition(part)
             end
         end
@@ -84,16 +87,19 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
         key:setName(keyName)
     end
 
-    if not isClient() and not isServer() then
-        -- 솔로: 바로 인벤토리 지급
-        if key then
-            player:getInventory():AddItem(key)
+    if key then
+        local inv = player:getInventory()
+        if inv:getCapacityWeight() + key:getActualWeight() <= inv:getCapacity() then
+            inv:AddItem(key)
+        else
+            -- 무게 초과로 못 넣으면 기존처럼 발밑에 떨궈서 유실 방지
+            local playerSquare = player:getCurrentSquare()
+            if playerSquare then
+                playerSquare:AddWorldInventoryItem(key, 0.5, 0.5, 0)
+            end
         end
-    elseif isServer() then
-        -- MP: 플레이어 발밑에 떨궈서 직접 줍게 함 (서버가 남의 인벤토리를 직접 건드리지 않음)
-        local playerSquare = player:getCurrentSquare()
-        if key and playerSquare then
-            playerSquare:AddWorldInventoryItem(key, 0.5, 0.5, 0)
+        if isServer() then
+            player:transmitInventory()
         end
     end
 
