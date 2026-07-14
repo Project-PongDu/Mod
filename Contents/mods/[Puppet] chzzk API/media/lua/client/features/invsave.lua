@@ -22,11 +22,24 @@
 -- 스냅샷은 클라이언트 로컬 파일(Zomboid/Lua/pongdu_invsave.txt)에 저장한다.
 -- 사망~리스폰 사이에 게임이 튕겨도 재접속 후 리스폰 시 정상 복원된다.
 --
--- 보존되는 상태: 커스텀 이름 / 내구도(cond, condMax) / 소모품 잔량 / 총기
--- (장전 수, 약실, 탄창 삽입, 부착물) / 음식(부패도, 섭취 잔량) / 의류(오염,
--- 피, 젖음) / 열쇠 keyId / modData(스칼라 값만) / 가방 중첩 구조 전체.
+-- 보존되는 상태: 커스텀 이름(의류 제외 -- 아래 참고) / 내구도(cond, condMax) /
+-- 소모품 잔량 / 총기(장전 수, 약실, 탄창 삽입, 부착물) / 음식(부패도, 섭취 잔량) /
+-- 의류(오염, 피, 젖음) / 열쇠 keyId / modData(스칼라 값만) / 가방 중첩 구조 전체 /
+-- 손 장착(주무기·보조무기) / 핫바 부착 슬롯(벨트/등/홀스터 등).
+--
+-- 핫바 부착 복원은 반드시 정규 경로(getPlayerHotbar():attachItem)로만 한다.
+-- AttachedItems에 직접 setItem 하면 하단 핫바 UI가 인식하지 못해 "몸에만 붙어
+-- 보이는 유령 비주얼"이 되므로 금지. attachItem은 아이템의 attached 슬롯 상태를
+-- 세팅하고 reloadIcons로 UI를 갱신해 양쪽을 일치시킨다.
+--
+-- 의류 이름은 일부러 복원하지 않는다: Clothing.getName()이 "더러움/해짐/젖음"을
+-- 매번 새로 계산해 접두어로 붙이는 표시용 문자열이라, 그걸 그대로 caputre해서
+-- setName()으로 박아버리면 부활할 때마다 접두어가 계속 누적된다. 오염도/내구도/
+-- 젖음만 복원하면 게임이 알아서 매번 정확히 새로 계산해준다.
+--
 -- 한계: modData 안의 중첩 테이블, 라디오류 DeviceData, 의류 visual(색/구멍/
--- 패치), 지도 필기는 복원되지 않는다.
+-- 패치), 지도 필기, 비-의류 아이템의 "부서짐/오염수" 등 이름에 얹히는 기타
+-- 동적 표시(예: isBroken())는 복원되지 않는다.
 
 local invsave = {}
 
@@ -90,18 +103,27 @@ local function splitTab(line)
 end
 
 -- ── 직렬화 ────────────────────────────────────────────────────────────────────
--- 필드 순서(20개, 해당 없으면 "-"):
+-- 필드 순서(22개, 해당 없으면 "-"):
 --  1 depth  2 fullType  3 wornLocation  4 name  5 cond  6 condMax  7 usedDelta
 --  8 ammo  9 chambered  10 containsClip  11 age  12 hungChange  13 thirstChange
 -- 14 dirtyness  15 bloodLevel  16 wetness  17 keyId  18 parts(콤마)  19 modData(콤마 k=t:v)
--- 20 handSlot(P/S/B/-)
+-- 20 handSlot(P/S/B/-)  21 hotbarSlotType  22 hotbarModelAttach
 
 local function serializeItem(item, depth, wornLoc, out, handSlot)
+    -- (핫바 부착 정보는 아이템 자신이 들고 있으므로 인자 추가 없이 여기서 직접 읽는다)
     local f = {}
     f[1] = tostring(depth)
     f[2] = enc(item:getFullType())
     f[3] = wornLoc and enc(wornLoc) or "-"
-    f[4] = enc(item:getName() or "")
+    -- 의류는 getName()이 매번 새로 계산되는 "더러움/해짐/젖음" 표시용 문자열이라
+    -- 그대로 caputre-restore하면 부활 때마다 접두어가 누적된다. 의류는 이름을
+    -- 아예 건드리지 않고(빈 값), 내구도/오염도/피/젖음만 복원해 게임이 매번
+    -- 새로 정확히 계산하게 둔다.
+    if instanceof(item, "Clothing") then
+        f[4] = ""
+    else
+        f[4] = enc(item:getName() or "")
+    end
     f[5] = tostring(item:getCondition())
     f[6] = tostring(item:getConditionMax())
 
@@ -167,6 +189,17 @@ local function serializeItem(item, depth, wornLoc, out, handSlot)
 
     -- 20: 사망 시점 손 장착 슬롯 (P=주무기 S=보조무기 B=양손무기 -=해당없음)
     f[20] = handSlot or "-"
+
+    -- 21: 핫바 부착 슬롯 타입 (예 "SmallBeltLeft", "Back"). -1이면 미부착.
+    -- 22: 핫바 부착 모델 부착점 (예 "Belt Left").
+    -- ISHotbar는 아이템의 getAttachedSlot()>-1 를 보고 슬롯을 채우므로, 복원 시
+    -- 이 두 값으로 슬롯을 되찾아 정규 부착 경로(attachItem)를 태운다.
+    if depth == 0 and item:getAttachedSlot() and item:getAttachedSlot() > -1 then
+        f[21] = enc(item:getAttachedSlotType() or "-")
+        f[22] = enc(item:getAttachedToModel() or "-")
+    else
+        f[21], f[22] = "-", "-"
+    end
 
     out[#out + 1] = table.concat(f, SEP)
 end
@@ -274,7 +307,7 @@ local function clearSnapshotFile()
     if w then w:close() end
 end
 
-local function restoreLine(f, player, stack)
+local function restoreLine(f, player, stack, pendingHotbar)
     local depth = tonumber(f[1]) or 0
     local parent = stack[depth]
     if not parent then parent = stack[0]; depth = 0 end
@@ -354,6 +387,16 @@ local function restoreLine(f, player, stack)
         if f[20] == "S" or f[20] == "B" then player:setSecondaryHandItem(item) end
     end
 
+    -- 핫바 부착은 지금 바로 하지 않고 모은다. availableSlot이 배낭/벨트 등 착용
+    -- 아이템에 따라 달라지므로 모든 착용/복원이 끝난 뒤 정규 경로로 부착한다.
+    if depth == 0 and f[21] and f[21] ~= "-" then
+        pendingHotbar[#pendingHotbar + 1] = {
+            item      = item,
+            slotType  = dec(f[21]),
+            modelAtt  = (f[22] and f[22] ~= "-") and dec(f[22]) or nil,
+        }
+    end
+
     -- 컨테이너면 다음 depth의 부모로 등록
     if instanceof(item, "InventoryContainer") then
         stack[depth + 1] = item:getInventory()
@@ -375,12 +418,49 @@ local function restoreSnapshot(lines)
 
     local stack = {}
     stack[0] = player:getInventory()
+    local pendingHotbar = {}
     local restored = 0
     for _, line in ipairs(lines) do
-        local ok, n = pcall(restoreLine, splitTab(line), player, stack)
+        local ok, n = pcall(restoreLine, splitTab(line), player, stack, pendingHotbar)
         if ok then restored = restored + (n or 0)
         else print("[PongDu] invsave: restore error: " .. tostring(n)) end
     end
+
+    -- 핫바 부착: 정규 경로(getPlayerHotbar -> attachItem)로 넣어야 하단 UI와
+    -- 몸 모델이 함께 반영된다. AttachedItems에 직접 꽂으면 UI가 인식 못 해
+    -- "몸에만 붙은 유령 비주얼"이 되므로 절대 그렇게 하지 않는다.
+    if #pendingHotbar > 0 then
+        local hotbar = getPlayerHotbar(player:getPlayerNum())
+        if hotbar then
+            hotbar:refresh()   -- 착용 배낭/벨트 기준으로 availableSlot 재계산
+            for _, ph in ipairs(pendingHotbar) do
+                pcall(function()
+                    -- 저장된 slotType으로 현재 availableSlot에서 해당 슬롯을 찾는다
+                    local slotIndex, slotDef
+                    for idx, slot in pairs(hotbar.availableSlot) do
+                        if slot.slotType == ph.slotType then
+                            slotIndex = idx
+                            slotDef   = slot.def
+                            break
+                        end
+                    end
+                    if slotIndex and slotDef then
+                        -- 모델 부착점(slot 인자)은 저장값 우선, 없으면 slotDef에서
+                        -- 아이템 attachmentType으로 역산
+                        local slotArg = ph.modelAtt
+                        if not slotArg and slotDef.attachments then
+                            slotArg = slotDef.attachments[ph.item:getAttachmentType()]
+                        end
+                        if slotArg then
+                            hotbar:attachItem(ph.item, slotArg, slotIndex, slotDef, false)
+                        end
+                    end
+                end)
+            end
+            hotbar:reloadIcons()
+        end
+    end
+
     clearSnapshotFile()
     player:Say(getText("IGUI_invsave_restored"))
     print("[PongDu] invsave: restored " .. tostring(restored) .. " items")

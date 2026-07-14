@@ -238,7 +238,7 @@ item inv_save_ticket
     Weight              = 0,
     Type                = Key,
     DisplayName         = Inventory Insurance,
-    Icon                = Doodle,
+    Icon                = InvSaveTicket,
     Tooltip             = Tooltip_inv_save_ticket,
 }
 
