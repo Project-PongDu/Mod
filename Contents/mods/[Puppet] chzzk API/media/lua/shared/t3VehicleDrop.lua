@@ -18,7 +18,8 @@
 
 t3VehicleDrop = t3VehicleDrop or {}
 
-local MAX_SEARCH_RADIUS = 40 -- 이 반경 안에서 실외 타일을 못 찾으면 최후 수단으로 플레이어 발밑에 소환
+local MIN_SEARCH_RADIUS = 15 -- 플레이어로부터 최소 이 거리(타일) 이상 떨어진 곳에만 소환
+local MAX_SEARCH_RADIUS = 50 -- 이 반경 안에서 자리를 못 찾으면 최후 수단으로 플레이어 발밑에 소환
 
 -- 실외 + 차량 없음 + 물 아님 + 장애물 없음(플레이어/좀비 제외)
 local function isValidDropSquare(sq)
@@ -56,7 +57,7 @@ local function findDropSquare(player)
     local px = math.floor(player:getX())
     local py = math.floor(player:getY())
 
-    for r = 0, MAX_SEARCH_RADIUS do
+    for r = MIN_SEARCH_RADIUS, MAX_SEARCH_RADIUS do
         for dx = -r, r do
             for dy = -r, r do
                 if math.max(math.abs(dx), math.abs(dy)) == r then
@@ -69,7 +70,7 @@ local function findDropSquare(player)
         end
     end
 
-    print("[t3VehicleDrop] " .. MAX_SEARCH_RADIUS .. " 타일 내 실외 자리를 못 찾음, 발밑에 강제 소환")
+    print("[t3VehicleDrop] " .. MIN_SEARCH_RADIUS .. "~" .. MAX_SEARCH_RADIUS .. " 타일 범위 내 실외 자리를 못 찾음, 발밑에 강제 소환")
     return player:getCurrentSquare()
 end
 
