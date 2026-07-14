@@ -9,10 +9,15 @@
 -- 사망 시퀀스 근거 (PZ 41.78.19, IsoPlayer.OnDeath / IsoGameCharacter.dropHandItems):
 --   dropHandItems()  ->  OnPlayerDeath 이벤트  ->  (나중에) becomeCorpse() -> 서버 전송
 --   1) 양손 아이템은 OnPlayerDeath "직전"에 이미 바닥 square에 떨어진다.
---      -> 낙하 시 엔진이 발화하는 onItemFall 이벤트로 아이템을 기록해뒀다가
---         사망 직전 1초 이내 낙하분만 회수한다 (남의 바닥 아이템은 안 건드림).
+--      -> OnEquipPrimary/Secondary로 "마지막으로 낀 아이템" 레퍼런스를 계속 들고
+--         있다가, 사망 시 그 레퍼런스가 아직 월드에 남아있으면(아무도 안 주웠으면,
+--         item:getWorldItem() ~= nil) 회수한다. 시간 필터가 아니라 "지금도 바닥에
+--         있는가"로만 판정하므로, 피격으로 미리 흘리고 한참 도망치다 죽는 경우도
+--         정확히 잡히고, 새 무기로 갈아끼우면 예전 것은 자연히 추적 대상에서
+--         빠진다(레퍼런스 교체).
 --   2) 시체(IsoDeadBody)는 OnPlayerDeath "이후"에 만들어져 서버로 전송되므로,
 --      이벤트 안에서 인벤토리를 비우면 시체/좀비는 어디서나 빈손이 된다.
+--   3) 사망 시점에 손(핫바)에 쥐고 있던 무기는 리스폰 시 같은 손에 재장착된다.
 --
 -- 스냅샷은 클라이언트 로컬 파일(Zomboid/Lua/pongdu_invsave.txt)에 저장한다.
 -- 사망~리스폰 사이에 게임이 튕겨도 재접속 후 리스폰 시 정상 복원된다.
@@ -31,19 +36,30 @@ local SEP          = "\t"
 local HEADER       = "PONGDU_INVSAVE_V1"
 local MAX_DEPTH    = 16
 
--- ── 손 아이템 낙하 기록 ─────────────────────────────────────────────────────────
--- dropHandItems()/dropHeavyItems()는 아이템을 바닥에 놓을 때마다 onItemFall을
--- 발화한다(엔진 내 발화 지점은 이 둘뿐 = 전부 비자발적 낙하). 낙하한 아이템과
--- 시각을 기록해뒀다가, 사망 이벤트에서 "직전 1초 이내 낙하분"만 회수한다.
--- 사망 시 dropHandItems -> OnPlayerDeath가 같은 호출 스택에서 연속 실행되므로
--- 시간 필터만으로 정확히 특정된다. (생전에 넘어져 떨어뜨린 건 자연 제외)
-local FALL_WINDOW_MS = 1000
-local recentFalls = {}   -- { {item=InventoryItem, t=ms}, ... } 최근 8건 유지
+-- ── 손 아이템 추적 (v3: 시간창 대신 "마지막으로 낀 아이템 + 월드 잔존 여부") ──
+-- v2의 시간창(1초) 방식은 "도망치다 피격으로 스태거 -> 무기 낙하 -> 몇 초 후 사망"
+-- 시나리오를 놓쳤다: dropHandItems()는 사망 시점에 "그때 손에 있는 것"만 떨어뜨리는데,
+-- 이미 그 전에 낙하한 무기는 사망 시점엔 손이 이미 빈 상태라 onItemFall이 새로 발화하지
+-- 않는다. 그래서 시간 필터로는 원천적으로 못 잡는다.
+--
+-- 대신 "각 손에 마지막으로 낀 아이템 레퍼런스"를 OnEquipPrimary/Secondary로 계속
+-- 추적한다(장착 해제로 nil이 들어와도 마지막 값은 덮어쓰지 않음). 사망 시 그 레퍼런스가
+-- 여전히 "월드에 아이템으로 존재"하면(item:getWorldItem() ~= nil) 아직 아무도 안 주운
+-- 채 바닥에 있다는 뜻이므로 회수한다. 픽업/파괴되면 엔진이 setWorldItem(null)로 정리하는
+-- 것을 소스로 확인했으므로 이 판정은 시간과 무관하게 항상 정확하다.
+-- 새 무기로 갈아끼우면 레퍼런스가 자연 교체되어, 예전에 흘린 무기까지 딸려오는
+-- 오작동도 없다.
+local lastPrimary, lastSecondary = nil, nil
 
-Events.onItemFall.Add(function(item)
-    if not item then return end
-    recentFalls[#recentFalls + 1] = { item = item, t = getTimestampMs() }
-    while #recentFalls > 8 do table.remove(recentFalls, 1) end
+Events.OnEquipPrimary.Add(function(chr, item)
+    if chr == getPlayer() and item then lastPrimary = item end
+end)
+Events.OnEquipSecondary.Add(function(chr, item)
+    if chr == getPlayer() and item then lastSecondary = item end
+end)
+-- 새 캐릭터(리스폰)로 넘어가면 이전 삶의 레퍼런스는 버린다.
+Events.OnCreatePlayer.Add(function(index, player)
+    lastPrimary, lastSecondary = nil, nil
 end)
 
 -- ── 문자열 인코딩 (rewards.txt와 동일하게 URL 인코딩 계열) ───────────────────────
@@ -74,12 +90,13 @@ local function splitTab(line)
 end
 
 -- ── 직렬화 ────────────────────────────────────────────────────────────────────
--- 필드 순서(19개, 해당 없으면 "-"):
+-- 필드 순서(20개, 해당 없으면 "-"):
 --  1 depth  2 fullType  3 wornLocation  4 name  5 cond  6 condMax  7 usedDelta
 --  8 ammo  9 chambered  10 containsClip  11 age  12 hungChange  13 thirstChange
 -- 14 dirtyness  15 bloodLevel  16 wetness  17 keyId  18 parts(콤마)  19 modData(콤마 k=t:v)
+-- 20 handSlot(P/S/B/-)
 
-local function serializeItem(item, depth, wornLoc, out)
+local function serializeItem(item, depth, wornLoc, out, handSlot)
     local f = {}
     f[1] = tostring(depth)
     f[2] = enc(item:getFullType())
@@ -148,6 +165,9 @@ local function serializeItem(item, depth, wornLoc, out)
     end
     f[19] = (#mdl > 0) and table.concat(mdl, ",") or "-"
 
+    -- 20: 사망 시점 손 장착 슬롯 (P=주무기 S=보조무기 B=양손무기 -=해당없음)
+    f[20] = handSlot or "-"
+
     out[#out + 1] = table.concat(f, SEP)
 end
 
@@ -185,32 +205,29 @@ local function onPlayerDeath(player)
 
     local out = {}
 
-    -- 1) 사망 직전(1초 이내) onItemFall로 바닥에 떨어진 손 아이템 회수.
-    --    onItemFall 시점에 AddWorldInventoryItem이 setWorldItem을 이미 호출했으므로
-    --    item:getWorldItem()으로 월드 오브젝트를 직접 얻어 제거한다.
-    local now = getTimestampMs()
-    local done = {}
-    for _, rec in ipairs(recentFalls) do
-        if rec.item and (now - rec.t) <= FALL_WINDOW_MS then
-            local dup = false
-            for _, d in ipairs(done) do
-                if d == rec.item then dup = true break end
+    -- 1) 마지막으로 낀 주/보조무기가 아직 바닥에 남아있으면(아무도 안 주웠으면) 회수.
+    --    dropHandItems()가 OnPlayerDeath 직전에 이미 실행되어, 사망 시점에 손에
+    --    쥐고 있던 무기라면 이 시점엔 이미 월드 아이템으로 존재한다.
+    local hand = {}
+    if lastPrimary then
+        hand[#hand + 1] = { item = lastPrimary, slot = (lastSecondary == lastPrimary) and "B" or "P" }
+    end
+    if lastSecondary and lastSecondary ~= lastPrimary then
+        hand[#hand + 1] = { item = lastSecondary, slot = "S" }
+    end
+
+    for _, h in ipairs(hand) do
+        local wi = h.item:getWorldItem()
+        if wi then   -- 아직 아무도 안 주운 채 바닥에 남아있음
+            serializeItem(h.item, 0, nil, out, h.slot)
+            if instanceof(h.item, "InventoryContainer") then
+                serializeContainer(h.item:getInventory(), 1, player, out)
             end
-            if not dup then
-                done[#done + 1] = rec.item
-                serializeItem(rec.item, 0, nil, out)
-                if instanceof(rec.item, "InventoryContainer") then
-                    serializeContainer(rec.item:getInventory(), 1, player, out)
-                end
-                local wi = rec.item:getWorldItem()
-                if wi then
-                    local sq = wi:getSquare()
-                    if sq then sq:transmitRemoveItemFromSquare(wi) end
-                end
-            end
+            local sq = wi:getSquare()
+            if sq then sq:transmitRemoveItemFromSquare(wi) end
         end
     end
-    recentFalls = {}
+    lastPrimary, lastSecondary = nil, nil
 
     -- 2) 본체 인벤토리 전체 스냅샷 (착용 부위 포함)
     serializeContainer(inv, 0, player, out)
@@ -329,6 +346,12 @@ local function restoreLine(f, player, stack)
     -- 착용 복원 (최상위 아이템만 worn 정보를 가짐)
     if depth == 0 and f[3] and f[3] ~= "-" then
         player:setWornItem(dec(f[3]), item)
+    end
+
+    -- 손 장착 복원 (사망 시점에 들고 있던/핫바 장착 무기를 그대로 재장착)
+    if depth == 0 and f[20] and f[20] ~= "-" then
+        if f[20] == "P" or f[20] == "B" then player:setPrimaryHandItem(item) end
+        if f[20] == "S" or f[20] == "B" then player:setSecondaryHandItem(item) end
     end
 
     -- 컨테이너면 다음 depth의 부모로 등록
