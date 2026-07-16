@@ -12,9 +12,9 @@ option PongDu.Donation_ShowPanel = {
     page = PongDu, translation = PongDu_Donation_ShowPanel,
 }
 
-option PongDu.Divider_Delay = {
+option PongDu.Divider_Roulette = {
     type = boolean, default = false,
-    page = PongDu, translation = PongDu_Divider_Delay,
+    page = PongDu, translation = PongDu_Divider_Roulette,
 }
 
 option PongDu.Delay_debuff_roulette = {
@@ -32,9 +32,34 @@ option PongDu.Delay_zombie_roulette = {
     page = PongDu, translation = PongDu_Delay_zombie_roulette,
 }
 
+option PongDu.Roulette_MinCount = {
+    type = integer, min = 1, max = 20, default = 2,
+    page = PongDu, translation = PongDu_Roulette_MinCount,
+}
+
+option PongDu.Roulette_MaxCount = {
+    type = integer, min = 1, max = 30, default = 6,
+    page = PongDu, translation = PongDu_Roulette_MaxCount,
+}
+
+option PongDu.Divider_Sprinter = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_Sprinter,
+}
+
 option PongDu.Delay_sprinter5 = {
     type = integer, min = 0, max = 60, default = 5,
     page = PongDu, translation = PongDu_Delay_sprinter5,
+}
+
+option PongDu.Sprinter_Count = {
+    type = integer, min = 1, max = 10, default = 5,
+    page = PongDu, translation = PongDu_Sprinter_Count,
+}
+
+option PongDu.Divider_Bandit = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_Bandit,
 }
 
 option PongDu.Delay_bandit_melee = {
@@ -42,54 +67,49 @@ option PongDu.Delay_bandit_melee = {
     page = PongDu, translation = PongDu_Delay_bandit_melee,
 }
 
-option PongDu.Delay_vaccine = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_vaccine,
-}
-
 option PongDu.Delay_bandit_ranged = {
     type = integer, min = 0, max = 60, default = 5,
     page = PongDu, translation = PongDu_Delay_bandit_ranged,
 }
 
-option PongDu.Delay_exile = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_exile,
+option PongDu.Divider_Vaccine = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_Vaccine,
 }
 
-option PongDu.Delay_backroom = {
+option PongDu.Delay_vaccine = {
     type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_backroom,
+    page = PongDu, translation = PongDu_Delay_vaccine,
 }
 
-option PongDu.Delay_random_skill_potion = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_random_skill_potion,
+option PongDu.Divider_RandomTeleport = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_RandomTeleport,
 }
 
-option PongDu.Delay_random_weapon = {
+option PongDu.Delay_random_teleport = {
     type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_random_weapon,
+    page = PongDu, translation = PongDu_Delay_random_teleport,
 }
 
-option PongDu.Delay_revive_ticket = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_revive_ticket,
+option PongDu.RT_MinDist = {
+    type = integer, min = 10, max = 1000, default = 100,
+    page = PongDu, translation = PongDu_RT_MinDist,
 }
 
-option PongDu.Delay_inv_save_ticket = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_inv_save_ticket,
+option PongDu.RT_MaxDist = {
+    type = integer, min = 20, max = 2000, default = 200,
+    page = PongDu, translation = PongDu_RT_MaxDist,
 }
 
-option PongDu.Delay_secret_passage_kit = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_secret_passage_kit,
+option PongDu.RT_Return = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_RT_Return,
 }
 
-option PongDu.Delay_horde_night = {
-    type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_horde_night,
+option PongDu.RT_SurviveMinutes = {
+    type = integer, min = 1, max = 60, default = 5,
+    page = PongDu, translation = PongDu_RT_SurviveMinutes,
 }
 
 option PongDu.Divider_Bombard = {
@@ -117,19 +137,50 @@ option PongDu.Bombard_Injure = {
     page = PongDu, translation = PongDu_Bombard_Injure,
 }
 
-option PongDu.Divider_RiseUp = {
+option PongDu.Divider_RandomSkillPotion = {
     type = boolean, default = false,
-    page = PongDu, translation = PongDu_Divider_RiseUp,
+    page = PongDu, translation = PongDu_Divider_RandomSkillPotion,
 }
 
-option PongDu.Delay_rise_up_dead_man = {
+option PongDu.Delay_random_skill_potion = {
     type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_rise_up_dead_man,
+    page = PongDu, translation = PongDu_Delay_random_skill_potion,
 }
 
-option PongDu.RiseUp_Radius = {
-    type = integer, min = 5, max = 60, default = 30,
-    page = PongDu, translation = PongDu_RiseUp_Radius,
+option PongDu.Divider_RandomWeapon = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_RandomWeapon,
+}
+
+option PongDu.Delay_random_weapon = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu, translation = PongDu_Delay_random_weapon,
+}
+
+option PongDu.Divider_VehicleDrop = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_VehicleDrop,
+}
+
+option PongDu.Delay_vehicle_drop = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu, translation = PongDu_Delay_vehicle_drop,
+}
+
+option PongDu.VehicleDrop_Pool = {
+    type = string,
+    default = Base.PickUpTruck;Base.PickUpTruckLights;Base.PickUpTruckLightsFire;Base.PickUpTruckMccoy;Base.PickUpVan;Base.PickUpVanLights;Base.PickUpVanLightsFire;Base.PickUpVanLightsPolice;Base.PickUpVanMccoy,
+    page = PongDu, translation = PongDu_VehicleDrop_Pool,
+}
+
+option PongDu.Divider_InvSaveTicket = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Divider_InvSaveTicket,
+}
+
+option PongDu.Delay_inv_save_ticket = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu, translation = PongDu_Delay_inv_save_ticket,
 }
 
 option PongDu.Divider_Mutant = {
@@ -167,20 +218,19 @@ option PongDu.Mutant_Tracer = {
     page = PongDu, translation = PongDu_Mutant_Tracer,
 }
 
-option PongDu.Divider_VehicleDrop = {
+option PongDu.Divider_RiseUp = {
     type = boolean, default = false,
-    page = PongDu, translation = PongDu_Divider_VehicleDrop,
+    page = PongDu, translation = PongDu_Divider_RiseUp,
 }
 
-option PongDu.Delay_vehicle_drop = {
+option PongDu.Delay_rise_up_dead_man = {
     type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_vehicle_drop,
+    page = PongDu, translation = PongDu_Delay_rise_up_dead_man,
 }
 
-option PongDu.VehicleDrop_Pool = {
-    type = string,
-    default = Base.PickUpTruck;Base.PickUpTruckLights;Base.PickUpTruckLightsFire;Base.PickUpTruckMccoy;Base.PickUpVan;Base.PickUpVanLights;Base.PickUpVanLightsFire;Base.PickUpVanLightsPolice;Base.PickUpVanMccoy,
-    page = PongDu, translation = PongDu_VehicleDrop_Pool,
+option PongDu.RiseUp_Radius = {
+    type = integer, min = 5, max = 60, default = 30,
+    page = PongDu, translation = PongDu_RiseUp_Radius,
 }
 
 option PongDu.Divider_Rain = {
@@ -209,12 +259,12 @@ option PongDu.Rain_Count = {
 }
 
 option PongDu.Rain_SprinterPercent = {
-    type = integer, min = 0, max = 100, default = 10,
+    type = integer, min = 0, max = 100, default = 20,
     page = PongDu, translation = PongDu_Rain_SprinterPercent,
 }
 
 option PongDu.Rain_ShowRadius = {
-    type = boolean, default = false,
+    type = boolean, default = true,
     page = PongDu, translation = PongDu_Rain_ShowRadius,
 }
 
@@ -223,36 +273,57 @@ option PongDu.Rain_SprinterNameTag = {
     page = PongDu, translation = PongDu_Rain_SprinterNameTag,
 }
 
-option PongDu.Divider_RandomTeleport = {
+/***** PONGDU DEV (dummy / stub features) *****/
+
+option PongDu.Divider_Exile = {
     type = boolean, default = false,
-    page = PongDu, translation = PongDu_Divider_RandomTeleport,
+    page = PongDu_Dev, translation = PongDu_Divider_Exile,
 }
 
-option PongDu.Delay_random_teleport = {
+option PongDu.Delay_exile = {
     type = integer, min = 0, max = 60, default = 5,
-    page = PongDu, translation = PongDu_Delay_random_teleport,
+    page = PongDu_Dev, translation = PongDu_Delay_exile,
 }
 
-option PongDu.RT_MinDist = {
-    type = integer, min = 10, max = 1000, default = 100,
-    page = PongDu, translation = PongDu_RT_MinDist,
-}
-
-option PongDu.RT_MaxDist = {
-    type = integer, min = 20, max = 2000, default = 200,
-    page = PongDu, translation = PongDu_RT_MaxDist,
-}
-
-option PongDu.RT_Return = {
+option PongDu.Divider_Backroom = {
     type = boolean, default = false,
-    page = PongDu, translation = PongDu_RT_Return,
+    page = PongDu_Dev, translation = PongDu_Divider_Backroom,
 }
 
-option PongDu.RT_SurviveMinutes = {
-    type = integer, min = 1, max = 60, default = 5,
-    page = PongDu, translation = PongDu_RT_SurviveMinutes,
+option PongDu.Delay_backroom = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu_Dev, translation = PongDu_Delay_backroom,
 }
 
+option PongDu.Divider_ReviveTicket = {
+    type = boolean, default = false,
+    page = PongDu_Dev, translation = PongDu_Divider_ReviveTicket,
+}
+
+option PongDu.Delay_revive_ticket = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu_Dev, translation = PongDu_Delay_revive_ticket,
+}
+
+option PongDu.Divider_SecretPassageKit = {
+    type = boolean, default = false,
+    page = PongDu_Dev, translation = PongDu_Divider_SecretPassageKit,
+}
+
+option PongDu.Delay_secret_passage_kit = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu_Dev, translation = PongDu_Delay_secret_passage_kit,
+}
+
+option PongDu.Divider_HordeNight = {
+    type = boolean, default = false,
+    page = PongDu_Dev, translation = PongDu_Divider_HordeNight,
+}
+
+option PongDu.Delay_horde_night = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu_Dev, translation = PongDu_Delay_horde_night,
+}
 
 /***** GENERAL *****/
 
@@ -315,4 +386,3 @@ option Hitmans.General_ArrivalIcon = {
     type = boolean, default = true,
     page = Hitmans_General, translation = Hitmans.ArrivalIcon,
 }
-

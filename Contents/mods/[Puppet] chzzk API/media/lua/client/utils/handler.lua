@@ -71,11 +71,10 @@ function handler.c()
     updateText.c()
     getSoundManager():PlaySound("ding", false, 1.0)
 
-    local amount = global.chosenRandomText == "IGUI_zombie1" and 2 or
-                   global.chosenRandomText == "IGUI_zombie2" and 3 or
-                   global.chosenRandomText == "IGUI_zombie3" and 4 or
-                   global.chosenRandomText == "IGUI_zombie4" and 5 or
-                   global.chosenRandomText == "IGUI_zombie5" and 6 or 0
+    -- 마릿수는 updateText.c()가 샌드박스 min/max로 이미 추첨해 저장해둔 값
+    -- (global.chosenZombieCount)을 그대로 쓴다. 고정 5단계 텍스트 비교 방식은
+    -- 범위가 가변이 되면서 제거됨.
+    local amount = global.chosenZombieCount or 0
     local data = { amount = amount, sprint = 0, sender = global.currentSender or "" }
     global.currentSender = ""
     global.textUpdateTimer = 0

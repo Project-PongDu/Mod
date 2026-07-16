@@ -80,7 +80,13 @@ local rewardHandlers = {
         immediate = false,
         fn = function(sender)
             global.b(" sprinter5 FUNCTION START")
-            handleZombieSpawn(5, 1, sender)               -- Sprinter x5
+            -- 마릿수: 샌드박스 Sprinter_Count 고정값 (1~10, 기본 5).
+            -- 룰렛과 달리 랜덤 범위가 아니라 설정한 수만큼 정확히 소환.
+            -- 옵션 없음(구 세이브) -> 고정 5.
+            local sv = SandboxVars and SandboxVars.PongDu
+            local amount = (sv and tonumber(sv.Sprinter_Count)) or 5
+            if amount < 1 then amount = 1 elseif amount > 10 then amount = 10 end
+            handleZombieSpawn(amount, 1, sender)          -- Sprinter xN
             global.processingEvent = false
             global.b(" sprinter5 FUNCTION END")
         end,
@@ -107,14 +113,21 @@ local rewardHandlers = {
             global.processingEvent = false
         end,
     },
+    -- ── 산타마을 유배 (exile): 더미 처리 ──────────────────────────────────────
+    -- 현재 실사용 안 함. 코드/샌드박스 옵션(Delay_exile)은 재활성화 대비 보존만
+    -- 하고, 실제 텔레포트는 발동하지 않는다. featureId 자체는 유효하게 남겨둬서
+    -- (rewardManager.isValid) 퐁듀 런처의 기존 amount->featureId 매핑이 깨지지
+    -- 않게 하고, 후원이 들어와도 조용히 소모만 한다.
+    -- 원본 로직(features/teleport.lua의 exile 텔레포트, 유배지 좌표 14298,786)은
+    -- 재활성화 시 아래 주석을 해제하면 그대로 복원된다.
     ["exile"] = {
         immediate = true,
         fn = function()
-            global.b(" exile FUNCTION START")
-            getSoundManager():PlaySound("exile_enter", false, 1.0)
-            teleport.b(global.player)                     -- Exile Teleport
+            -- global.b(" exile FUNCTION START")
+            -- getSoundManager():PlaySound("exile_enter", false, 1.0)
+            -- teleport.b(global.player)                     -- Exile Teleport
+            -- global.b(" exile FUNCTION END")
             global.processingEvent = false
-            global.b(" exile FUNCTION END")
         end,
     },
     ["random_teleport"] = {
@@ -127,14 +140,17 @@ local rewardHandlers = {
             global.b(" random_teleport FUNCTION END")
         end,
     },
+    -- ── 백룸 탈출 (backroom): 더미 처리 ────────────────────────────────────────
+    -- 현재 실사용 안 함. exile과 동일 정책 — 코드/샌드박스 옵션은 보존, 발동만
+    -- 비활성화. 원본 로직(features/backroom.lua)은 재활성화 시 주석 해제.
     ["backroom"] = {
         immediate = true,
         fn = function()
-            global.b(" backroom FUNCTION START")
-            getSoundManager():PlaySound("glitch", false, 1.0)
-            backroom.a(global.player)                     -- Backroom
+            -- global.b(" backroom FUNCTION START")
+            -- getSoundManager():PlaySound("glitch", false, 1.0)
+            -- backroom.a(global.player)                     -- Backroom
+            -- global.b(" backroom FUNCTION END")
             global.processingEvent = false
-            global.b(" backroom FUNCTION END")
         end,
     },
     ["missile"] = {
@@ -242,7 +258,7 @@ local rewardHandlers = {
         immediate = true,
         fn = function(sender)
             global.b(" ZOMBIE RAIN START")
-            zombierain.b(global.player)                   -- Zombie Rain (30s / 500)
+            zombierain.b(global.player, sender)           -- Zombie Rain
             global.processingEvent = false
             global.b(" ZOMBIE RAIN END")
         end,

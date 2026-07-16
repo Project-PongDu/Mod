@@ -1,5 +1,4 @@
 local constants = {
-    IGUI_zombies = {},
     IGUI_moodle_Types = {
         "IGUI_moodle_Type2",
         "IGUI_moodle_Type6",
@@ -19,12 +18,10 @@ local constants = {
     },
 }
 
--- Zombie roulette weights. B version: uniform 20 each.
--- (Original was skewed 43/21/18/13/5 — favoured smaller counts.)
-for _ = 1, 20 do table.insert(constants.IGUI_zombies, "IGUI_zombie1") end
-for _ = 1, 20 do table.insert(constants.IGUI_zombies, "IGUI_zombie2") end
-for _ = 1, 20 do table.insert(constants.IGUI_zombies, "IGUI_zombie3") end
-for _ = 1, 20 do table.insert(constants.IGUI_zombies, "IGUI_zombie4") end
-for _ = 1, 20 do table.insert(constants.IGUI_zombies, "IGUI_zombie5") end
+-- Zombie roulette: 이전엔 고정 5단계(2~6마리, 균등 20가중치) 텍스트 키
+-- (IGUI_zombie1..5)를 뽑는 방식이었으나, 샌드박스 PongDu.Roulette_MinCount /
+-- Roulette_MaxCount로 범위를 직접 설정하도록 바뀌면서 이 테이블은 더 이상
+-- 쓰이지 않는다. 실제 마릿수 추첨은 utils/updateText.lua의 _a.c()가
+-- ZombRand(min, max+1)로 직접 처리한다.
 
 return constants

@@ -1,5 +1,6 @@
 local _a = {
     chosenRandomText = "",
+    chosenZombieCount = 0,
     processingEvent = false,
     player = nil,
     stats = nil,
