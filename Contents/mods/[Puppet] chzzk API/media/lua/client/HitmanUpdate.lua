@@ -12,6 +12,7 @@ local function CalcSpottedScore(player, dist)
     if not instanceof(player, "IsoPlayer") then return end
 
     local square = player:getSquare()
+    if not square then return end
     local spottedScore = square:getLightLevel(0)
 
     if player:isRunning() then spottedScore = spottedScore + 0.1 end
