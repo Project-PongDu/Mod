@@ -99,20 +99,39 @@ end
 -- 서버/네트워크 영향 없음 — 순수 클라 로컬 상태 보정.
 local _seen = {}      -- [onlineID] = 최초 관측 시각(ms)
 local _done = {}      -- [onlineID] = true (눕혔거나 제외 확정 — 더 안 건드림)
+local _laidAt = {}    -- [onlineID] = 눕힌 시각(ms) — 유지 검증 대기열
 local _windows = {}   -- {x, y, r2, arrived, expires} : 서버 GetupWindow 수신분
 local _lastScan = 0
-local SCAN_INTERVAL_MS = 200
+local SCAN_INTERVAL_MS = 200   -- 평시 스캔 간격 (창 활성 중엔 매 틱)
 local WINDOW_MS        = 4000  -- 창 유지: 서버측 기상 타이머(30~90틱)보다 약간 길게
 local PRE_GRACE_MS     = 2000  -- 좀비 패킷이 커맨드보다 먼저 도착한 경우 소급 폭
 local YOUNG_MS         = 4000  -- 최초 관측 후 이 시간까지만 재평가
+local VERIFY_MS        = 500   -- 눕힌 뒤 이 시점에 상태 유지 여부 검증(진단용)
 
-local function insideWindow(z, firstSeen)
+-- 만료 창 정리. 반환값: 활성 창 존재 여부.
+-- ★ 창 활성 중엔 스캔을 매 틱으로 돌린다: 로그 분석 결과 laydown 커버리지는
+--   100%였는데도(892/892, ok=true) 일부가 벌떡 서는 증상 — 스캔 간격(200ms)
+--   동안 클라 애니메이터가 idle에 정착해버리면 AI 상태만 onground가 되고
+--   시각 전이가 안 걸릴 수 있다. 바닐라 ParseZombie는 생성 '직후'(애니메이터
+--   1틱도 돌기 전) 눕힌다 — 매 틱 스캔으로 그 타이밍에 최대한 붙인다.
+-- Kahlua엔 표준 next()가 노출돼 있지 않다 — pairs로 공백 판정.
+local function isEmpty(t)
+    for _ in pairs(t) do return false end
+    return true
+end
+
+local function pruneWindows()
     local now = getTimestampMs()
     for i = #_windows, 1, -1 do
+        if now > _windows[i].expires then table.remove(_windows, i) end
+    end
+    return #_windows > 0
+end
+
+local function insideWindow(z, firstSeen)
+    for i = 1, #_windows do
         local w = _windows[i]
-        if now > w.expires then
-            table.remove(_windows, i)
-        elseif firstSeen >= w.arrived - PRE_GRACE_MS then
+        if firstSeen >= w.arrived - PRE_GRACE_MS then
             local dx = z:getX() - w.x
             local dy = z:getY() - w.y
             if dx * dx + dy * dy <= w.r2 then return true end
@@ -127,9 +146,24 @@ local function layDown(z, zid, why)
         z:setOnFloor(true)
         z:changeState(ZombieOnGroundState.instance())
     end)
+    if ok then _laidAt[zid] = getTimestampMs() end
     print("[PongDu][RiseUp][Getup] laydown zid=" .. tostring(zid)
         .. " via=" .. why .. " ok=" .. tostring(ok)
         .. (ok and "" or (" err=" .. tostring(err))))
+end
+
+-- 눕힌 뒤 VERIFY_MS 시점의 상태 유지 검증 (진단용).
+-- held=false = 네트워크 상태 동기화가 강제 상태를 걷어냄(역전 가설)
+-- held=true인데 벌떡 섰다 = 애니메이터 미전이(정착 가설)
+local function verifyLaid(z, zid)
+    local held, name
+    pcall(function()
+        local st = z:getCurrentState()
+        held = (st == ZombieOnGroundState.instance())
+        name = tostring(st)
+    end)
+    print("[PongDu][RiseUp][Getup] verify zid=" .. tostring(zid)
+        .. " held=" .. tostring(held) .. " state=" .. tostring(name))
 end
 
 local function getupScan()
@@ -146,7 +180,7 @@ local function getupScan()
         local z = zlist:get(i)
         if z then
             local zid = z:getOnlineID()
-            alive[zid] = true
+            alive[zid] = z
             local first = _seen[zid]
             if not first then
                 first = now
@@ -167,17 +201,31 @@ local function getupScan()
         end
     end
 
+    -- 유지 검증 패스
+    for zid, t in pairs(_laidAt) do
+        if now - t >= VERIFY_MS then
+            local z = alive[zid]
+            if z then verifyLaid(z, zid) end
+            _laidAt[zid] = nil
+        end
+    end
+
     for zid in pairs(_seen) do
         if not alive[zid] then
             _seen[zid] = nil
             _done[zid] = nil
+            _laidAt[zid] = nil
         end
     end
 end
 
 Events.OnTick.Add(function()
     local now = getTimestampMs()
-    if now - _lastScan < SCAN_INTERVAL_MS then return end
+    local active = pruneWindows()
+    -- 창 활성 중이거나 검증 대기 좀비가 있으면 매 틱, 아니면 200ms 간격
+    if not active and isEmpty(_laidAt) then
+        if now - _lastScan < SCAN_INTERVAL_MS then return end
+    end
     _lastScan = now
     local ok, err = pcall(getupScan)
     if not ok then
