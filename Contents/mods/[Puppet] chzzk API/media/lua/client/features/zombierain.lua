@@ -23,8 +23,52 @@ require("ISUI/ISPanel")
 -- 스퀘어 생성이 스킵될 수 있다 -> 해당 좀비는 착지(z=0) 후 패킷부터 정상
 -- 재생성된다 (일시적 비표시만 발생, 유실 아님).
 
-local RAIN_DURATION_TICKS = 30 * 60      -- 폭격 타이머와 동일: 1틱 = 1 감산
-local PENDING_MS          = 60000        -- RainMark 유효시간 (스트림아웃/원격 소유 잔여분 청소)
+local PENDING_MS = 60000    -- RainMark 유효시간 (스트림아웃/원격 소유 잔여분 청소)
+
+-- ── 샌드박스 옵션 (사용 시점에 읽음 -- 파일 로드 시점엔 SandboxVars 비어있음) ──
+-- 반경/스프린터비율에 더해 지속시간(Rain_Duration, 초)과 마리수(Rain_Count)도
+-- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (1틱 = 1 감산).
+local function rainCfg()
+    local sv  = SandboxVars and SandboxVars.PongDu
+    local r   = (sv and tonumber(sv.Rain_Radius))          or 55
+    local pct = (sv and tonumber(sv.Rain_SprinterPercent)) or 0
+    local dur = (sv and tonumber(sv.Rain_Duration))        or 30
+    local cnt = (sv and tonumber(sv.Rain_Count))           or 100
+    return r, pct, dur, cnt
+end
+
+-- 스프린터 이름표 (Rain_SprinterNameTag, 기본 켜짐). 실제 렌더는 특수좀비
+-- 이름표 시스템(mutantspawn.lua)이 담당하므로 Mutant_NameTag가 꺼져 있으면
+-- 이쪽을 켜도 표시되지 않는다.
+local function sprinterTagEnabled()
+    local sv = SandboxVars and SandboxVars.PongDu
+    if sv and sv.Rain_SprinterNameTag == false then return false end
+    return true
+end
+
+-- 반경 표시 (Rain_ShowRadius, 기본 켜짐)
+local function showRadiusEnabled()
+    local sv = SandboxVars and SandboxVars.PongDu
+    if sv and sv.Rain_ShowRadius == false then return false end
+    return true
+end
+
+-- 바닥 반경 마커: riseup.lua와 동일 API (ISSpawnHordeUI가 쓰는 것).
+-- WorldMarkers는 로컬 렌더링이라 호출한 클라이언트(도네 본인) 화면에만 보인다.
+-- 레인은 지속시간 동안 유지 (강령술의 3초와 달리 낙하가 계속되므로).
+local function showRadiusMarker(square, radius, durationMs)
+    if not square then return end
+    local marker = getWorldMarkers():addGridSquareMarker(square, 0.35, 0.55, 1.0, true, radius)
+    marker:setScaleCircleTexture(true)
+    local start = getTimestampMs()
+    local function tick()
+        if getTimestampMs() - start >= durationMs then
+            marker:remove()
+            Events.OnTick.Remove(tick)
+        end
+    end
+    Events.OnTick.Add(tick)
+end
 
 -- ── 남은시간 표시 패널 (BombardTimerDisplay와 동일 스타일) ─────────────────────
 local _rainTicks = 0
@@ -104,15 +148,17 @@ Events.OnServerCommand.Add(function(module, command, args)
     if command ~= "RainMark" then return end
     local zeds = args and args["zeds"]
     if type(zeds) ~= "table" then return end
+    local sender = tostring(args["sender"] or "")   -- 세션 공통 (이름표용)
     local now = getTimestampMs()
     for _, e in pairs(zeds) do
         local id = e and tonumber(e["id"])
         if id then
             if not _pending[id] then _pendingCount = _pendingCount + 1 end
             _pending[id] = {
-                h = tonumber(e["h"]) or 1.0,
-                s = tonumber(e["s"]) or 0,
-                e = now + PENDING_MS,
+                h  = tonumber(e["h"]) or 1.0,
+                s  = tonumber(e["s"]) or 0,
+                e  = now + PENDING_MS,
+                sd = sender,
             }
         end
     end
@@ -140,6 +186,21 @@ local function onTick()
                     -- 스프린터 적용: 시야에 들어온 모든 클라가 1회 적용 (멱등)
                     if p.s == 1 and not p.sApplied then
                         pcall(function() z:setWalkType("sprint" .. tostring(ZombRand(5) + 1)) end)
+                        -- 이름표: 특수좀비 시스템과 동일하게 클라 로컬 modData 마킹
+                        -- (RainMark는 전 클라 브로드캐스트라 각 클라가 각자 마킹 --
+                        --  동기화 불필요). PuppetMutantZid 스탬프는 풀 재활용 스테일
+                        --  방어(applyMutant 가드)의 판별 기준. 서버측 modData는 건드리지
+                        --  않으므로 시체/부활 경로에는 영향 없음 (일반좀비로 부활).
+                        if sprinterTagEnabled() then
+                            pcall(function()
+                                local md = z:getModData()
+                                md["PuppetMutant"]    = "sprinter"
+                                md["PuppetMutantZid"] = id
+                                if p.sd and p.sd ~= "" then
+                                    md["PuppetMutantSender"] = p.sd
+                                end
+                            end)
+                        end
                         p.sApplied = true
                     end
                     -- 착지 시 체력 원복: 좀비 체력은 클라 권한 -> 소유 좀비만.
@@ -171,15 +232,21 @@ end
 Events.OnTick.Add(onTick)
 
 -- ── 시작 (rewardManager에서 호출) ────────────────────────────────────────────
-function _a.b(player)
-    local sv  = SandboxVars and SandboxVars.PongDu
-    local r   = (sv and tonumber(sv.Rain_Radius)) or 55
-    local pct = (sv and tonumber(sv.Rain_SprinterPercent)) or 0
-    sendClientCommand("PongDuRain", "Start", { ["r"] = r, ["pct"] = pct })
+function _a.b(player, sender)
+    local r, pct, dur, cnt = rainCfg()
+    sendClientCommand("PongDuRain", "Start", {
+        ["r"] = r, ["pct"] = pct, ["dur"] = dur, ["cnt"] = cnt,
+        ["sender"] = sender or "",
+    })
     getSoundManager():PlaySound("zombie_rain", false, 1.0)
+    -- 반경 표시 (Rain_ShowRadius): 도네 본인 화면에 지속시간 동안
+    if showRadiusEnabled() then
+        showRadiusMarker(player:getCurrentSquare(), r, dur * 1000)
+    end
     -- 독립 실행: 진행 중 재후원이 오면 서버는 세션을 병행하고,
-    -- 클라 타이머는 "가장 늦게 끝나는 세션" 기준으로 30초로 리필한다.
-    if _rainTicks < RAIN_DURATION_TICKS then _rainTicks = RAIN_DURATION_TICKS end
+    -- 클라 타이머는 "가장 늦게 끝나는 세션" 기준으로 지속시간만큼 리필한다.
+    local ticks = dur * 60
+    if _rainTicks < ticks then _rainTicks = ticks end
     if not _panel then
         _panel = RainTimerDisplay:new()
         _panel:addToUIManager()

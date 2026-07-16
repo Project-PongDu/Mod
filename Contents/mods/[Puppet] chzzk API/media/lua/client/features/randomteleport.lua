@@ -1,8 +1,10 @@
 local randomteleport = {}
 local global = require("global")
+require("ISUI/ISPanel")
 
 -- ── 랜덤 텔레포트 (random_teleport) ──────────────────────────────────────────
--- 발동 시점 위치를 원점으로, 반경 100~200타일 링 안의 랜덤 좌표로 이동.
+-- 발동 시점 위치를 원점으로, 반경 RT_MinDist~RT_MaxDist(기본 100~200)타일
+-- 링 안의 랜덤 좌표로 이동.
 -- 좌표 검증은 2단계:
 --   1) 사전 검사 (텔포 전, 청크 로딩 불필요):
 --      getWorld():getMetaGrid():isValidSquare(x,y)  -- 맵 바운딩 박스 밖 제외
@@ -14,14 +16,32 @@ local global = require("global")
 --      로딩된 스퀘어가 물타일 / 바닥 없음 / 솔리드(벽·나무)면 원점 기준으로
 --      재추첨해서 다시 텔포. MAX_ATTEMPTS 초과 시 원점 복귀 (안전망).
 
-local MIN_RADIUS         = 100
-local MAX_RADIUS         = 200
 local MAX_ATTEMPTS       = 15    -- 사후 검증 실패 시 재추첨 한도
 local MAX_PREROLLS       = 200   -- 메타그리드 사전 검사 재추첨 한도
 local LOAD_TIMEOUT_TICKS = 600   -- 청크 로딩 대기 한도 (약 10초 @60fps)
 
 local state = nil   -- 진행 중이면 {origin, cx, cy, attempts, waitTicks}
 local tickHandler = nil
+
+-- ── 샌드박스 옵션 (사용 시점에 읽음) ─────────────────────────────────────────
+-- 거리: PongDu.RT_MinDist / RT_MaxDist (기본 100~200). max < min이면 min으로 클램프.
+local function distCfg()
+    local sv = SandboxVars and SandboxVars.PongDu
+    local mn = (sv and tonumber(sv.RT_MinDist)) or 100
+    local mx = (sv and tonumber(sv.RT_MaxDist)) or 200
+    if mn < 1 then mn = 1 end
+    if mx < mn then mx = mn end
+    return mn, mx
+end
+
+-- 생존 복귀: PongDu.RT_Return (기본 꺼짐) / RT_SurviveMinutes (기본 5분)
+local function returnCfg()
+    local sv = SandboxVars and SandboxVars.PongDu
+    local on = sv ~= nil and sv.RT_Return == true
+    local mins = (sv and tonumber(sv.RT_SurviveMinutes)) or 5
+    if mins < 1 then mins = 1 end
+    return on, mins
+end
 
 -- 메타그리드 기준 사전 검사: 맵 범위 밖 / 존재하지 않는 셀 걸러냄
 local function isMetaValid(x, y)
@@ -32,10 +52,11 @@ local function isMetaValid(x, y)
     return true
 end
 
--- 원점 기준 반경 100~200 링 안에서 메타 유효 좌표 하나 추첨. 실패 시 nil.
+-- 원점 기준 반경 min~max 링 안에서 메타 유효 좌표 하나 추첨. 실패 시 nil.
 local function rollCandidate(ox, oy)
+    local minR, maxR = distCfg()
     for _ = 1, MAX_PREROLLS do
-        local r = MIN_RADIUS + ZombRand(MAX_RADIUS - MIN_RADIUS + 1)
+        local r = minR + ZombRand(maxR - minR + 1)
         local a = math.rad(ZombRand(360))
         local x = math.floor(ox + r * math.cos(a) + 0.5)
         local y = math.floor(oy + r * math.sin(a) + 0.5)
@@ -69,6 +90,132 @@ local function stopLoop()
     end
     state = nil
 end
+
+-- ── 생존 복귀 (RT_Return, 기본 꺼짐) ─────────────────────────────────────────
+-- 착지 확정 시점부터 생존시간(RT_SurviveMinutes, 분) 카운트다운. 살아서 버티면
+-- exile과 동일하게 원래 위치로 자동 복귀. 상태는 player modData
+-- (rtReturnTime/rtOrigin)에 저장해 재접속 복구를 지원한다 -- exile의
+-- returnTime/originalPosition과 키를 분리해 두 기능이 동시 진행돼도 서로 안
+-- 덮는다. 사망 시 취소 (exile과 동일 정책).
+-- 카운트다운 중 랜텔 재발동 시: 최초 원점(rtOrigin)은 유지하고 타이머만 리셋
+-- -> 어디로 연쇄 텔포되든 복귀 지점은 "맨 처음 발동한 자리".
+local RTReturnTimerDisplay = ISPanel:derive("RTReturnTimerDisplay")
+local _retTick  = nil
+local _retPanel = nil
+
+function RTReturnTimerDisplay:new(player)
+    local w = getCore():getScreenWidth()
+    local h = getCore():getScreenHeight()
+    -- 폭격(h-150)/레인(h-180) 타이머와 동시 표시 대비 30px 위
+    local o = ISPanel:new(w / 2 - 80, h - 210, 160, 25)
+    setmetatable(o, self)
+    self.__index = self
+    o.player = player
+    o:noBackground()
+    return o
+end
+
+function RTReturnTimerDisplay:render()
+    local t = self.player:getModData().rtReturnTime or 0
+    local sec = math.floor(t / 60)
+    self:drawTextCentre(getText("IGUI_donation_random_teleport") .. " "
+        .. string.format("%02d:%02d", math.floor(sec / 60), sec % 60),
+        self.width / 2, 0, 0.55, 1.0, 0.55, 1, UIFont.Small)
+end
+
+function RTReturnTimerDisplay:update()
+    if (self.player:getModData().rtReturnTime or 0) <= 0 then
+        self:removeFromUIManager()
+        _retPanel = nil
+    end
+end
+
+local function rtDoReturn(p)
+    local md = p:getModData()
+    local o = md.rtOrigin
+    if o then
+        getSoundManager():PlaySound("exile_exit", false, 1.0)
+        local v = p:getVehicle()
+        if v then v:removePassenger(p) end
+        movePlayer(p, o.x, o.y, o.z)
+        global.b(" random_teleport: survived, returned to origin")
+    end
+    md.rtReturnTime = 0
+    md.rtOrigin = nil
+end
+
+local function rtStopCountdown(p)
+    local md = p and p:getModData()
+    if md then
+        md.rtReturnTime = 0
+        md.rtOrigin = nil
+    end
+    if _retTick then
+        Events.OnTick.Remove(_retTick)
+        _retTick = nil
+    end
+end
+
+local function rtStartTicker(p)
+    local md = p:getModData()
+    if _retTick then Events.OnTick.Remove(_retTick) end
+    _retTick = function()
+        if not md.rtReturnTime or md.rtReturnTime <= 0 then
+            Events.OnTick.Remove(_retTick)
+            _retTick = nil
+            return
+        end
+        md.rtReturnTime = md.rtReturnTime - 1
+        if md.rtReturnTime <= 0 then
+            md.rtReturnTime = 0
+            rtDoReturn(p)
+            Events.OnTick.Remove(_retTick)
+            _retTick = nil
+        end
+    end
+    Events.OnTick.Add(_retTick)
+    if not _retPanel then
+        _retPanel = RTReturnTimerDisplay:new(p)
+        _retPanel:addToUIManager()
+        _retPanel:setVisible(true)
+    end
+end
+
+-- 착지 확정 시 호출. 옵션 꺼짐이면 아무것도 안 함.
+local function rtArmReturn(p, origin)
+    local on, mins = returnCfg()
+    if not on then return end
+    local md = p:getModData()
+    if not md.rtOrigin then
+        md.rtOrigin = { x = origin.x, y = origin.y, z = origin.z }
+    end
+    md.rtReturnTime = mins * 60 * 60   -- 분 -> 틱 (폭격/유배와 동일: 1틱 = 1 감산)
+    rtStartTicker(p)
+end
+
+-- 사망 시 복귀 취소
+Events.OnPlayerDeath.Add(function(p)
+    if not p or not p:isLocalPlayer() then return end
+    rtStopCountdown(p)
+end)
+
+-- 재접속 복구: 다른 기능들과 동일 패턴 (OnTick에서 플레이어 로드 확인 후 1회)
+local _rtRecoveryDone = false
+local function rtRecovery()
+    if _rtRecoveryDone then
+        Events.OnTick.Remove(rtRecovery)
+        return
+    end
+    local p = getSpecificPlayer(0)
+    if not p then return end
+    local md = p:getModData()
+    if md.rtReturnTime and md.rtReturnTime > 0 and md.rtOrigin then
+        rtStartTicker(p)
+    end
+    _rtRecoveryDone = true
+    Events.OnTick.Remove(rtRecovery)
+end
+Events.OnTick.Add(rtRecovery)
 
 -- 재추첨 + 재텔포. 후보 고갈 / 한도 초과면 원점 복귀 후 종료.
 local function rerollOrGiveUp(p)
@@ -116,6 +263,7 @@ local function onTick()
     if isLandable(sq) then
         global.b(string.format(" random_teleport: landed at %d,%d (attempt %d)",
             state.cx, state.cy, state.attempts))
+        rtArmReturn(p, state.origin)   -- 생존 복귀 (옵션 켜져 있을 때만)
         stopLoop()
     else
         rerollOrGiveUp(p)

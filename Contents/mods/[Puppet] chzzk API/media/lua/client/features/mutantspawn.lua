@@ -29,11 +29,35 @@ local global = require("global")
 
 local KINDS = { "screamer", "brute", "roach", "tracer" }
 
+-- 샌드박스 타입 필터: PongDu.Mutant_<종류> 체크된 것만 등장 풀에 포함.
+-- 옵션 없음(구 세이브) = 허용. 4종 전부 해제면 스프린터 1마리로 폴백
+-- (서버 spawnSpecialZombie는 kind="sprinter"를 그대로 처리 -- modData 마킹 +
+--  MutantMark 브로드캐스트, 클라 initMutant가 walkType 적용).
+local KIND_OPTION = {
+    screamer = "Mutant_Screamer",
+    brute    = "Mutant_Brute",
+    roach    = "Mutant_Roach",
+    tracer   = "Mutant_Tracer",
+}
+
+local function pickKind()
+    local sv = SandboxVars and SandboxVars.PongDu
+    local pool = {}
+    for _, k in ipairs(KINDS) do
+        if not (sv and sv[KIND_OPTION[k]] == false) then
+            pool[#pool + 1] = k
+        end
+    end
+    if #pool == 0 then return "sprinter" end
+    return pool[ZombRand(#pool) + 1]
+end
+
 local haloKey = {
     screamer = "IGUI_mutant_name_screamer",
     brute    = "IGUI_mutant_name_brute",
     roach    = "IGUI_mutant_name_roach",
     tracer   = "IGUI_mutant_name_tracer",
+    sprinter = "IGUI_mutant_name_sprinter",
 }
 
 -- 소환 외침: 욕(SWEAR) + 종류(mutateType) + 마무리(ENDMENT) 3파트를 랜덤 조합.
@@ -60,7 +84,7 @@ local _nextScream = {}   -- [onlineID] = 다음 비명 허용 시각(ms). 클라
 function _a.a(sender)
     local player = getPlayer()
     if not player then return end
-    local kind = KINDS[ZombRand(#KINDS) + 1]
+    local kind = pickKind()
     sendClientCommand("PongDuMutant", "MutantSpawn", {
         ["ZedX"]   = player:getX() + zone.b(),
         ["ZedY"]   = player:getY() + zone.b(),

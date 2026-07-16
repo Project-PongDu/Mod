@@ -73,7 +73,15 @@ end
 -- Blast injury applied LOCALLY on each affected client (donee + nearby players
 -- in range). Only injures a player who is outside; shared so everyone caught in
 -- the blast takes the same damage.
+-- 부상 스위치: PongDu.Bombard_Injure (기본 꺼짐 = 부상 없음).
+-- 옵션 없음(구 세이브)도 꺼짐 취급. SandboxVars는 사용 시점에 읽는다.
+local function injureEnabled()
+    local sv = SandboxVars and SandboxVars.PongDu
+    return sv ~= nil and sv.Bombard_Injure == true
+end
+
 local function applyBlastInjury(p)
+    if not injureEnabled() then return end
     if not p or not p:isOutside() then return end
     p:clearVariable("BumpFallType")
     p:setBumpType("stagger")

@@ -18,12 +18,17 @@
 -- (client/features/zombierain.lua). 검증된 기존 채널 그대로.
 --
 -- [실험 유의] 생성된 빈 스퀘어는 지울 수 있는 API가 없어 월드에 잔류한다.
--- 발동당 최대 RAIN_TOTAL x DROP_Z개. 실험 월드에서 세이브 크기/부하 실측 후
+-- 발동당 최대 Rain_Count x DROP_Z개. 실험 월드에서 세이브 크기/부하 실측 후
 -- 본 규모(500) 확장 여부를 결정한다.
 
-local RAIN_DURATION_MS   = 30000                            -- 30초
-local RAIN_TOTAL         = 100                              -- 소환 규모
-local RAIN_INTERVAL_MS   = RAIN_DURATION_MS / RAIN_TOTAL
+-- 지속시간/마리수는 샌드박스(Rain_Duration/Rain_Count)를 클라가 Start에 실어
+-- 보내고, 여기 값들은 파라미터 누락(구버전 클라) 시 폴백 + 클램프 한계로 쓴다.
+local RAIN_DUR_DEFAULT_S = 30                               -- 지속시간 폴백 (초)
+local RAIN_DUR_MIN_S     = 5
+local RAIN_DUR_MAX_S     = 120
+local RAIN_CNT_DEFAULT   = 100                              -- 마리수 폴백
+local RAIN_CNT_MIN       = 10
+local RAIN_CNT_MAX       = 500
 local RAIN_DROP_Z        = 4                                -- 낙하 시작 높이 (4층)
 local RAIN_MIN_DIST      = 3                                -- 플레이어 직격 방지 최소 거리
 local SPAWN_CAP_PER_TICK = 5                                -- 랙 스파이크 후 몰아치기 상한
@@ -93,7 +98,10 @@ local function flushBatch(session, force)
     local now = getTimestampMs()
     if not force and now - session.lastFlush < BATCH_MS then return end
     session.lastFlush = now
-    sendServerCommand("PongDuRain", "RainMark", { ["zeds"] = session.batch })
+    sendServerCommand("PongDuRain", "RainMark", {
+        ["zeds"]   = session.batch,
+        ["sender"] = session.sender or "",   -- 스프린터 이름표용 (세션 공통)
+    })
     session.batch = {}
 end
 
@@ -111,7 +119,7 @@ local function onTick()
             if not s.startMs then s.startMs = now end
             local elapsed = now - s.startMs
             -- 경과시간 기준 목표 마리수와의 차분만큼 스폰 (틱당 상한으로 폭주 방지)
-            local target = math.floor(elapsed / RAIN_INTERVAL_MS)
+            local target = math.floor(elapsed / s.intervalMs)
             if target > #s.cols then target = #s.cols end
             local n = target - s.spawned
             if n > SPAWN_CAP_PER_TICK then n = SPAWN_CAP_PER_TICK end
@@ -125,7 +133,7 @@ local function onTick()
                 end
             end
             flushBatch(s, false)
-            if s.spawned >= #s.cols or elapsed > RAIN_DURATION_MS + 5000 then
+            if s.spawned >= #s.cols or elapsed > s.durMs + 5000 then
                 flushBatch(s, true)
                 print("[PongDuRain] session done player=" .. tostring(s.player:getUsername())
                     .. " spawned=" .. tostring(s.spawned) .. " hits=" .. tostring(s.hits)
@@ -142,10 +150,19 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     if not player then return end
     local cell = getCell()
     if not cell then return end
-    local r   = tonumber(data and data["r"]) or 55
-    local pct = tonumber(data and data["pct"]) or 0
+    local r      = tonumber(data and data["r"]) or 55
+    local pct    = tonumber(data and data["pct"]) or 0
+    local durS   = tonumber(data and data["dur"]) or RAIN_DUR_DEFAULT_S
+    local cnt    = tonumber(data and data["cnt"]) or RAIN_CNT_DEFAULT
+    local sender = tostring(data and data["sender"] or "")
     if r < 10 then r = 10 elseif r > 100 then r = 100 end
     if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
+    if durS < RAIN_DUR_MIN_S then durS = RAIN_DUR_MIN_S
+    elseif durS > RAIN_DUR_MAX_S then durS = RAIN_DUR_MAX_S end
+    cnt = math.floor(cnt)
+    if cnt < RAIN_CNT_MIN then cnt = RAIN_CNT_MIN
+    elseif cnt > RAIN_CNT_MAX then cnt = RAIN_CNT_MAX end
+    local durMs = durS * 1000
 
     -- 컬럼 일괄 선정 + 서버 스퀘어 생성 + 클라 브로드캐스트 페이로드 구성
     -- [계측] 시작 틱 스파이크 실측용: 선정/생성 각 단계 소요시간을 분리 측정
@@ -153,7 +170,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local px, py = player:getX(), player:getY()
     local cols, payload = {}, {}
     local missedPick = 0
-    for _ = 1, RAIN_TOTAL do
+    for _ = 1, cnt do
         local x, y = pickRainColumn(cell, px, py, r)
         if x then
             cols[#cols + 1]       = { x = x, y = y }
@@ -189,9 +206,12 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         .. " sqCreated=" .. tostring(createdSq) .. " sqReused=" .. tostring(reusedSq))
 
     _sessions[#_sessions + 1] = {
-        player    = player,
-        cols      = cols,
-        sprintPct = pct,
+        player     = player,
+        cols       = cols,
+        sprintPct  = pct,
+        durMs      = durMs,
+        intervalMs = durMs / cnt,
+        sender     = sender,
         readyAt   = getTimestampMs() + PREP_DELAY_MS,
         startMs   = nil,
         spawned   = 0,
@@ -201,5 +221,6 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     }
     print("[PongDuRain] session start player=" .. tostring(player:getUsername())
         .. " r=" .. tostring(r) .. " sprint%=" .. tostring(pct)
+        .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
         .. " cols=" .. tostring(#cols))
 end)
