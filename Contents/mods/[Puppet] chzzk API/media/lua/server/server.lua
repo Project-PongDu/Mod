@@ -172,6 +172,22 @@ local function srvlog(msg)
     if w then w:write(os.date("%Y-%m-%d %H:%M:%S") .. " - " .. tostring(msg) .. "\n") w:close() end
 end
 
+-- 소환 좀비 플레이어 어그로 창 브로드캐스트.
+-- 클라 features/aggro.lua가 수신 -> 창 유지시간(dur) 동안 반경 내 자기 소유
+-- 좀비에게 spotted(도네이터, true) + setLastHeardSound(도네이터 좌표)를 건다.
+-- target이 박히면 ZombieGroupManager(랠리 무리배회)가 못 채가므로, 대량 스폰
+-- 좀비가 랠리 척력 벡터를 쫓아 방사형으로 흩어지는 현상을 차단한다.
+-- 좀비는 클라 권한이라 서버측 setTarget은 소유 클라 동기화에 덮인다 — 반드시
+-- 이 브로드캐스트 -> 클라 적용 경로여야 한다.
+local function broadcastAggro(player, x, y, r, durMs)
+    if not player then return end
+    sendServerCommand("PongDuAggro", "Window", {
+        ["x"] = x, ["y"] = y, ["r"] = r,
+        ["dur"] = durMs,
+        ["pid"] = player:getOnlineID(),
+    })
+end
+
 local function onClientCommand(module, command, player, data)
     if module == "PongDuZombie" and command == "ZedSpawn" then
         srvlog("ZedSpawn RECEIVED on server")
@@ -190,7 +206,11 @@ local function onClientCommand(module, command, player, data)
         local ok, err = pcall(function()
             spawnZombies(x, y, z, amount, true, isSprint, sender)
         end)
-        if ok then srvlog("spawnZombies OK")
+        if ok then
+            srvlog("spawnZombies OK")
+            -- 서버 오프셋(±4) + 클라 zone 오프셋 포함 반경 15면 충분히 커버
+            -- (zombie.lua tagNew의 신규 좀비 판정 반경과 동일 기준)
+            broadcastAggro(player, x, y, 15, 8000)
         else srvlog("spawnZombies ERROR: " .. tostring(err)) end
     elseif module == "PongDuMutant" and command == "MutantSpawn" then
         local x    = tonumber(data["ZedX"])
@@ -202,7 +222,9 @@ local function onClientCommand(module, command, player, data)
             local ok, err = pcall(function()
                 spawnSpecialZombie(x, y, z, kind, data["sender"] or "")
             end)
-            if ok then srvlog("MutantSpawn OK")
+            if ok then
+                srvlog("MutantSpawn OK")
+                broadcastAggro(player, x, y, 10, 8000)
             else srvlog("MutantSpawn ERROR: " .. tostring(err)) end
         end
     end
@@ -529,6 +551,11 @@ DOServer["PongDuRiseUp"]["RiseUp"] = function(player, data)
         sendServerCommand("PongDuRiseUp", "GetupWindow", {
             ["x"] = cx, ["y"] = cy, ["r"] = r,
         })
+        -- 부활 좀비 어그로: onground 상태에서 target을 박아도 기상 전이
+        -- (reanimatetimer 기반 AnimSet 조건)와 무관하고, 일어나는 즉시 추격
+        -- 시작. target 보유 좀비는 랠리 편입에서 제외돼 흩어짐도 차단된다.
+        -- 창 10초 = 서버 부활 -> 클라 동기화 -> 기상(30~90틱)까지 커버.
+        broadcastAggro(player, cx, cy, r + 5, 10000)
     end
 end
 

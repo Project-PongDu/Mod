@@ -200,6 +200,18 @@ Events.OnClientCommand.Add(function(module, command, player, data)
 
     sendServerCommand("PongDuRain", "Prep", { ["cols"] = payload, ["z"] = RAIN_DROP_Z })
 
+    -- 낙하 좀비 플레이어 어그로 창 (클라 features/aggro.lua 수신).
+    -- 아래 spawnRainZombie의 서버측 setTarget은 좀비 클라 권한 구조상 소유
+    -- 클라 동기화에 덮여 실효가 없다 — 실제 어그로는 이 브로드캐스트를 받은
+    -- 각 클라가 자기 소유 좀비에 건다. 좀비가 지속시간 내내 낙하하므로 창은
+    -- 준비지연 + 지속시간 + 착지 여유(8초)까지 연다. 반경은 컬럼 선정 반경
+    -- + 착지 후 미세 이동 여유.
+    sendServerCommand("PongDuAggro", "Window", {
+        ["x"] = px, ["y"] = py, ["r"] = r + 10,
+        ["dur"] = PREP_DELAY_MS + durMs + 8000,
+        ["pid"] = player:getOnlineID(),
+    })
+
     print("[PongDuRain] prep pickMs=" .. tostring(tPick1 - tPick0)
         .. " squareMs=" .. tostring(tSquares1 - tPick1)
         .. " cols=" .. tostring(#cols) .. " missedPick=" .. tostring(missedPick)
