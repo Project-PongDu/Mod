@@ -23,9 +23,11 @@
 -- 사망~리스폰 사이에 게임이 튕겨도 재접속 후 리스폰 시 정상 복원된다.
 --
 -- 보존되는 상태: 커스텀 이름(의류 제외 -- 아래 참고) / 내구도(cond, condMax) /
--- 소모품 잔량 / 총기(장전 수, 약실, 탄창 삽입, 부착물) / 음식(부패도, 섭취 잔량) /
--- 의류(오염, 피, 젖음) / 열쇠 keyId / modData(스칼라 값만) / 가방 중첩 구조 전체 /
--- 손 장착(주무기·보조무기) / 핫바 부착 슬롯(벨트/등/홀스터 등).
+-- 소모품 잔량 / 총기(장전 수, 약실, 탄창 삽입, 부착물, 동적 MaxAmmo) /
+-- 독립 탄창 잔탄 / 음식(부패도, 섭취 잔량) / 의류(오염, 피, 젖음) /
+-- 외형(tint 색상, hue, 베이스 텍스처, 텍스처 초이스, 데칼) / 열쇠 keyId /
+-- modData(스칼라 값만) / 가방 중첩 구조 전체 / 손 장착(주무기·보조무기) /
+-- 핫바 부착 슬롯(벨트/등/홀스터 등).
 --
 -- 핫바 부착 복원은 반드시 정규 경로(getPlayerHotbar():attachItem)로만 한다.
 -- AttachedItems에 직접 setItem 하면 하단 핫바 UI가 인식하지 못해 "몸에만 붙어
@@ -37,8 +39,8 @@
 -- setName()으로 박아버리면 부활할 때마다 접두어가 계속 누적된다. 오염도/내구도/
 -- 젖음만 복원하면 게임이 알아서 매번 정확히 새로 계산해준다.
 --
--- 한계: modData 안의 중첩 테이블, 라디오류 DeviceData, 의류 visual(색/구멍/
--- 패치), 지도 필기, 비-의류 아이템의 "부서짐/오염수" 등 이름에 얹히는 기타
+-- 한계: modData 안의 중첩 테이블, 라디오류 DeviceData, 의류 구멍/패치 상태,
+-- 지도 필기, 비-의류 아이템의 "부서짐/오염수" 등 이름에 얹히는 기타
 -- 동적 표시(예: isBroken())는 복원되지 않는다.
 
 local invsave = {}
@@ -131,6 +133,13 @@ end
 -- 20 handSlot(P/S/B/-)  21 hotbarSlotType  22 hotbarModelAttach
 -- 23 maxAmmo (MaxAmmo>0인 아이템만; GunFighter류가 드럼/확장 탄창 장착 시
 --    총기 MaxAmmo를 동적으로 바꾸므로 기본값 복원으로 인한 불일치 방지)
+-- 24 visual(콤마: tintR,tintG,tintB,hue,decal,baseTex,texChoice) — 미복원 시
+--    ItemVisual 게터가 랜덤 재추첨(OutfitRNG)해 색/무늬가 바뀌는 문제 방지
+-- 25 magazineType  26 fireMode (원거리 총기만) — GunFighter류가 드럼/확장 탄창
+--    삽입이나 트리거 그룹 변경 시 총기 필드를 동적으로 바꾸는데, 팩토리 재생성은
+--    스크립트 기본값으로 롤백돼 배출 탄창 타입이 어긋나는 문제 방지
+-- 27 jammed(0/1)  28 spentRoundChambered(0/1)  29 spentRoundCount (원거리 총기만)
+--    — 잼/탄피 배출 상태. 하드코어 리로딩류의 racking 정합 유지
 
 local function serializeItem(item, depth, wornLoc, out, handSlot)
     -- (핫바 부착 정보는 아이템 자신이 들고 있으므로 인자 추가 없이 여기서 직접 읽는다)
@@ -236,6 +245,50 @@ local function serializeItem(item, depth, wornLoc, out, handSlot)
     -- setMaxAmmo로 총기 값을 바꾸는데, 팩토리 생성 복원은 스크립트 기본값으로
     -- 돌아가 modData(ClipType 등)와 어긋나므로 실제 값을 저장해 되돌린다.
     f[23] = (item:getMaxAmmo() > 0) and tostring(item:getMaxAmmo()) or "-"
+
+    -- 24: 외형. tint는 no-arg 게터(미설정이면 nil), hue/decal 게터는 ClothingItem
+    -- 인자가 필요하다(호출 시점에 미설정이면 그 자리에서 확정되는데, 이미 착용/
+    -- 렌더된 아이템은 확정돼 있고 가방 속 미렌더 아이템은 어차피 플레이어가 본 적
+    -- 없는 색이라 여기서 확정해도 무방). 복원 없이 두면 OutfitRNG가 랜덤 재추첨해
+    -- 색/무늬/데칼이 전부 바뀐다.
+    local vis = item:getVisual()
+    if vis then
+        local v = { "-", "-", "-", "-", "-", "-", "-" }
+        local ci = vis:getClothingItem()
+        local tint = vis:getTint()
+        if not tint and ci then tint = vis:getTint(ci) end
+        if tint then
+            v[1] = tostring(tint:getRedFloat())
+            v[2] = tostring(tint:getGreenFloat())
+            v[3] = tostring(tint:getBlueFloat())
+        end
+        if ci then
+            v[4] = tostring(vis:getHue(ci))
+            local dcl = vis:getDecal(ci)
+            if dcl then v[5] = enc(dcl) end
+        end
+        v[6] = tostring(vis:getBaseTexture())
+        v[7] = tostring(vis:getTextureChoice())
+        f[24] = table.concat(v, ",")
+    else
+        f[24] = "-"
+    end
+
+    -- 25/26: 총기 동적 필드. GunFighter류가 드럼/확장 탄창 삽입 시 setMagazineType,
+    -- 트리거 그룹 변경 시 setFireMode로 필드를 바꾸는데, 배출 탄창 생성이
+    -- gun:getMagazineType() 기준이라 이걸 복원 안 하면 기본 탄창(예: SPASClip)에
+    -- 드럼 잔탄이 담겨 나오는 버그가 생긴다.
+    if instanceof(item, "HandWeapon") and item:isRanged() then
+        local mt = item:getMagazineType()
+        f[25] = (mt and mt ~= "") and enc(mt) or "-"
+        local fm = item:getFireMode()
+        f[26] = (fm and fm ~= "") and enc(fm) or "-"
+        f[27] = item:isJammed() and "1" or "0"
+        f[28] = item:isSpentRoundChambered() and "1" or "0"
+        f[29] = tostring(item:getSpentRoundCount())
+    else
+        f[25], f[26], f[27], f[28], f[29] = "-", "-", "-", "-", "-"
+    end
 
     out[#out + 1] = table.concat(f, SEP)
 end
@@ -370,6 +423,13 @@ local function restoreLine(f, player, stack, pendingHotbar)
     if f[8] ~= "-" then item:setCurrentAmmoCount(tonumber(f[8]) or 0) end
 
     if instanceof(item, "HandWeapon") and item:isRanged() then
+        -- 동적 탄창 타입/발사 모드 복원 (잔탄·MaxAmmo와 정합 유지).
+        -- 구버전 스냅샷엔 f[25]/f[26]이 없으므로 nil 가드.
+        if f[25] and f[25] ~= "-" then item:setMagazineType(dec(f[25])) end
+        if f[26] and f[26] ~= "-" then item:setFireMode(dec(f[26])) end
+        if f[27] and f[27] ~= "-" then item:setJammed(f[27] == "1") end
+        if f[28] and f[28] ~= "-" then item:setSpentRoundChambered(f[28] == "1") end
+        if f[29] and f[29] ~= "-" then item:setSpentRoundCount(tonumber(f[29]) or 0) end
         if f[9]  ~= "-" then item:setRoundChambered(f[9] == "1") end
         if f[10] ~= "-" then item:setContainsClip(f[10] == "1") end
         if f[18] and f[18] ~= "-" and f[18] ~= "" then
@@ -412,6 +472,24 @@ local function restoreLine(f, player, stack, pendingHotbar)
                     md[k] = dec(v)
                 end
             end
+        end
+    end
+
+    -- 외형 복원 (AddItem/착용 전에 세팅해야 첫 렌더부터 저장된 외형이 적용됨).
+    -- 구버전 스냅샷엔 f[24]가 없으므로 nil 가드.
+    if f[24] and f[24] ~= "-" and f[24] ~= "" then
+        local vis = item:getVisual()
+        if vis then
+            local v = {}
+            for tok in string.gmatch(f[24] .. ",", "([^,]*),") do v[#v + 1] = tok end
+            if v[1] and v[1] ~= "-" then
+                vis:setTint(ImmutableColor.new(
+                    tonumber(v[1]) or 1, tonumber(v[2]) or 1, tonumber(v[3]) or 1, 1))
+            end
+            if v[4] and v[4] ~= "-" then vis:setHue(tonumber(v[4]) or 0) end
+            if v[5] and v[5] ~= "-" then vis:setDecal(dec(v[5])) end
+            if v[6] and v[6] ~= "-" then vis:setBaseTexture(tonumber(v[6]) or -1) end
+            if v[7] and v[7] ~= "-" then vis:setTextureChoice(tonumber(v[7]) or -1) end
         end
     end
 
@@ -501,6 +579,13 @@ local function restoreSnapshot(lines)
             hotbar:reloadIcons()
         end
     end
+
+    -- 인벤토리 UI 새로고침: 복원 직후 아이콘/가방 탭이 갱신 안 된 채 남는 것 방지.
+    -- 바닐라 정규 패턴(refreshBackpacks + dirtyUI)만 사용.
+    local pn = player:getPlayerNum()
+    if getPlayerInventory(pn) then getPlayerInventory(pn):refreshBackpacks() end
+    if getPlayerLoot(pn) then getPlayerLoot(pn):refreshBackpacks() end
+    if ISInventoryPage and ISInventoryPage.dirtyUI then ISInventoryPage.dirtyUI() end
 
     clearSnapshotFile()
     player:Say(getText("IGUI_invsave_restored"))
