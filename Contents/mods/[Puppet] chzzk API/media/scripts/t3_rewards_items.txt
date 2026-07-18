@@ -158,27 +158,27 @@ item serum_sneak
 item weapon_box_melee
 {
     DisplayCategory     = Container,
-    Weight              = 0.1,
+    Weight              = 0.3,
     Type                = Normal,
     DisplayName         = Melee Weapon Box,
-    Icon                = Toolbox,
+    Icon                = DuffelbagMilitary,
     Tooltip             = Tooltip_weapon_box,
 }
 
 item weapon_box_ranged
 {
     DisplayCategory     = Container,
-    Weight              = 0.1,
+    Weight              = 0.3,
     Type                = Normal,
     DisplayName         = Ranged Weapon Box,
-    Icon                = Toolbox,
+    Icon                = DuffelbagMilitary,
     Tooltip             = Tooltip_weapon_box,
 }
 
 recipe Open Weapon Box
 {
     weapon_box_melee,
-    Result:Toolbox,
+    Result:weapon_box_melee,
     RemoveResultItem:true,
     OnCreate:t3RandomWeapon.OpenMeleeBox,
     CanBeDoneFromFloor:true,
@@ -189,7 +189,7 @@ recipe Open Weapon Box
 recipe Open Weapon Box
 {
     weapon_box_ranged,
-    Result:Toolbox,
+    Result:weapon_box_ranged,
     RemoveResultItem:true,
     OnCreate:t3RandomWeapon.OpenRangedBox,
     CanBeDoneFromFloor:true,
@@ -216,7 +216,7 @@ recipe Open Vehicle Drop Kit
     RemoveResultItem:true,
     OnCreate:t3VehicleDrop.OpenKit,
     CanBeDoneFromFloor:true,
-    Time:600,
+    Time:200,
     Sound:RadioTalk,
 }
 
