@@ -81,11 +81,12 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     vehicle:transmitEngine()
 
     -- 열쇠 지급.
-    -- 서버가 남의 인벤토리에 직접 AddItem하면 owning client에 반영이 안 될 수 있어
-    -- (검증된 API 부재), MP에서는 키를 만들지 않고 vehicleId만 요청자 본인에게
-    -- sendServerCommand로 전달한다. 실제 키 생성+AddItem은
-    -- client/VehicleDropKeyGrant.lua 에서 그 플레이어의 로컬 클라이언트가 직접 수행
-    -- (owning client가 직접 하므로 자연 동기화됨 -- 이 모드의 bombard/mutant 알림과 동일 패턴).
+    -- 키의 실체는 "CarKey 아이템 + keyId(int) 일치"가 전부라 (BaseVehicle.createVehicleKey
+    -- 디컴파일 확인), 차량 객체 없이도 keyId만 있으면 어디서든 유효한 키를 만들 수 있다.
+    -- 예전 방식(클라가 getVehicleById로 차량을 찾아 createVehicleKey)은 드랍 지점이
+    -- 50~100타일이라 차량이 클라 스트리밍 범위 밖이면 조회 실패 -> 키 미지급 버그가 있었다.
+    -- 이제 서버가 keyId/차종/색상만 뽑아 보내고, 클라(VehicleDropKeyGrant.lua)가
+    -- 차량 조회 없이 로컬에서 키를 직접 생성한다.
     if not isClient() and not isServer() then
         -- 솔로: 같은 프로세스이므로 바로 생성+지급해도 동기화 문제 없음
         local key = vehicle:createVehicleKey()
@@ -93,12 +94,27 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
             local keyName = (sender and sender ~= "" and (sender .. "의 ") or "") .. key:getDisplayName()
             key:setName(keyName)
             player:getInventory():AddItem(key)
+            print("[t3VehicleDrop] 솔로 키 지급 완료: " .. keyName)
+        else
+            print("[t3VehicleDrop] 솔로 키 생성 실패 (vehicleId " .. tostring(vehicleId) .. ")")
         end
     elseif isServer() then
+        -- 서버측 키를 임시 생성해 색상만 추출 (바닐라 키 색 = 차체 색 유지용)
+        local colR, colG, colB
+        local tmpKey = vehicle:createVehicleKey()
+        local col = tmpKey and tmpKey:getColor()
+        if col then
+            colR, colG, colB = col:getR(), col:getG(), col:getB()
+        end
+
         sendServerCommand(player, "PongDuVehicleDrop", "GrantKey", {
-            vehicleId = vehicleId,
+            keyId      = vehicle:getKeyId(),
+            scriptName = vehicle:getScript():getName(),
+            colR = colR, colG = colG, colB = colB,
             sender = sender,
+            vehicleId = vehicleId, -- 로그 추적용
         })
+        print("[t3VehicleDrop] GrantKey 전송 (keyId " .. tostring(vehicle:getKeyId()) .. ", vehicleId " .. tostring(vehicleId) .. ")")
     end
 
     print("[t3VehicleDrop] " .. tostring(vehicleType) .. " 소환 완료 (후원자: " .. tostring(sender) .. ")")

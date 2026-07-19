@@ -155,8 +155,8 @@ end
 -- 심볼은 개봉한 플레이어 본인의 맵에만 표시되고, 바닐라 맵 심볼 저장 체계에 따라 영구 보존된다.
 -- 이 파일은 shared라 데디 서버에서도 로드되지만, OpenKit 자체가 클라이언트에서만
 -- 실행되므로 (레시피 OnCreate) ISWorldMap이 없는 환경 방어만 해두면 된다.
-local MARKER_SYMBOL = "Target" -- 바닐라 MapSymbolDefinitions 등록 심볼
-local MARKER_R, MARKER_G, MARKER_B = 0.85, 0.1, 0.1
+local MARKER_SYMBOL = "Boat" -- 바닐라 MapSymbolDefinitions 등록 심볼
+local MARKER_R, MARKER_G, MARKER_B = 0.1, 0.3, 0.9
 
 local function drawDropMarker(player, x, y)
     if isServer() then return end
