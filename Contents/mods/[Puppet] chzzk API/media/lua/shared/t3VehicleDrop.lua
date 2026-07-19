@@ -18,8 +18,8 @@
 
 t3VehicleDrop = t3VehicleDrop or {}
 
-local MIN_SEARCH_RADIUS = 10 -- 플레이어로부터 최소 이 거리(타일) 이상 떨어진 곳에만 소환
-local MAX_SEARCH_RADIUS = 30 -- 이 반경 안에서 자리를 못 찾으면 최후 수단으로 플레이어 발밑에 소환
+local MIN_SEARCH_RADIUS = 50 -- 플레이어로부터 최소 이 거리(타일) 이상 떨어진 곳에만 소환
+local MAX_SEARCH_RADIUS = 100 -- 이 반경 안에서 자리를 못 찾으면 최후 수단으로 플레이어 발밑에 소환
 
 -- 실외 + 차량 없음 + 물 아님 + 장애물 없음(플레이어/좀비 제외)
 local function isValidDropSquare(sq)
@@ -38,6 +38,10 @@ local AREA_RADIUS = 7 -- 5x5 = 중심 기준 -2~+2
 
 -- (cx,cy) 중심 5x5 타일이 전부 유효한 실외공간인지 확인
 local function isValidDropArea(cell, cx, cy, pz)
+    -- 중심 스퀘어부터 검사: 미로드 지역(nil)이나 실내면 전체 스캔 없이 즉시 탈락
+    if not isValidDropSquare(cell:getGridSquare(cx, cy, pz)) then
+        return false
+    end
     for dx = -AREA_RADIUS, AREA_RADIUS do
         for dy = -AREA_RADIUS, AREA_RADIUS do
             local sq = cell:getGridSquare(cx + dx, cy + dy, pz)
@@ -147,6 +151,44 @@ local function pickVehicleType()
     return pickFromSandboxPool()
 end
 
+-- 월드맵(M키)에 투하 지점 심볼을 그린다. (BATMAN_EHE_MILITARY_DROP의 drawSymbol 패턴)
+-- 심볼은 개봉한 플레이어 본인의 맵에만 표시되고, 바닐라 맵 심볼 저장 체계에 따라 영구 보존된다.
+-- 이 파일은 shared라 데디 서버에서도 로드되지만, OpenKit 자체가 클라이언트에서만
+-- 실행되므로 (레시피 OnCreate) ISWorldMap이 없는 환경 방어만 해두면 된다.
+local MARKER_SYMBOL = "Target" -- 바닐라 MapSymbolDefinitions 등록 심볼
+local MARKER_R, MARKER_G, MARKER_B = 0.85, 0.1, 0.1
+
+local function drawDropMarker(player, x, y)
+    if isServer() then return end
+    if not ISWorldMap or not ISWorldMap.ShowWorldMap then
+        print("[t3VehicleDrop] ISWorldMap 없음, 맵 심볼 표시 생략")
+        return
+    end
+
+    local playerNum = player:getPlayerNum()
+    if not ISWorldMap_instance then
+        -- 최초 1회 인스턴스 강제 생성 트릭 (참고 모드와 동일 패턴)
+        ISWorldMap.ShowWorldMap(playerNum)
+        ISWorldMap.HideWorldMap(playerNum)
+    end
+    if not ISWorldMap_instance then
+        print("[t3VehicleDrop] ISWorldMap_instance 생성 실패, 맵 심볼 표시 생략")
+        return
+    end
+
+    local symbolsAPI = ISWorldMap_instance.mapAPI and ISWorldMap_instance.mapAPI:getSymbolsAPI()
+    if not symbolsAPI then
+        print("[t3VehicleDrop] symbolsAPI 조회 실패, 맵 심볼 표시 생략")
+        return
+    end
+
+    local sym = symbolsAPI:addTexture(MARKER_SYMBOL, x, y)
+    sym:setRGBA(MARKER_R, MARKER_G, MARKER_B, 1.0)
+    sym:setAnchor(0.5, 0.5)
+    sym:setScale((ISMap and ISMap.SCALE) or 0.666)
+    print("[t3VehicleDrop] 맵 심볼 표시 완료 (" .. tostring(x) .. "," .. tostring(y) .. ")")
+end
+
 -- 소모된 kit 아이템의 modData에 심어둔 후원자 이름을 읽는다 (t3RandomWeapon.lua와 동일 패턴).
 local function findDonor(items)
     if not items then return "" end
@@ -180,5 +222,8 @@ function t3VehicleDrop.OpenKit(items, result, player)
         })
     end
 
-    player:Say(getText("IGUI_donation_vehicle_drop") .. "!")
+    local sx, sy = sq:getX(), sq:getY()
+    player:Say(getText("IGUI_donation_vehicle_drop_location",
+        string.format("%d", sx), string.format("%d", sy)))
+    drawDropMarker(player, sx, sy)
 end
