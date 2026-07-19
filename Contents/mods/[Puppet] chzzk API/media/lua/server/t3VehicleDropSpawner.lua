@@ -23,6 +23,90 @@ local function scatterParachutes(square)
     end
 end
 
+-- 바닐라 trySpawnKey가 addToWorld 시점에 자동으로 뿌리는 키를 회수한다.
+-- (BaseVehicle 디컴파일 기준 자동 키의 행선지: 점화구/도어, 글로브박스,
+--  차량 기준 ±10타일 z0~2의 counter/officedrawers/shelves/desk 컨테이너,
+--  같은 범위 바닥 월드아이템, 그리고 ±10타일 내 좀비의 사망드랍.)
+-- 좀비 사망드랍(addItemToSpawnAtDeath)만은 제거 API가 없어 회수 불가 — 드물게
+-- 근처 좀비 시체에서 여분 키가 나올 수 있는 알려진 한계.
+local KEY_CLEANUP_RADIUS = 10 -- addKeyToSquare의 탐색 반경과 동일
+
+local function isAutoKey(item, keyId)
+    return item and item:getType() == "CarKey" and item:getKeyId() == keyId
+end
+
+local function removeKeysFromContainer(container, keyId)
+    if not container then return 0 end
+    local removed = 0
+    local items = container:getItems()
+    for i = items:size() - 1, 0, -1 do
+        local item = items:get(i)
+        if isAutoKey(item, keyId) then
+            container:Remove(item)
+            removed = removed + 1
+        end
+    end
+    return removed
+end
+
+local function removeAutoSpawnedKeys(vehicle)
+    local keyId = vehicle:getKeyId()
+    local removed = 0
+
+    -- 점화구/도어에 꽂힌 키
+    if vehicle:isKeysInIgnition() then vehicle:setKeysInIgnition(false) end
+    if vehicle:isKeyIsOnDoor() then vehicle:setKeyIsOnDoor(false) end
+    if vehicle:getCurrentKey() then
+        vehicle:setCurrentKey(nil)
+        removed = removed + 1
+    end
+
+    -- 글로브박스 (VehicleEasyUse=true면 여기로 확정 스폰됨)
+    local gloveBox = vehicle:getPartById("GloveBox")
+    if gloveBox then
+        removed = removed + removeKeysFromContainer(gloveBox:getItemContainer(), keyId)
+    end
+
+    -- 차량 기준 ±10타일, z 0~2: 바닥 월드아이템 + 가구 컨테이너
+    local cell = getCell()
+    local vx = math.floor(vehicle:getX())
+    local vy = math.floor(vehicle:getY())
+    for sx = vx - KEY_CLEANUP_RADIUS, vx + KEY_CLEANUP_RADIUS do
+        for sy = vy - KEY_CLEANUP_RADIUS, vy + KEY_CLEANUP_RADIUS do
+            for sz = 0, 2 do
+                local sq = cell:getGridSquare(sx, sy, sz)
+                if sq then
+                    -- 바닥 월드아이템
+                    local wobjs = sq:getWorldObjects()
+                    for i = wobjs:size() - 1, 0, -1 do
+                        local wobj = wobjs:get(i)
+                        local item = wobj and wobj:getItem()
+                        if isAutoKey(item, keyId) then
+                            sq:transmitRemoveItemFromSquare(wobj)
+                            removed = removed + 1
+                        end
+                    end
+                    -- 가구 컨테이너 (trySpawnKey가 노리는 4종만)
+                    local objs = sq:getObjects()
+                    for i = 0, objs:size() - 1 do
+                        local obj = objs:get(i)
+                        local cont = obj and obj:getContainer()
+                        if cont then
+                            local ctype = cont:getType()
+                            if ctype == "counter" or ctype == "officedrawers"
+                                or ctype == "shelves" or ctype == "desk" then
+                                removed = removed + removeKeysFromContainer(cont, keyId)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    print("[t3VehicleDrop] 자동 스폰 키 회수: " .. removed .. "개 (keyId " .. tostring(keyId) .. ")")
+end
+
 function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     local square = getCell():getGridSquare(x, y, z)
     if not square then
@@ -45,6 +129,9 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
         print("[t3VehicleDrop] 소환 후 차량 재조회 실패: " .. tostring(vehicleType))
         return
     end
+
+    -- 바닐라가 자동으로 뿌린 키 회수 (우리 키만 유일한 키가 되도록)
+    removeAutoSpawnedKeys(vehicle)
 
     -- 연료 풀
     local gasTank = vehicle:getPartById("GasTank")

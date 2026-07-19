@@ -53,28 +53,31 @@ local function isValidDropArea(cell, cx, cy, pz)
     return true
 end
 
--- 플레이어 좌표를 중심으로 링 단위(체비셰프 거리)로 확장 탐색.
--- 5x5 타일이 전부 유효해야 통과하므로 InsurgentStartLUV의 무검증 배치보다 훨씬 안전하다.
+local MAX_PLACEMENT_ATTEMPTS = 300 -- 무작위 샘플링 시도 횟수 상한
+
+-- 플레이어 중심 도넛(반경 MIN~MAX) 안에서 완전 무작위 좌표를 샘플링.
+-- 예전 링 순차 스캔은 항상 북서쪽부터 훑어서 연속 소환 시 링을 따라
+-- 규칙적으로 배치되는 패턴이 눈에 띄는 문제가 있었다 (무작위 각도+거리로 대체).
+-- isValidDropArea의 중심 선검사 덕에 미로드/실내 후보는 즉시 탈락하므로
+-- 300회 시도해도 비용은 낮다.
 local function findDropSquare(player)
     local cell = getCell()
     local pz = 0 -- 항상 지상 기준으로 탐색 (옥상/발코니에서 열어도 차는 지상에 떨어져야 함)
     local px = math.floor(player:getX())
     local py = math.floor(player:getY())
 
-    for r = MIN_SEARCH_RADIUS, MAX_SEARCH_RADIUS do
-        for dx = -r, r do
-            for dy = -r, r do
-                if math.max(math.abs(dx), math.abs(dy)) == r then
-                    local cx, cy = px + dx, py + dy
-                    if isValidDropArea(cell, cx, cy, pz) then
-                        return cell:getGridSquare(cx, cy, pz)
-                    end
-                end
-            end
+    for attempt = 1, MAX_PLACEMENT_ATTEMPTS do
+        local dist  = ZombRandFloat(MIN_SEARCH_RADIUS, MAX_SEARCH_RADIUS)
+        local angle = ZombRandFloat(0, 6.2831853) -- 2*pi
+        local cx = px + math.floor(math.cos(angle) * dist + 0.5)
+        local cy = py + math.floor(math.sin(angle) * dist + 0.5)
+        if isValidDropArea(cell, cx, cy, pz) then
+            print("[t3VehicleDrop] 무작위 배치 성공 (" .. attempt .. "회차, " .. cx .. "," .. cy .. ")")
+            return cell:getGridSquare(cx, cy, pz)
         end
     end
 
-    print("[t3VehicleDrop] " .. MIN_SEARCH_RADIUS .. "~" .. MAX_SEARCH_RADIUS .. " 타일 범위 내 실외 자리를 못 찾음, 발밑에 강제 소환")
+    print("[t3VehicleDrop] " .. MAX_PLACEMENT_ATTEMPTS .. "회 무작위 샘플링 실패 (" .. MIN_SEARCH_RADIUS .. "~" .. MAX_SEARCH_RADIUS .. "타일), 발밑에 강제 소환")
     return player:getCurrentSquare()
 end
 
@@ -121,8 +124,9 @@ local function collectMilitaryVehicles()
     return list
 end
 
--- VehicleDrop_Pool ("Base.A;Base.B;Base.C") 파싱 후 무작위 선택.
-local function pickFromSandboxPool()
+-- VehicleDrop_Pool ("Base.A;Base.B;Base.C") 파싱.
+-- 스크립트가 실제 존재하는 항목만 채택 (오타로 addVehicleDebug가 터지는 것 방지 + 원인 로그).
+local function collectPoolVehicles()
     local sv = SandboxVars and SandboxVars.PongDu
     local pool = sv and sv.VehicleDrop_Pool
 
@@ -131,24 +135,39 @@ local function pickFromSandboxPool()
         for token in string.gmatch(pool, "[^;]+") do
             local trimmed = token:match("^%s*(.-)%s*$")
             if trimmed ~= "" then
-                list[#list + 1] = trimmed
+                if getVehicleScript(trimmed) then
+                    if hasDriverSeat(trimmed) then
+                        list[#list + 1] = trimmed
+                    else
+                        print("[t3VehicleDrop] 풀 항목 제외(운전석 없음): " .. trimmed)
+                    end
+                else
+                    print("[t3VehicleDrop] 풀 항목 제외(차량 스크립트 없음): " .. trimmed)
+                end
             end
         end
     end
-
-    if #list == 0 then
-        return "Base.PickupTruck" -- 샌드박스 값이 비어있을 때의 최후 fallback
-    end
-    return list[ZombRand(#list) + 1]
+    return list
 end
 
--- 차종 선택: military 존 군용차가 있으면 그 목록에서만, 없으면 샌드박스 풀에서.
+-- 차종 선택: military 존 등록 차량 + 샌드박스 풀의 "합집합"에서 무작위.
+-- (예전엔 military 존이 하나라도 있으면 풀을 무시했는데, 그러면
+-- trafficjams 존에만 등록하는 군용차 모드(97bushmaster 등)를 풀에 넣어도
+-- 다른 military 존 모드에 가려 절대 안 뽑히는 문제가 있었다.)
 local function pickVehicleType()
-    local military = collectMilitaryVehicles()
-    if #military > 0 then
-        return military[ZombRand(#military) + 1]
+    local merged, seen = {}, {}
+    for _, ft in ipairs(collectMilitaryVehicles()) do
+        if not seen[ft] then seen[ft] = true; merged[#merged + 1] = ft end
     end
-    return pickFromSandboxPool()
+    for _, ft in ipairs(collectPoolVehicles()) do
+        if not seen[ft] then seen[ft] = true; merged[#merged + 1] = ft end
+    end
+
+    if #merged == 0 then
+        print("[t3VehicleDrop] 후보 차종 없음, 최후 fallback: Base.PickupTruck")
+        return "Base.PickupTruck"
+    end
+    return merged[ZombRand(#merged) + 1]
 end
 
 -- 월드맵(M키)에 투하 지점 심볼을 그린다. (BATMAN_EHE_MILITARY_DROP의 drawSymbol 패턴)
@@ -220,6 +239,16 @@ function t3VehicleDrop.OpenKit(items, result, player)
             vehicleType = vehicleType,
             sender = donor,
         })
+    end
+
+    -- 개봉 라디오 사운드: 레시피 Sound:RadioTalk는 볼륨 조절이 불가능해서 제거하고
+    -- 여기서 직접 재생하며 볼륨을 절반으로 낮춘다 (BaseSoundEmitter.setVolume(handle, v)).
+    local emitter = player:getEmitter()
+    if emitter then
+        local handle = emitter:playSound("RadioTalk")
+        if handle then
+            emitter:setVolume(handle, 0.5)
+        end
     end
 
     local sx, sy = sq:getX(), sq:getY()
