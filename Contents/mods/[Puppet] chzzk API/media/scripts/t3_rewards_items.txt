@@ -267,7 +267,8 @@ recipe Open Vehicle Drop Kit
     RemoveResultItem:true,
     OnCreate:t3VehicleDrop.OpenKit,
     CanBeDoneFromFloor:true,
-    Time:200,
+    Time:500,
+    Sound:RadioTalk,
 }
 
 item t3DeployedParachute

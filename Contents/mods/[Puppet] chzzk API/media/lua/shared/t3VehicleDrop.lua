@@ -241,15 +241,8 @@ function t3VehicleDrop.OpenKit(items, result, player)
         })
     end
 
-    -- 개봉 라디오 사운드: 레시피 Sound:RadioTalk는 볼륨 조절이 불가능해서 제거하고
-    -- 여기서 직접 재생하며 볼륨을 절반으로 낮춘다 (BaseSoundEmitter.setVolume(handle, v)).
-    local emitter = player:getEmitter()
-    if emitter then
-        local handle = emitter:playSound("RadioTalk")
-        if handle then
-            emitter:setVolume(handle, 0.5)
-        end
-    end
+    -- 개봉 라디오 사운드(RadioTalk)는 레시피 Sound 필드로 재생됨.
+    -- 볼륨 절반 처리는 client/VehicleDropCraftSound.lua 에서 ISCraftAction:start 훅으로 처리.
 
     local sx, sy = sq:getX(), sq:getY()
     player:Say(getText("IGUI_donation_vehicle_drop_location",
