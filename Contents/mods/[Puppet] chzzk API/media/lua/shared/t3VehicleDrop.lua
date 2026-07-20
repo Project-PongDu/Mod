@@ -164,8 +164,8 @@ local function pickVehicleType()
     end
 
     if #merged == 0 then
-        print("[t3VehicleDrop] 후보 차종 없음, 최후 fallback: Base.PickupTruck")
-        return "Base.PickupTruck"
+        print("[t3VehicleDrop] 후보 차종 없음, 최후 fallback: Base.PickUpTruck")
+        return "Base.PickUpTruck"
     end
     return merged[ZombRand(#merged) + 1]
 end

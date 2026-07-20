@@ -11,4 +11,14 @@ module Base
         }
     }
 
+    sound vehicle_call_signal
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/vehicle_airdrop.wav,
+        }
+    }
+
 }
