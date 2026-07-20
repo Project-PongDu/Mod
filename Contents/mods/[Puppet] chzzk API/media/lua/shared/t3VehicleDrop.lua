@@ -18,8 +18,22 @@
 
 t3VehicleDrop = t3VehicleDrop or {}
 
-local MIN_SEARCH_RADIUS = 50 -- 플레이어로부터 최소 이 거리(타일) 이상 떨어진 곳에만 소환
-local MAX_SEARCH_RADIUS = 100 -- 이 반경 안에서 자리를 못 찾으면 최후 수단으로 플레이어 발밑에 소환
+-- findDropSquare는 플레이어가 실제로 키트를 크래프팅해야만 호출되므로, 그 시점엔
+-- 세이브 로드+샌드박스 파싱이 이미 끝난 뒤다. SandboxVars 자체는 Lua VM 부팅 시점에
+-- media/lua/shared/Sandbox/SandboxVars.lua(require "Sandbox/Survival")로 즉시 채워지고,
+-- 우리 옵션(PongDu.VehicleDrop_MinDistance/MaxDistance)도 게임 시작 시 병합되므로
+-- 이 경로에서는 nil-guard나 별도 기본값 없이 바로 읽어도 안전하다.
+-- MaxDistance < MinDistance로 잘못 설정된 경우 addVehicleDebug까지 안 가고
+-- 여기서 서로 바꿔 방어한다 (ZombRandFloat(min, max)에 min > max를 넘기면 오동작).
+local function getSearchRadius()
+    local minR = SandboxVars.PongDu.VehicleDrop_MinDistance
+    local maxR = SandboxVars.PongDu.VehicleDrop_MaxDistance
+    if maxR < minR then
+        print("[t3VehicleDrop] VehicleDrop_MaxDistance(" .. maxR .. ") < MinDistance(" .. minR .. "), swapping")
+        minR, maxR = maxR, minR
+    end
+    return minR, maxR
+end
 
 -- 실외 + 차량 없음 + 물 아님 + 장애물 없음(플레이어/좀비 제외)
 local function isValidDropSquare(sq)
@@ -65,9 +79,10 @@ local function findDropSquare(player)
     local pz = 0 -- 항상 지상 기준으로 탐색 (옥상/발코니에서 열어도 차는 지상에 떨어져야 함)
     local px = math.floor(player:getX())
     local py = math.floor(player:getY())
+    local minR, maxR = getSearchRadius()
 
     for attempt = 1, MAX_PLACEMENT_ATTEMPTS do
-        local dist  = ZombRandFloat(MIN_SEARCH_RADIUS, MAX_SEARCH_RADIUS)
+        local dist  = ZombRandFloat(minR, maxR)
         local angle = ZombRandFloat(0, 6.2831853) -- 2*pi
         local cx = px + math.floor(math.cos(angle) * dist + 0.5)
         local cy = py + math.floor(math.sin(angle) * dist + 0.5)
@@ -77,7 +92,7 @@ local function findDropSquare(player)
         end
     end
 
-    print("[t3VehicleDrop] Random sampling failed after " .. MAX_PLACEMENT_ATTEMPTS .. " attempts (" .. MIN_SEARCH_RADIUS .. "~" .. MAX_SEARCH_RADIUS .. " tiles), forcing spawn at player position")
+    print("[t3VehicleDrop] Random sampling failed after " .. MAX_PLACEMENT_ATTEMPTS .. " attempts (" .. minR .. "~" .. maxR .. " tiles), forcing spawn at player position")
     return player:getCurrentSquare()
 end
 

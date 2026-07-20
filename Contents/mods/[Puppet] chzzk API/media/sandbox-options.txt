@@ -173,6 +173,16 @@ option PongDu.VehicleDrop_Pool = {
     page = PongDu, translation = PongDu_VehicleDrop_Pool,
 }
 
+option PongDu.VehicleDrop_MinDistance = {
+    type = integer, min = 0, max = 300, default = 30,
+    page = PongDu, translation = PongDu_VehicleDrop_MinDistance,
+}
+
+option PongDu.VehicleDrop_MaxDistance = {
+    type = integer, min = 0, max = 300, default = 50,
+    page = PongDu, translation = PongDu_VehicleDrop_MaxDistance,
+}
+
 option PongDu.Divider_InvSaveTicket = {
     type = boolean, default = false,
     page = PongDu, translation = PongDu_Divider_InvSaveTicket,
