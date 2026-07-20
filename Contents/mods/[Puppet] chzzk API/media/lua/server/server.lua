@@ -554,8 +554,8 @@ DOServer["PongDuRiseUp"]["RiseUp"] = function(player, data)
         -- 부활 좀비 어그로: onground 상태에서 target을 박아도 기상 전이
         -- (reanimatetimer 기반 AnimSet 조건)와 무관하고, 일어나는 즉시 추격
         -- 시작. target 보유 좀비는 랠리 편입에서 제외돼 흩어짐도 차단된다.
-        -- 창 10초 = 서버 부활 -> 클라 동기화 -> 기상(30~90틱)까지 커버.
-        broadcastAggro(player, cx, cy, r + 5, 10000)
+        -- 창 35초 = 밀집 더미 밟힘 리셋으로 인한 최대 기상 지연(관측 27초) + 여유.
+        broadcastAggro(player, cx, cy, r + 5, 35000)
     end
 end
 

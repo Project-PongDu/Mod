@@ -71,27 +71,64 @@ end
 --
 -- 그래서 서버는 눕혀놨는데 클라는 선 채로 그린다 -> 기상 모션 소실.
 --
--- ★ 구 버전(realState 관측만)이 실패한 이유: "클라가 좀비를 처음 본 순간
---   realState == onground"라는 전제가 타이밍 의존적이다. 반증 —
---   ① 바닐라가 부활 플레이어를 눕힐 때 realState를 안 쓰고 isReanimatedPlayer
---      게이트로 명시적 changeState를 한다. realState만으로 충분했다면 이
---      게이트는 존재할 이유가 없다.
---   ② 바닐라 죽은척 좀비도 원격 클라에선 기상 모션이 없다. 걔네 서버
---      realState도 onground를 거치는데 클라가 못 눕는다 = 첫 패킷에
---      onground가 실려온다는 보장이 없다는 방증.
+-- ★★ 핵심 메커니즘 (IsoGameCharacter.actionStateChanged:11272 확증):
+--   B41 좀비의 AI 상태머신은 애니메이터(ActionContext)의 '노예'다.
+--   AnimSet 노드가 전이될 때마다 actionStateChanged가
+--   m_stateUpdateLookup[노드명] 으로 stateMachine.changeState를 다시 건다
+--   (IsoZombie.initializeStates:354 의 "onground"->ZombieOnGroundState 매핑).
+--   즉 Lua에서 changeState(ZombieOnGroundState)를 박아도, 애니메이터가
+--   onground 노드로 실제 전이하지 못하면 다음 AnimSet 전이 한 방에 AI가
+--   서있는 상태로 되돌려진다. 눕히기의 진짜 트리거는 changeState가 아니라
+--   "bonfloor" 애님 변수(setOnFloor, IsoGameCharacter:708 바인딩)이며,
+--   changeState는 그 사이 AI 공백(타겟 획득 차단)을 메우는 보조일 뿐이다.
 --
--- 현 구조는 2중 트리거다 (어느 쪽이 실제 작동하는지 via= 로그로 관측 가능):
---   1) window   : 서버 RiseUp 핸들러가 부활 완료 직후 브로드캐스트하는
+-- ★ 밀집 더미 위 발동 시 '즉시 기립' 증상의 로그 확증 (300부활 세션):
+--   getup-ok 346건 중 131건이 laydown 후 1초 미만 — 눕기+기상 모션이
+--   물리적으로 불가능한 시간. anim=lunge 115 / attack 14 = 플레이어가
+--   더미 위에 서 있으면 부활 좀비가 거리 0에서 즉시 타겟을 잡고 lunge로
+--   전이 -> 원샷 laydown이 위 메커니즘으로 무효화된 것.
+--   rescue 117건(700ms)은 "애니메이터가 300마리 부하로 아직 전이 못 함"을
+--   고착으로 오판해 모션 없이 강제 기립시킨 — 즉시 기립의 직접 생산자.
+--
+-- 대응: 원샷 laydown -> "눕히기 강제 유지 루프(enforcement)"로 전환.
+--   laydown 후 ENFORCE_MS 동안 매 스캔마다 애니메이터가 lying 노드에
+--   도달했는지 확인하고, 아니면 setTarget(nil) + setOnFloor(true) +
+--   changeState 를 재적용한다. 애니메이터가 onground에 정착하면 그때부터
+--   updateInternal이 타겟 블록을 스킵하므로 재획득 걱정 없이 손을 뗀다.
+--   rescue는 enforcement 만료 '후'에도 AI=onground+애니=standing 인 진짜
+--   고착에만 발동한다 (기존 700ms -> 사실상 ENFORCE_MS로 지연).
+--
+-- ★★ 전이 아크 소스 확증 (PZ-Library "PZ 41.78.19 Anims"/actiongroups/zombie):
+--   · lunge/transitions.xml : 전이 18개 중 bOnFloor→onground 아크 '없음'
+--     → lunge 중인 좀비는 setOnFloor만으론 절대 안 눕는다. 대신
+--     <isFalse>bHasTarget</isFalse> → idle 아크가 있어 setTarget(nil)이
+--     1틱 안에 lunge를 강제 이탈시킨다 (setTarget(nil)이 필수인 이유).
+--   · idle/otherTransitions.xml : <isTrue>bOnFloor</isTrue> → onground.
+--     원본 주석부터 "This handles zombies being already on the ground,
+--     like newly-reanimated corpses." — 정확히 이 용도의 공식 아크.
+--   · attack, face-target : bOnFloor→onground 직행 아크 보유 — 공격 모션
+--     중이어도 setOnFloor(true)만으로 즉시 눕는다.
+--   · onground/transitions.xml : 소유 좀비(bClient=false)는
+--     reanimateTimer<=0 에서만 getup — 눕은 뒤 기상 모션 보장.
+--     (원격 좀비는 서버 realState 추종 아크 — 우리 개입 불필요)
+--   즉 applyLaydown의 setTarget(nil)→setOnFloor(true) 순서가 어느 노드에서
+--   출발하든 최대 2틱(lunge→idle→onground) 안에 눕는 경로를 보장한다.
+--
+-- 현 구조는 2계층 x 2조건 트리거다 (via= 로그로 어느 경로가 작동했는지 관측):
+--   [계층] zu    : OnZombieUpdate(IsoZombie:2102) — 좀비 자신의 update 페이즈,
+--                  즉 그 프레임 '렌더 전'에 발화. 첫 update에서 눕히면 서있는
+--                  포즈가 화면에 그려질 프레임 자체가 없다. OnTick 스캔(등장 →
+--                  다음 틱 사이 1~수 프레임 서있는 모습 노출)의 잔여 플래시
+--                  ("벌떡 일어났다 다시 눕는" 증상) 제거용. 창 활성 중에만
+--                  동작해 평시 오버헤드 0. 바닐라 전례: YouHaveOneDay.lua가
+--                  같은 이벤트에서 Hit() 등 상태 조작을 수행.
+--   [계층] tick  : OnTick 스캔 — zu가 못 잡은 케이스(창 열리기 전 도착분의
+--                  소급 처리 등) 폴백 + enforcement/고착 감시 구동.
+--   [조건] window   : 서버 RiseUp 핸들러가 부활 완료 직후 브로드캐스트하는
 --                 GetupWindow(x,y,r)를 받아 창을 연다. 창(4초, 좀비 패킷이
 --                 커맨드보다 먼저 온 경우 대비 소급 2초) 안에서 반경 내에
 --                 "처음 관측된" 좀비를 무조건 눕힌다. realState 무의존.
---   2) realState: 관측 초기(4초) 동안 realState가 onground로 확인되면 눕힌다.
---                 (구 버전 경로 — fallback으로 유지)
---
--- "처음 본 좀비만" 조건이 핵심 — 이미 idle로 정착한 좀비에 changeState를
--- 반복하면 enter()가 기상 타이머(30~90)를 계속 재세팅해 영원히 못 일어나고,
--- ActionContext가 이미 idle 애님에 정착한 뒤엔 강제 전이가 안 먹을 수 있다.
--- 바닐라 ParseZombie도 같은 이유로 '생성 직후'에만 눕힌다.
+--   [조건] realState: 관측 초기(4초) 동안 realState가 onground로 확인되면 눕힌다.
 --
 -- 낙하 중 좀비(좀비레인 등, z가 소수이거나 realState=="falling")는 눕히면
 -- 공중에 눕는 연출사고가 나므로 관측 즉시 영구 제외한다.
@@ -99,28 +136,28 @@ end
 -- 서버/네트워크 영향 없음 — 순수 클라 로컬 상태 보정.
 local _seen = {}      -- [onlineID] = 최초 관측 시각(ms)
 local _done = {}      -- [onlineID] = true (눕혔거나 제외 확정 — 더 안 건드림)
-local _laid = {}      -- [onlineID] = {t=눕힌 시각} — AI/애니 정합성 감시 대기열
+local _laid = {}      -- [onlineID] = {t=최초 laydown 시각, tries=재적용 횟수,
+                      --               laidOk=애니메이터 lying 도달 확인 여부}
 local _windows = {}   -- {x, y, r2, arrived, expires} : 서버 GetupWindow 수신분
 local _lastScan = 0
 local SCAN_INTERVAL_MS = 200   -- 평시 스캔 간격 (창 활성 중엔 매 틱)
 local WINDOW_MS        = 4000  -- 창 유지: 서버측 기상 타이머(30~90틱)보다 약간 길게
 local PRE_GRACE_MS     = 2000  -- 좀비 패킷이 커맨드보다 먼저 도착한 경우 소급 폭
 local YOUNG_MS         = 4000  -- 최초 관측 후 이 시간까지만 재평가
-local ANIM_SETTLE_MS   = 700   -- laydown 후 애니메이터가 lying 노드에 진입할 유예
+local ANIM_SETTLE_MS   = 400   -- laydown 후 첫 검사까지 유예 (애니 전이 최소 시간)
+local ENFORCE_MS       = 3000  -- 눕히기 강제 유지 기간 — 이 안에선 rescue 금지
 local TRACK_CAP_MS     = 30000 -- 추적 하드캡 (북키핑 정리용 — 조치 없음)
 
--- 만료 창 정리. 반환값: 활성 창 존재 여부.
--- ★ 창 활성 중엔 스캔을 매 틱으로 돌린다: 로그 분석 결과 laydown 커버리지는
---   100%였는데도(892/892, ok=true) 일부가 벌떡 서는 증상 — 스캔 간격(200ms)
---   동안 클라 애니메이터가 idle에 정착해버리면 AI 상태만 onground가 되고
---   시각 전이가 안 걸릴 수 있다. 바닐라 ParseZombie는 생성 '직후'(애니메이터
---   1틱도 돌기 전) 눕힌다 — 매 틱 스캔으로 그 타이밍에 최대한 붙인다.
 -- Kahlua엔 표준 next()가 노출돼 있지 않다 — pairs로 공백 판정.
 local function isEmpty(t)
     for _ in pairs(t) do return false end
     return true
 end
 
+-- 만료 창 정리. 반환값: 활성 창 존재 여부.
+-- ★ 창 활성 중엔 스캔을 매 틱으로 돌린다: enforcement 재적용은 애니메이터의
+--   전이 타이밍 싸움이라 200ms 간격으론 진다. 바닐라 ParseZombie가 생성
+--   '직후'(애니메이터 1틱도 돌기 전) 눕히는 것과 같은 이유.
 local function pruneWindows()
     local now = getTimestampMs()
     for i = #_windows, 1, -1 do
@@ -141,13 +178,23 @@ local function insideWindow(z, firstSeen)
     return false
 end
 
-local function layDown(z, zid, why)
-    _done[zid] = true
-    local ok, err = pcall(function()
+-- 눕히기 1회 적용 (최초/재적용 공용).
+-- setTarget(nil): lunge/attack 노드는 bhastarget 없이는 유지되지 않는다 —
+-- 플레이어 발밑 부활 좀비의 즉시 타겟 획득 -> lunge 선점을 여기서 끊는다.
+-- AI가 ZombieOnGroundState인 동안은 updateInternal이 타겟 블록을 스킵하므로
+-- 재획득도 봉쇄된다 (actionStateChanged가 AI를 되돌리기 전까지).
+local function applyLaydown(z)
+    return pcall(function()
+        z:setTarget(nil)
         z:setOnFloor(true)
         z:changeState(ZombieOnGroundState.instance())
     end)
-    if ok then _laid[zid] = { t = getTimestampMs() } end
+end
+
+local function layDown(z, zid, why)
+    _done[zid] = true
+    local ok, err = applyLaydown(z)
+    if ok then _laid[zid] = { t = getTimestampMs(), tries = 0, laidOk = false } end
     print("[PongDu][RiseUp][Getup] laydown zid=" .. tostring(zid)
         .. " via=" .. why .. " ok=" .. tostring(ok)
         .. (ok and "" or (" err=" .. tostring(err))))
@@ -159,15 +206,16 @@ end
 --   타이머를 계속 리셋한다(ZombieOnGroundState.execute) — 6초 이상 눕는 게
 --   정상이다. 이걸 timeout이 고착으로 오판해 AI만 idle로 밀면, 기상 타이머는
 --   ZombieOnGroundState.execute 안에서만 감소하므로 애니메이터가 lying에서
---   영원히 못 나오는 역방향 데드락이 된다 (rescue reason=timeout 22/22 전원
---   영구 눕기 증상과 일치).
+--   영원히 못 나오는 역방향 데드락이 된다.
 --
--- 2차: 추정을 버리고 애니메이터를 직접 읽는다.
+-- 2차(현행): 애니메이터를 직접 읽는다.
 --   getCurrentActionContextStateName() (IsoGameCharacter:1058, Kahlua 노출)
 --   이 ActionContext 노드명을 반환 — "onground"류 = 시각적으로 누움.
---   AI 상태(getCurrentState)와 교차하면 네 사분면이 나오고, 어긋난 두 칸만
---   서로 반대 방향으로 밀어주면 어느 쪽이든 일관 상태로 수렴한다:
---     AI=onground + 애니=standing → idle로 rescue   (구 접촉 글리치)
+--   enforcement 기간 안에서는 어긋남 = "아직 전이 못 함"으로 보고 재적용,
+--   기간 만료 후에도 남는 어긋남만 사분면 로직으로 교정한다:
+--     AI=onground + 애니=standing → idle로 rescue   (진짜 고착 — 애니메이터가
+--                                   전이 안 하면 actionStateChanged도 안 와서
+--                                   AI가 onground에 영구 방치되는 케이스)
 --     AI=idle    + 애니=onground → onground로 revert (역방향 데드락 치유
 --                                   — revert로 타이머 재가동, 자연 기상)
 --   일관 lying은 방치(기상은 바닐라 몫), 일관 standing은 추적 종료.
@@ -177,13 +225,13 @@ local LYING_NODES = {
     ["fakedead"] = true, ["fakedead-attack"] = true,
 }
 
-local function rescueStuck(z, zid)
+local function rescueStuck(z, zid, tries)
     local ok, err = pcall(function()
         z:setOnFloor(false)
         z:changeState(ZombieIdleState.instance())
     end)
     print("[PongDu][RiseUp][Getup] rescue zid=" .. tostring(zid)
-        .. " ok=" .. tostring(ok)
+        .. " tries=" .. tostring(tries) .. " ok=" .. tostring(ok)
         .. (ok and "" or (" err=" .. tostring(err))))
 end
 
@@ -202,7 +250,8 @@ local function checkLaid(z, zid, rec, now)
     local elapsed = now - rec.t
     if elapsed < ANIM_SETTLE_MS then return false end   -- 애니 전이 유예
     if elapsed > TRACK_CAP_MS then
-        print("[PongDu][RiseUp][Getup] track-cap zid=" .. tostring(zid))
+        print("[PongDu][RiseUp][Getup] track-cap zid=" .. tostring(zid)
+            .. " laidOk=" .. tostring(rec.laidOk))
         return true
     end
 
@@ -215,18 +264,54 @@ local function checkLaid(z, zid, rec, now)
     local aiGround = (ai == ZombieOnGroundState.instance())
     local lying = LYING_NODES[anim] or false
 
-    if aiGround and not lying then
-        rescueStuck(z, zid)          -- 고착: AI 눕고 애니 서있음
-        return false                 -- revert 필요 여부 계속 감시
-    elseif not aiGround and anim == "onground" and ai == ZombieIdleState.instance() then
-        revertToGround(z, zid)       -- 역방향: 우리가 박은 idle + 애니 lying
+    if lying then
+        rec.laidOk = true
+        -- 역방향 데드락: 애니 lying인데 AI가 idle (rescue 잔재 등)
+        if not aiGround and anim == "onground" and ai == ZombieIdleState.instance() then
+            revertToGround(z, zid)
+        end
+        return false                 -- 일관 lying 또는 전이 중: 대기 (기상은 바닐라 몫)
+    end
+
+    -- 애니메이터 standing류 --------------------------------------------------
+    if not rec.laidOk and elapsed <= ENFORCE_MS then
+        -- 아직 한 번도 못 눕힘 + enforcement 기간 내: 재적용.
+        -- lunge 선점이든 애니메이터 부하 지연이든 여기서 계속 밀어붙인다.
+        rec.tries = rec.tries + 1
+        applyLaydown(z)
         return false
-    elseif not aiGround and not lying then
+    end
+
+    if aiGround then
+        -- enforcement 만료 후에도 AI=onground + 애니=standing: 진짜 고착.
+        rescueStuck(z, zid, rec.tries)
+        return false                 -- revert 필요 여부 계속 감시
+    end
+
+    -- 일관 standing: laidOk면 정상 기상 완료, 아니면 눕히기 최종 실패 (관측용 구분)
+    if rec.laidOk then
         print("[PongDu][RiseUp][Getup] getup-ok zid=" .. tostring(zid)
             .. " after=" .. tostring(elapsed) .. "ms anim=" .. tostring(anim))
-        return true                  -- 일관 standing: 완치
+    else
+        print("[PongDu][RiseUp][Getup] never-laid zid=" .. tostring(zid)
+            .. " after=" .. tostring(elapsed) .. "ms anim=" .. tostring(anim)
+            .. " tries=" .. tostring(rec.tries))
     end
-    return false                     -- 일관 lying 또는 전이 중: 대기
+    return true
+end
+
+-- 신규 관측 좀비 1마리 판정 (zu/tick 공용). first=최초 관측 시각, tag=계층 표기.
+local function evaluateNew(z, zid, first, tag)
+    local rs
+    pcall(function() rs = z:getRealState() end)
+    local zz = z:getZ()
+    if z:isDead() or rs == "falling" or zz ~= math.floor(zz) then
+        _done[zid] = true          -- 사망/낙하 중: 영구 제외
+    elseif rs == "onground" then
+        layDown(z, zid, "realState" .. tag)
+    elseif insideWindow(z, first) then
+        layDown(z, zid, "window" .. tag)
+    end
 end
 
 local function getupScan()
@@ -250,21 +335,12 @@ local function getupScan()
                 _seen[zid] = now
             end
             if not _done[zid] and now - first <= YOUNG_MS then
-                local rs
-                pcall(function() rs = z:getRealState() end)
-                local zz = z:getZ()
-                if z:isDead() or rs == "falling" or zz ~= math.floor(zz) then
-                    _done[zid] = true          -- 사망/낙하 중: 영구 제외
-                elseif rs == "onground" then
-                    layDown(z, zid, "realState")
-                elseif insideWindow(z, first) then
-                    layDown(z, zid, "window")
-                end
+                evaluateNew(z, zid, first, "")
             end
         end
     end
 
-    -- 고착 감시 패스
+    -- 고착 감시 + enforcement 패스
     for zid, rec in pairs(_laid) do
         local z = alive[zid]
         if z and checkLaid(z, zid, rec, now) then
@@ -284,7 +360,7 @@ end
 Events.OnTick.Add(function()
     local now = getTimestampMs()
     local active = pruneWindows()
-    -- 창 활성 중이거나 고착 감시 대기 좀비가 있으면 매 틱, 아니면 200ms 간격
+    -- 창 활성 중이거나 enforcement/고착 감시 대기 좀비가 있으면 매 틱, 아니면 200ms 간격
     if not active and isEmpty(_laid) then
         if now - _lastScan < SCAN_INTERVAL_MS then return end
     end
@@ -292,6 +368,26 @@ Events.OnTick.Add(function()
     local ok, err = pcall(getupScan)
     if not ok then
         print("[PongDu][RiseUp][Getup] scan error: " .. tostring(err))
+    end
+end)
+
+-- 렌더 전 선눕히기: 창 활성 중에만. 좀비 update 페이즈 내부라 여기서 눕히면
+-- 그 프레임에 바로 lying으로 그려진다 (OnTick 경로의 1~수 프레임 플래시 제거).
+Events.OnZombieUpdate.Add(function(z)
+    if #_windows == 0 then return end   -- 평시 오버헤드 0 (창 없으면 즉시 탈출)
+    if not z then return end
+    local zid = z:getOnlineID()
+    if _done[zid] then return end
+    local now = getTimestampMs()
+    local first = _seen[zid]
+    if not first then
+        first = now
+        _seen[zid] = now
+    end
+    if now - first > YOUNG_MS then return end
+    local ok, err = pcall(evaluateNew, z, zid, first, "@zu")
+    if not ok then
+        print("[PongDu][RiseUp][Getup] zu error: " .. tostring(err))
     end
 end)
 
