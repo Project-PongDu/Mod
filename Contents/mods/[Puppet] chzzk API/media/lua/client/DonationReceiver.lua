@@ -202,15 +202,30 @@ local function getIconTexture(featureId)
     return cached
 end
 
+-- featureId별로 getText에 넘길 동적 인자(%1 등). 대부분은 nil -> 고정 텍스트 그대로.
+-- sprinter5는 샌드박스 Sprinter_Count(1~10, 기본 5)에 맞춰 "뛰좀 N마리!"로 표시돼야 함
+-- (rewardManager.lua의 실제 소환 마릿수도 이 값을 그대로 씀 -- 텍스트만 5로 박혀있던 버그).
+local function donationTextArg(featureId)
+    if featureId == "sprinter5" then
+        local sv = SandboxVars and SandboxVars.PongDu
+        local n  = sv and tonumber(sv.Sprinter_Count)
+        return tostring(n or 5)
+    end
+    return nil
+end
+
 -- 순수 효과 이름만 (후원 메시지 안 붙임) -- 큐박스 호버 툴팁 전용.
 local function effectName(featureId)
     local key = labelKey[featureId]
-    return key and getText(key) or ("Effect " .. tostring(featureId))
+    if not key then return "Effect " .. tostring(featureId) end
+    local arg = donationTextArg(featureId)
+    return arg and getText(key, arg) or getText(key)
 end
 
 local function buildLabel(featureId, sender, message)
-    local key   = labelKey[featureId]
-    local label = key and getText(key) or ("Effect " .. tostring(featureId))
+    local key = labelKey[featureId]
+    local arg = donationTextArg(featureId)
+    local label = key and (arg and getText(key, arg) or getText(key)) or ("Effect " .. tostring(featureId))
     if featureId == "vaccine" and message and message ~= "" then
         return label .. ", " .. message
     end

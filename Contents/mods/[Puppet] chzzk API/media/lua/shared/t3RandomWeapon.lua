@@ -336,9 +336,35 @@ Events.OnServerCommand.Add(function(module, command, args)
     end
 end)
 
+-- Pool request with retry. OnGameStart fires BEFORE the player-connect
+-- handshake completes on MP clients (verified in console logs: the request
+-- packet left ~70ms before "player-connect" was even sent), so the first
+-- request can be silently lost. EveryOneMinute keeps re-requesting until the
+-- sync arrives, then goes quiet. Capped to avoid spamming a server that
+-- runs an older mod version without the handler.
+local REQUEST_RETRY_CAP = 30
+local requestAttempts = 0
+
+local function requestPools()
+    requestAttempts = requestAttempts + 1
+    print(LOG .. "requesting weapon pools from server (attempt " .. requestAttempts .. ")")
+    sendClientCommand("PongDuRandomWeapon", "RequestPools", {})
+end
+
 Events.OnGameStart.Add(function()
     if isClient() then
-        print(LOG .. "requesting weapon pools from server")
-        sendClientCommand("PongDuRandomWeapon", "RequestPools", {})
+        requestPools()
     end
+end)
+
+Events.EveryOneMinute.Add(function()
+    if not isClient() or syncedPools then return end
+    if requestAttempts >= REQUEST_RETRY_CAP then
+        if requestAttempts == REQUEST_RETRY_CAP then
+            requestAttempts = requestAttempts + 1 -- log the warning only once
+            print(LOG .. "WARNING: pool sync failed after " .. REQUEST_RETRY_CAP .. " attempts; staying on fallback pools")
+        end
+        return
+    end
+    requestPools()
 end)
