@@ -9,7 +9,15 @@
 --   Pool filters: Type == Weapon, not OBSOLETE, and "Improvised" excluded --
 --   except for Spear, where Improvised is allowed (nearly every spear is
 --   "Improvised;Spear" and they are real weapons, unlike spoons/plungers).
--- Ranged box: static weight table (clip/ammo pairing needs manual data).
+-- Ranged box:
+--   * Arsenal Gunfighter present: server-built pool scanned from the loot
+--     distribution tables AFTER Arsenal baked its sandbox TYPE/ORIGIN/CALIBER
+--     gating into them, so only sandbox-enabled guns appear, weighted by
+--     their summed distro weights (see t3RandomWeaponServer).
+--   * Vanilla: static weight table below (weights sum to 100).
+--   Either way the weapon comes with 2 magazines + 3 ammo boxes resolved
+--   from the weapon's own script data (getMagazineType / getAmmoBox), so no
+--   per-gun clip/ammo pairing table is needed.
 --
 -- Global table (no module return) so recipe OnCreate can resolve
 -- "t3RandomWeapon.OpenMeleeBox" / "t3RandomWeapon.OpenRangedBox".
@@ -17,6 +25,10 @@
 t3RandomWeapon = t3RandomWeapon or {}
 
 local LOG = "[PongDu][RandomWeapon] "
+
+local MAG_COUNT = 2
+local AMMO_BOX_COUNT = 3
+local FALLBACK_LOOSE_ROUNDS = 60 -- when a firearm defines no AmmoBox in its script
 
 -- ── Melee category table (weights sum = 100) ────────────────────────────────
 -- Category strings must match vanilla script "Categories" values
@@ -33,34 +45,36 @@ t3RandomWeapon.CATEGORY_TABLE = {
 -- Categories where "Improvised" items stay in the pool.
 local ALLOW_IMPROVISED = { Spear = true }
 
--- ── Ranged table (weights sum = 100) ────────────────────────────────────────
--- clip/ammo pairings verified against vanilla ProceduralDistributions
--- (PistolCase1~3, RevolverCase1~3, RifleCase1~3).
+-- ── Vanilla ranged table (weights sum = 100) ────────────────────────────────
+-- Fallback used only when no Arsenal ranged pool is available. Magazines and
+-- ammo are resolved at grant time from the weapon script, not listed here.
 t3RandomWeapon.RANGED_TABLE = {
-    { item = "Base.AssaultRifle",       weight = 3,  clip = "Base.556Clip",  ammo = "Base.556Box"          },
-    { item = "Base.AssaultRifle2",      weight = 4,  clip = "Base.M14Clip",  ammo = "Base.308Box"          },
-    { item = "Base.Revolver_Long",      weight = 4,                          ammo = "Base.Bullets44Box"    },
-    { item = "Base.Pistol3",            weight = 5,  clip = "Base.44Clip",   ammo = "Base.Bullets44Box"    },
-    { item = "Base.Revolver_Short",     weight = 6,                          ammo = "Base.Bullets38Box"    },
-    { item = "Base.HuntingRifle",       weight = 8,  clip = "Base.308Clip",  ammo = "Base.308Box"          },
-    { item = "Base.DoubleBarrelShotgun", weight = 8,                         ammo = "Base.ShotgunShellsBox" },
-    { item = "Base.VarmintRifle",       weight = 10, clip = "Base.223Clip",  ammo = "Base.223Box"          },
-    { item = "Base.Revolver",           weight = 10,                         ammo = "Base.Bullets45Box"    },
-    { item = "Base.Shotgun",            weight = 12,                         ammo = "Base.ShotgunShellsBox" },
-    { item = "Base.Pistol2",            weight = 12, clip = "Base.45Clip",   ammo = "Base.Bullets45Box"    },
-    { item = "Base.Pistol",             weight = 18, clip = "Base.9mmClip",  ammo = "Base.Bullets9mmBox"   },
+    { item = "Base.AssaultRifle",        weight = 3  },
+    { item = "Base.AssaultRifle2",       weight = 4  },
+    { item = "Base.Revolver_Long",       weight = 4  },
+    { item = "Base.Pistol3",             weight = 5  },
+    { item = "Base.Revolver_Short",      weight = 6  },
+    { item = "Base.HuntingRifle",        weight = 8  },
+    { item = "Base.DoubleBarrelShotgun", weight = 8  },
+    { item = "Base.VarmintRifle",        weight = 10 },
+    { item = "Base.Revolver",            weight = 10 },
+    { item = "Base.Shotgun",             weight = 12 },
+    { item = "Base.Pistol2",             weight = 12 },
+    { item = "Base.Pistol",              weight = 18 },
 }
 
--- ── Melee pool cache ────────────────────────────────────────────────────────
+-- ── Pool caches ─────────────────────────────────────────────────────────────
 -- Authoritative pools come from the server (t3RandomWeaponServer), built from
 -- the world loot distribution tables so only naturally-spawning weapons enter.
---   * SP / local host: server lua is loaded locally -> BuildPools() direct.
+--   * SP / local host: server lua is loaded locally -> direct build calls.
 --   * MP client: requested at OnGameStart, received via OnServerCommand.
---   * Fallback (sync not yet arrived): local vanilla-only build via getModID(),
---     which cannot see distribution tables but at least blocks modded
---     transform-only items (e.g. bayonet-form rifles).
-local syncedPools = nil -- server-authoritative (or locally built in SP)
-local meleePools = nil  -- fallback cache (vanilla-only)
+--   * Melee fallback (sync not yet arrived): local vanilla-only build via
+--     getModID(), which cannot see distribution tables but at least blocks
+--     modded transform-only items (e.g. bayonet-form rifles).
+--   * Ranged fallback: static RANGED_TABLE above (vanilla guns).
+local syncedPools = nil   -- melee: server-authoritative (or locally built in SP)
+local meleePools = nil    -- melee: fallback cache (vanilla-only)
+local syncedRanged = nil  -- ranged: server-authoritative Arsenal pool (or nil)
 
 local function buildMeleePools()
     meleePools = {}
@@ -72,7 +86,7 @@ local function buildMeleePools()
     for i = 1, allItems:size() do
         local scriptItem = allItems:get(i - 1)
         -- Vanilla-only filter. NOTE: matching the "Base." module prefix on
-        -- getFullName() is NOT enough — mods (e.g. Arsenal Gunfighter's
+        -- getFullName() is NOT enough -- mods (e.g. Arsenal Gunfighter's
         -- Home-key bayonet-form weapons) can register items directly under
         -- module Base instead of their own namespace, so fullName alone lies
         -- about origin. getModID() tracks the actual source mod.info the item
@@ -102,9 +116,16 @@ local function buildMeleePools()
     end
 end
 
--- Weighted pick. Weights must sum to 100.
+-- Weighted pick over entries carrying a .weight field. Total is computed per
+-- call so both the 100-sum static tables and the server-built ranged pool
+-- (arbitrary total) work with the same function.
 local function pickWeighted(tbl)
-    local roll = ZombRand(100)
+    local total = 0
+    for _, entry in ipairs(tbl) do
+        total = total + entry.weight
+    end
+    if total <= 0 then return tbl[1] end
+    local roll = ZombRand(total)
     local acc = 0
     for _, entry in ipairs(tbl) do
         acc = acc + entry.weight
@@ -113,7 +134,7 @@ local function pickWeighted(tbl)
     return tbl[#tbl] -- safety net
 end
 
--- Resolve the pools to draw from, best source first.
+-- Resolve the melee pools to draw from, best source first.
 local function resolvePools()
     if syncedPools then return syncedPools, "synced" end
     if not isClient() and t3RandomWeaponServer then
@@ -124,6 +145,17 @@ local function resolvePools()
     end
     if not meleePools then buildMeleePools() end
     return meleePools, "fallback"
+end
+
+-- Resolve the ranged pool: Arsenal distro pool when available, vanilla static
+-- table otherwise.
+local function resolveRangedPool()
+    if syncedRanged then return syncedRanged, "synced-arsenal" end
+    if not isClient() and t3RandomWeaponServer then
+        syncedRanged = t3RandomWeaponServer.BuildRangedPool()
+        if syncedRanged then return syncedRanged, "local-server-arsenal" end
+    end
+    return t3RandomWeapon.RANGED_TABLE, "vanilla-static"
 end
 
 -- Roll category by weight, then uniform pick inside the category pool.
@@ -154,19 +186,58 @@ local function findDonor(items)
     return ""
 end
 
-local function grant(player, itemName, donor, clip, ammo)
+-- Prefix a bare item name with a module. Weapon scripts store AmmoBox WITHOUT
+-- a module prefix (confirmed: Item.java resolves magazineType only;
+-- ItemPickerJava.java adds getAmmoBox() verbatim), so we qualify it with the
+-- weapon's own module before AddItem.
+local function qualifyItemName(name, moduleHint)
+    if not name or name == "" then return nil end
+    if string.match(name, "%.") then return name end
+    return (moduleHint or "Base") .. "." .. name
+end
+
+local function grant(player, itemName, donor)
     local inv = player:getInventory()
     local weapon = inv:AddItem(itemName)
-    if weapon then
-        if donor ~= "" then
-            weapon:setName(donor .. "'s " .. weapon:getDisplayName())
-        end
-        player:Say(weapon:getDisplayName() .. "!")
-    else
+    if not weapon then
         print(LOG .. "ERROR: AddItem failed for " .. tostring(itemName))
+        return
     end
-    if clip then inv:AddItem(clip) end
-    if ammo then inv:AddItem(ammo) end
+    if donor ~= "" then
+        weapon:setName(donor .. "'s " .. weapon:getDisplayName())
+    end
+    player:Say(weapon:getDisplayName() .. "!")
+
+    -- Ammunition package: 2 magazines + 3 ammo boxes, resolved from the
+    -- weapon's own script data. Melee weapons return nil for both getters,
+    -- so this block is a no-op for the melee box. Firearms without a
+    -- magazine (revolvers, shotguns) just skip the magazine part.
+    local moduleHint = string.match(itemName, "^([^%.]+)") or "Base"
+    local magType = weapon.getMagazineType and weapon:getMagazineType()
+    if magType and magType ~= "" then
+        for _ = 1, MAG_COUNT do
+            if not inv:AddItem(magType) then
+                print(LOG .. "WARNING: AddItem failed for magazine " .. tostring(magType))
+                break
+            end
+        end
+    end
+    local rawBox = weapon.getAmmoBox and weapon:getAmmoBox()
+    local boxName = qualifyItemName(rawBox, moduleHint)
+    if boxName then
+        for _ = 1, AMMO_BOX_COUNT do
+            if not inv:AddItem(boxName) then
+                print(LOG .. "WARNING: AddItem failed for ammo box " .. tostring(boxName))
+                break
+            end
+        end
+    else
+        local ammoType = weapon.getAmmoType and weapon:getAmmoType()
+        if ammoType and ammoType ~= "" then
+            inv:AddItems(ammoType, FALLBACK_LOOSE_ROUNDS)
+            print(LOG .. "no AmmoBox on " .. itemName .. ", granted " .. FALLBACK_LOOSE_ROUNDS .. " loose rounds of " .. ammoType)
+        end
+    end
 end
 
 -- Recipe OnCreate handlers -------------------------------------------------
@@ -190,9 +261,10 @@ end
 
 function t3RandomWeapon.OpenRangedBox(items, result, player)
     if not player then return end
-    local entry = pickWeighted(t3RandomWeapon.RANGED_TABLE)
-    print(LOG .. "rolled ranged item=" .. entry.item)
-    grant(player, entry.item, findDonor(items), entry.clip, entry.ammo)
+    local pool, source = resolveRangedPool()
+    local entry = pickWeighted(pool)
+    print(LOG .. "rolled ranged item=" .. entry.item .. " (pool size " .. #pool .. ", source=" .. source .. ")")
+    grant(player, entry.item, findDonor(items))
 end
 
 -- ── MP pool sync ────────────────────────────────────────────────────────────
@@ -208,7 +280,13 @@ Events.OnServerCommand.Add(function(module, command, args)
         local pool = syncedPools[entry.category]
         table.insert(summary, entry.category .. "=" .. tostring(pool and #pool or 0))
     end
-    print(LOG .. "pools synced from server: " .. table.concat(summary, " "))
+    print(LOG .. "melee pools synced from server: " .. table.concat(summary, " "))
+    if args.ranged then
+        syncedRanged = args.ranged
+        print(LOG .. "ranged pool synced from server: " .. #syncedRanged .. " firearms")
+    else
+        print(LOG .. "no ranged pool from server (no Arsenal); using vanilla table")
+    end
 end)
 
 Events.OnGameStart.Add(function()
