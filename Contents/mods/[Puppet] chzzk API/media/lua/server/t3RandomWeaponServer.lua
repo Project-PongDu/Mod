@@ -9,19 +9,32 @@
 -- calls the build functions directly with no round trip.
 --
 -- MELEE pools (6 skill categories): whitelist rule -- an item may enter a
--- pool only if it appears in the distribution tables with a positive weight,
--- i.e. it can naturally spawn in the world. This excludes transform-only
--- items (e.g. Arsenal Gunfighter's Home-key bayonet forms) and items whose
--- distro weights were driven negative by Arsenal's sandbox gating.
+-- pool only if it appears in the distribution tables with a positive weight
+-- in a REACHABLE distribution (see reachability below), i.e. it can actually
+-- spawn in the world. This excludes transform-only items (e.g. Arsenal
+-- Gunfighter's Home-key bayonet forms) and items disabled via Arsenal's
+-- sandbox gating.
 --
 -- RANGED pool (built only when Arsenal Gunfighter is present): Arsenal
 -- rewrites the distribution tables at OnPreDistributionMerge, baking its
--- sandbox TYPE / ORIGIN / CALIBER gating into each entry's final weight
--- (disabled guns end up <= 0). The post-init tables therefore ARE the
--- sandbox-filtered spawn list: we sum the positive weights per ranged weapon
--- across all items/junk arrays and use that sum as the donation roll weight.
--- Without Arsenal the ranged pool is nil and the client falls back to the
--- hardcoded vanilla table in t3RandomWeapon.
+-- sandbox TYPE / ORIGIN / CALIBER gating into the entry weights. The
+-- post-init tables therefore ARE the sandbox-filtered spawn list: we sum the
+-- positive weights per ranged weapon across all reachable items/junk arrays
+-- and use that sum as the donation roll weight. Without Arsenal the ranged
+-- pool is nil and the client falls back to the hardcoded vanilla table in
+-- t3RandomWeapon.
+--
+-- REACHABILITY: Arsenal's gating is two-level. Per-caliber gun cases
+-- (SuburbsDistributions["Case_Small1"] etc.) hold guns WITHOUT caliber
+-- gating on the gun entries themselves; instead the CASE ITEM's own spawn
+-- entries ("Base.Case_Small1", weight gated by x22/w22) are what enforce the
+-- caliber sandbox. The engine (ItemPickerJava) fills a container item by
+-- looking up the distribution keyed by the item's type, so if the case item
+-- can never spawn, its contents can never exist in the world. We mirror
+-- that: a distribution whose key resolves to a script item is only scanned
+-- if that item itself appears somewhere with a positive weight. Computed as
+-- a fixpoint (max 5 passes) to handle nested container chains. The scan is
+-- monotonically shrinking, so equal set sizes between passes = converged.
 -- NOTE: distro weights are per-container relative values; the cross-container
 -- sum approximates global rarity, it is not an exact spawn probability.
 
@@ -34,12 +47,12 @@ local cachedRanged = nil
 local rangedBuilt = false -- distinguishes "not built yet" from "built as nil (no Arsenal)"
 
 -- ── Distribution scan ───────────────────────────────────────────────────────
--- Walks the distribution tables once. In every "items" / "junk" array
--- (entries alternate name, weight, name, weight ...) it collects:
---   * whitelist set of names having at least one positive-weight entry
+-- Walks the distribution tables. In every "items" / "junk" array (entries
+-- alternate name, weight, name, weight ...) it collects:
+--   * set of names having at least one positive-weight entry in a reachable
+--     distribution (whitelist; stores both raw string and last dot-segment,
+--     since names may or may not carry a module prefix)
 --   * weightSum map: raw name -> sum of positive weights (ranged pool source)
--- Names may or may not carry a module prefix ("Axe" vs "Base.Axe"), so the
--- whitelist stores both the raw string and its last dot-segment.
 
 local function addName(set, name)
     set[name] = true
@@ -47,7 +60,23 @@ local function addName(set, name)
     if short then set[short] = true end
 end
 
-local function scanTable(tbl, set, weightSum, depth, visited)
+-- Cache for "does this distribution key resolve to a script item?" lookups.
+-- Keys that resolve to items are container-type distributions (gun cases,
+-- bags, first-aid kits ...); keys that don't (room names, procedural list
+-- names, "all") are always traversed.
+local itemKeyCache = {}
+local function keyIsItem(key)
+    local v = itemKeyCache[key]
+    if v ~= nil then return v end
+    local ok = getScriptManager():FindItem(key) ~= nil
+    itemKeyCache[key] = ok
+    return ok
+end
+
+-- One scan pass. reachable == nil means first pass (traverse everything);
+-- otherwise container-item distros are only entered when their key is in
+-- the reachable set from the previous pass.
+local function scanTable(tbl, set, weightSum, depth, visited, reachable)
     if type(tbl) ~= "table" or depth > 8 or visited[tbl] then return end
     visited[tbl] = true
     for k, v in pairs(tbl) do
@@ -60,34 +89,57 @@ local function scanTable(tbl, set, weightSum, depth, visited)
                 end
             end
         elseif type(v) == "table" then
-            scanTable(v, set, weightSum, depth + 1, visited)
+            local blocked = false
+            if type(k) == "string" and reachable and keyIsItem(k) and not reachable[k] then
+                blocked = true
+            end
+            if not blocked then
+                scanTable(v, set, weightSum, depth + 1, visited, reachable)
+            end
         end
     end
 end
 
+local function countSet(s)
+    local n = 0
+    for _ in pairs(s) do n = n + 1 end
+    return n
+end
+
 local function scanDistributions()
-    local set, weightSum = {}, {}
-    local visited = {}
-    local sources = 0
+    local roots = {}
     if ProceduralDistributions and ProceduralDistributions.list then
-        scanTable(ProceduralDistributions.list, set, weightSum, 1, visited)
-        sources = sources + 1
+        table.insert(roots, ProceduralDistributions.list)
     end
     if SuburbsDistributions then
-        scanTable(SuburbsDistributions, set, weightSum, 1, visited)
-        sources = sources + 1
+        table.insert(roots, SuburbsDistributions)
     end
     if VehicleDistributions then
-        scanTable(VehicleDistributions, set, weightSum, 1, visited)
-        sources = sources + 1
+        table.insert(roots, VehicleDistributions)
     end
-    local count = 0
-    for _ in pairs(set) do count = count + 1 end
-    print(LOG .. "distribution scan: " .. count .. " spawnable names from " .. sources .. " tables")
-    if sources == 0 then
+    if #roots == 0 then
         print(LOG .. "WARNING: no distribution tables found; scan empty")
+        return {}, {}, 0
     end
-    return set, weightSum, sources
+
+    local reachable = nil
+    local set, weightSum
+    local passes = 0
+    for pass = 1, 5 do
+        passes = pass
+        set, weightSum = {}, {}
+        local visited = {}
+        for _, root in ipairs(roots) do
+            scanTable(root, set, weightSum, 1, visited, reachable)
+        end
+        -- Monotonically shrinking: converged when the name count stops
+        -- changing between passes.
+        if reachable and countSet(set) == countSet(reachable) then break end
+        reachable = set
+    end
+    print(LOG .. "distribution scan: " .. countSet(set) .. " reachable spawnable names from "
+            .. #roots .. " tables (" .. passes .. " passes)")
+    return set, weightSum, #roots
 end
 
 -- ── Arsenal Gunfighter detection ────────────────────────────────────────────
@@ -135,7 +187,7 @@ function t3RandomWeaponServer.BuildAll()
             end
         end
     end
-    print(LOG .. "rejected " .. rejectedNotDistributed .. " weapon items not present in world distributions")
+    print(LOG .. "rejected " .. rejectedNotDistributed .. " weapon items not reachable in world distributions")
     for _, entry in ipairs(t3RandomWeapon.CATEGORY_TABLE) do
         print(LOG .. "melee pool built: " .. entry.category .. " = " .. #pools[entry.category] .. " items")
         if #pools[entry.category] == 0 then
@@ -165,7 +217,7 @@ function t3RandomWeaponServer.BuildAll()
             if w < 1 then w = 1 end
             table.insert(ranged, { item = full, weight = w })
         end
-        print(LOG .. "ranged pool built: " .. #ranged .. " firearms (distro-weighted)")
+        print(LOG .. "ranged pool built: " .. #ranged .. " firearms (distro-weighted, reachability-filtered)")
         if #ranged == 0 then
             print(LOG .. "WARNING: Arsenal detected but ranged pool empty; client falls back to vanilla table")
             ranged = nil
