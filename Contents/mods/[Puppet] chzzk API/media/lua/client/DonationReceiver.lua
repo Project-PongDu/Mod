@@ -115,27 +115,27 @@ local labelKey = {
 }
 
 local colorMap = {
-    ["debuff_roulette"]      = {0.6, 0.3, 0.9},
-    ["buff_roulette"]        = {0.3, 0.6, 1.0},
-    ["zombie_roulette"]      = {0.3, 0.9, 0.3},
-    ["sprinter5"]            = {0.9, 0.9, 0.3},
-    ["bandit_melee"]         = {1.0, 0.4, 0.2},
-    ["vaccine"]              = {0.3, 0.9, 0.9},
-    ["bandit_ranged"]        = {1.0, 0.2, 0.2},
-    ["exile"]                = {0.9, 0.7, 0.1},
-    ["random_teleport"]      = {0.4, 0.7, 1.0},
-    ["backroom"]             = {0.9, 0.7, 0.1},
-    ["missile"]              = {1.0, 0.3, 0.0},
-    ["random_weapon"]        = {0.8, 0.8, 0.2},
-    ["random_skill_potion"]  = {0.5, 0.9, 0.5},
-    ["inv_save_ticket"]      = {0.9, 0.85, 0.4},
-    ["vehicle_drop"]         = {0.6, 0.6, 1.0},
-    ["revive_ticket"]        = {1.0, 0.8, 0.8},
-    ["mutant_spawn"]         = {0.7, 0.2, 0.2},
-    ["secret_passage_kit"]   = {0.6, 0.4, 0.2},
-    ["horde_night"]          = {0.9, 0.1, 0.1},
-    ["rise_up_dead_man"]     = {0.4, 0.1, 0.5},
-    ["zombie_rain"]          = {0.35, 0.55, 0.9},
+    ["debuff_roulette"]      = {0.55, 0.05, 0.95},
+    ["buff_roulette"]        = {0.05, 0.45, 1.0},
+    ["zombie_roulette"]      = {0.05, 0.85, 0.05},
+    ["sprinter5"]            = {0.95, 0.85, 0.0},
+    ["bandit_melee"]         = {1.0, 0.25, 0.0},
+    ["vaccine"]              = {0.0, 0.85, 0.85},
+    ["bandit_ranged"]        = {0.95, 0.0, 0.0},
+    ["exile"]                = {0.95, 0.6, 0.0},
+    ["random_teleport"]      = {0.1, 0.55, 1.0},
+    ["backroom"]             = {0.95, 0.6, 0.0},
+    ["missile"]              = {1.0, 0.15, 0.0},
+    ["random_weapon"]        = {0.75, 0.75, 0.0},
+    ["random_skill_potion"]  = {0.15, 0.85, 0.15},
+    ["inv_save_ticket"]      = {0.95, 0.8, 0.0},
+    ["vehicle_drop"]         = {0.35, 0.35, 1.0},
+    ["revive_ticket"]        = {1.0, 0.35, 0.55},
+    ["mutant_spawn"]         = {0.8, 0.05, 0.05},
+    ["secret_passage_kit"]   = {0.65, 0.35, 0.05},
+    ["horde_night"]          = {0.95, 0.0, 0.0},
+    ["rise_up_dead_man"]     = {0.45, 0.0, 0.6},
+    ["zombie_rain"]          = {0.15, 0.4, 0.95},
 }
 
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
@@ -156,12 +156,12 @@ local iconTexPath = {
     ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
     ["horde_night"]          = "media/textures/donation/horde_night.png",
     ["zombie_rain"]          = "media/textures/donation/zombie_rain.png",
+    ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
     
     
-    -- ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
-    -- ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
+    ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
+    ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
     -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
-    -- ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     
     -- ["exile"]                = "media/textures/donation/exile.png",
@@ -187,8 +187,8 @@ local function getSlotMasks()
     return slotFillMaskTex, slotBorderMaskTex
 end
 
--- 슬롯 테두리는 이제 효과색이 아니라 항상 고정된 검회색 (col과 무관).
-local BORDER_COL = {0.13, 0.13, 0.15}
+-- 슬롯 테두리는 이제 효과색이 아니라 항상 고정된 흰색 (col과 무관).
+local BORDER_COL = {1.0, 1.0, 1.0}
 
 local function getIconTexture(featureId)
     local path = iconTexPath[featureId]
@@ -328,7 +328,7 @@ function DonationEntryPanel:render()
         end
     end
 
-    -- 테두리: 상태와 무관하게 항상 고정 검회색 (예전엔 효과색 + 상태별 굵기/투명도였음)
+    -- 테두리: 상태와 무관하게 항상 고정 흰색 (예전엔 효과색 + 상태별 굵기/투명도였음)
     if borderMask then
         self:drawTextureScaledAspect(borderMask, 0, 0, w, h, 0.9, BORDER_COL[1], BORDER_COL[2], BORDER_COL[3])
     else
