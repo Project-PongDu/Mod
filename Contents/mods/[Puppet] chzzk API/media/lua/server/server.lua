@@ -245,6 +245,41 @@ DOServer["PongDuBombard"]  = DOServer["PongDuBombard"]  or {}
 DOServer["PongDuRiseUp"]   = DOServer["PongDuRiseUp"]   or {}
 DOServer["PongDuDonation"] = DOServer["PongDuDonation"] or {}
 
+-- 폭격 반경 내 차량을 완전 고철화한다.
+-- setScript()로 불탄 차량 스크립트를 씌우는 방식은 바닐라에 Burnt 변형이
+-- 19종밖에 없어 전 차종을 커버하지 못하므로, 모든 파츠 내구도를 0으로
+-- 내리는 방식으로 처리한다(모델 교체 없음 = 차종 제한 없음).
+-- 차량은 좀비와 달리 서버 권위이므로 서버에서 변경 후
+-- transmitPartCondition()으로 클라에 전파해야 한다.
+local function wreckVehiclesAround(cell, cx, cy, r)
+    if not cell then return end
+    local vehicles = cell:getVehicles()
+    if not vehicles then return end
+    local wrecked, parts = 0, 0
+    for i = 0, vehicles:size() - 1 do
+        local v = vehicles:get(i)
+        if v and not v:isRemovedFromWorld() then
+            local dist = math.sqrt(math.pow(v:getX() - cx, 2) + math.pow(v:getY() - cy, 2))
+            if dist < r then
+                local n = v:getPartCount()
+                for pi = 0, n - 1 do
+                    local part = v:getPartByIndex(pi)
+                    if part and part:getCondition() > 0 then
+                        local ok, err = pcall(function()
+                            part:setCondition(0)
+                            v:transmitPartCondition(part)
+                        end)
+                        if ok then parts = parts + 1
+                        else srvlog("wreckVehicle part ERROR id=" .. tostring(part:getId()) .. " " .. tostring(err)) end
+                    end
+                end
+                wrecked = wrecked + 1
+            end
+        end
+    end
+    srvlog("wreckVehiclesAround done vehicles=" .. tostring(wrecked) .. " parts=" .. tostring(parts))
+end
+
 DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
     local cx = player:getX()
     local cy = player:getY()
@@ -274,6 +309,10 @@ DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
             end
         end
     end
+    -- 반경 내 차량 고철화.
+    local okv, errv = pcall(function() wreckVehiclesAround(e, cx, cy, r) end)
+    if not okv then srvlog("wreckVehiclesAround ERROR: " .. tostring(errv)) end
+
     -- 좀비 킬은 서버에서 하지 않는다.
     -- B41 멀티에서 좀비는 클라이언트 권한(client-authoritative)이므로 서버사이드
     -- setHealth/becomeCorpse는 소유 클라의 동기화에 덮여 저장에 반영되지 않는다
