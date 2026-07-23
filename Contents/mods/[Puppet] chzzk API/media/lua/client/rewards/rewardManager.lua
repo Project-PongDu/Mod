@@ -55,7 +55,9 @@ end
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
 -- immediate=true 인 기능은 안전지대 안에서도 즉시 발동. zombie_roulette / sprinter5 /
--- mutant_spawn 이 셋만 예외로 안전지대 밖으로 나갈 때까지 대기(immediate=false).
+-- mutant_spawn 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
+-- missile 은 immediate 가 함수라서 샌드박스 옵션(Bombard_SafeZoneBlock)에 따라
+-- 런타임에 결정된다.
 local rewardHandlers = {
     ["debuff_roulette"] = {
         immediate = true,
@@ -154,7 +156,17 @@ local rewardHandlers = {
         end,
     },
     ["missile"] = {
-        immediate = true,
+        -- 안전지대(세이프하우스 +10타일) 처리는 샌드박스 "세이프존 폭격 방지"
+        -- (Bombard_SafeZoneBlock) 옵션을 따른다. SandboxVars는 게임 로드 후에만
+        -- 존재하므로 반드시 발동 시점에 읽는다.
+        --   옵션 ON(기본)  -> immediate=false. 좀비룰렛/뛰좀과 동일하게 큐박스에서
+        --                     락이 걸리고, 안전지대를 벗어날 때까지 폭격이 미뤄진다.
+        --   옵션 OFF      -> immediate=true. 기존 동작대로 안전지대에서도 그냥 터진다.
+        --   옵션 없음(구 세이브) -> nil이므로 기본값 ON 취급.
+        immediate = function()
+            local sv = SandboxVars and SandboxVars.PongDu
+            return sv ~= nil and sv.Bombard_SafeZoneBlock == false
+        end,
         fn = function()
             global.b(" DONATION EXPLOSION START")
             getSoundManager():PlaySound("alert", false, 1.0)
@@ -282,16 +294,30 @@ function rewardManager.getFeatureIds()
     return ids
 end
 
+-- entry.immediate 평가. 값이 함수면 런타임에 호출해서 판정한다.
+-- (샌드박스 옵션에 따라 안전지대 정책이 바뀌는 기능용 - 예: missile)
+local function isImmediate(entry)
+    if entry == nil then return false end
+    local im = entry.immediate
+    if type(im) == "function" then
+        local ok = im()
+        return ok == true
+    end
+    return im == true
+end
+
 -- isZoneBlocked(featureId) -> true면 안전지대 안에서는 발동 불가(immediate=false).
 -- 도네큐박스가 슬롯에 자물쇠(락) 표시를 할지 판단할 때 쓴다.
 function rewardManager.isZoneBlocked(featureId)
     local entry = rewardHandlers[featureId]
-    return entry ~= nil and entry.immediate ~= true
+    if entry == nil then return false end
+    return not isImmediate(entry)
 end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]
--- immediate=true 기능은 안전지대 안에서도 즉시 발동 (zombie_roulette / sprinter5 /
--- mutant_spawn 제외 전부). 이 3개만 플레이어가 안전지대를 벗어날 때까지 대기 (5초마다 재확인).
+-- immediate 판정이 false인 기능은 플레이어가 안전지대를 벗어날 때까지 대기(5초마다 재확인).
+-- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn
+-- 조건부 대기 대상: missile (샌드박스 Bombard_SafeZoneBlock 이 켜져 있을 때만)
 function rewardManager.a(featureId, sender, callback)
     global.player = getPlayer()
     if not global.player then return end
@@ -299,9 +325,10 @@ function rewardManager.a(featureId, sender, callback)
     global.processingEvent = true
 
     local entry = rewardHandlers[featureId]
-    local skipZoneWait = entry and entry.immediate
+    local skipZoneWait = isImmediate(entry)
 
     if not skipZoneWait and zone.a(global.player) then
+        print("[PongDu] Reward '" .. tostring(featureId) .. "' deferred: player is inside a safe zone.")
         local elapsed = 0
         local function waitAndApply()
             elapsed = elapsed + getGameTime():getTimeDelta() * 1000

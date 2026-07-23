@@ -137,6 +137,11 @@ option PongDu.Bombard_Injure = {
     page = PongDu, translation = PongDu_Bombard_Injure,
 }
 
+option PongDu.Bombard_SafeZoneBlock = {
+    type = boolean, default = true,
+    page = PongDu, translation = PongDu_Bombard_SafeZoneBlock,
+}
+
 option PongDu.Divider_RandomSkillPotion = {
     type = boolean, default = false,
     page = PongDu, translation = PongDu_Divider_RandomSkillPotion,
