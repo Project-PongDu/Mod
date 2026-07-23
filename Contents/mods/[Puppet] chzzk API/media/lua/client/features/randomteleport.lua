@@ -65,6 +65,17 @@ local function rollCandidate(ox, oy)
     return nil
 end
 
+-- 차량 탑승 중이면 강제 하차. B41엔 removePassenger가 없고 exit(chr)가 정석:
+-- clearPassenger + setVehicle(nil) + collidable 복구 + MP sendExit 동기화까지 처리
+-- (바닐라 ISExitVehicle:perform 참조).
+local function forceExitVehicle(p)
+    local v = p:getVehicle()
+    if not v then return end
+    v:exit(p)
+    p:PlayAnim("Idle")
+    global.b(" random_teleport: forced exit from vehicle before teleport")
+end
+
 local function movePlayer(p, x, y, z)
     p:setX(x)
     p:setY(y)
@@ -135,8 +146,7 @@ local function rtDoReturn(p)
     local o = md.rtOrigin
     if o then
         getSoundManager():PlaySound("exile_exit", false, 1.0)
-        local v = p:getVehicle()
-        if v then v:removePassenger(p) end
+        forceExitVehicle(p)
         movePlayer(p, o.x, o.y, o.z)
         global.b(" random_teleport: survived, returned to origin")
     end
@@ -276,8 +286,7 @@ function randomteleport.a(player)
     -- 이미 진행 중이면 기존 루프를 버리고 현재 위치 기준으로 새로 시작
     stopLoop()
 
-    local v = player:getVehicle()
-    if v then v:removePassenger(player) end
+    forceExitVehicle(player)
 
     local origin = { x = player:getX(), y = player:getY(), z = player:getZ() }
     local cx, cy = rollCandidate(origin.x, origin.y)

@@ -43,9 +43,21 @@ function _a.a(a)
     end
 end
 
+-- 차량 탑승 중이면 강제 하차. B41엔 removePassenger가 없고 exit(chr)가 정석:
+-- clearPassenger + setVehicle(nil) + collidable 복구 + MP sendExit 동기화까지 처리
+-- (바닐라 ISExitVehicle:perform 참조).
+local function forceExitVehicle(p)
+    local v = p:getVehicle()
+    if not v then return end
+    v:exit(p)
+    p:PlayAnim("Idle")
+    _c.b(" exile: forced exit from vehicle before teleport")
+end
+
 -- 복귀 처리
 local function doReturn(a, b)
     if b.isDead or b.hasReturned then return end
+    forceExitVehicle(a)
     getSoundManager():PlaySound("exile_exit", false, 1.0)
     if b.originalPosition then
         a:setX(b.originalPosition.x)
@@ -88,8 +100,7 @@ function _a.b(a)
     if not b.originalPosition then
         b.originalPosition = {x = a:getX(), y = a:getY(), z = a:getZ()}
     end
-    local v = a:getVehicle()
-    if v then v:removePassenger(a) end
+    forceExitVehicle(a)
     a:setX(14298)
     a:setY(786)
     a:setZ(0)
