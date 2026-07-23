@@ -4,9 +4,11 @@
 -- 그 자리에 차량을 무작위로 소환한다.
 --
 -- 차종 선택 규칙 (pickVehicleType):
---   military 존 등록 차량(모드 추가 군용차; 바닐라 B41에는 military 존이 없음)과
---   샌드박스 VehicleDrop_Pool의 "합집합"에서 무작위 선택.
---   둘 다 비어있으면 FALLBACK_VEHICLES(바닐라 픽업트럭/밴 9종)에서 무작위 선택.
+--   샌드박스 VehicleDrop_Source(드롭다운)로 기본 풀을 하나 정하고,
+--   거기에 VehicleDrop_Pool(수동 입력)을 무조건 합집합으로 얹어 무작위 선택.
+--     1 = 바닐라 차량만 / 2 = 모드 차량만 / 3 = 바닐라+모드 / 4 = 군용 차량만
+--   수동 입력은 드롭다운 필터를 무시한다(직접 적은 건 무조건 채택).
+--   최종 후보가 0개면 소환하지 않고 로그만 남긴다.
 --
 -- 실제 addVehicleDebug 호출(t3VehicleDrop.spawnVehicle)은
 -- server/t3VehicleDropSpawner.lua 에 있다 (솔로/서버에서만 로드됨).
@@ -165,37 +167,136 @@ local function collectPoolVehicles()
     return list
 end
 
--- 차종 선택: military 존 등록 차량 + 샌드박스 풀의 "합집합"에서 무작위.
--- (예전엔 military 존이 하나라도 있으면 풀을 무시했는데, 그러면
--- trafficjams 존에만 등록하는 군용차 모드(97bushmaster 등)를 풀에 넣어도
--- 다른 military 존 모드에 가려 절대 안 뽑히는 문제가 있었다.)
--- military 존/샌드박스 풀이 모두 비었을 때 쓰는 최후 fallback 목록 (바닐라 픽업트럭/밴 9종)
-local FALLBACK_VEHICLES = {
-    "Base.PickUpTruck",
-    "Base.PickUpTruckLights",
-    "Base.PickUpTruckLightsFire",
-    "Base.PickUpTruckMccoy",
-    "Base.PickUpVan",
-    "Base.PickUpVanLights",
-    "Base.PickUpVanLightsFire",
-    "Base.PickUpVanLightsPolice",
-    "Base.PickUpVanMccoy",
+-- 바닐라 B41 차량 화이트리스트 (media/scripts/vehicles 전수 기준, burnt/smashed 변형 제외 45종).
+-- 모드 차량 판별은 "이 목록에 없으면 모드차"라는 소거법이라 목록이 완전해야 성립한다.
+-- VehicleZoneDistribution 기반 수집은 존 미등록 차량(ModernCar_ez 등 3종)을 놓치므로
+-- 스크립트 파일 정의를 직접 훑어 만든 목록을 쓴다. B42로 올라가면 재검증 필요.
+local VANILLA_VEHICLES = {
+    ["Base.CarLights"] = true,
+    ["Base.CarLightsPolice"] = true,
+    ["Base.CarLuxury"] = true,
+    ["Base.CarNormal"] = true,
+    ["Base.CarStationWagon"] = true,
+    ["Base.CarStationWagon2"] = true,
+    ["Base.CarTaxi"] = true,
+    ["Base.CarTaxi2"] = true,
+    ["Base.ModernCar"] = true,
+    ["Base.ModernCar02"] = true,
+    ["Base.ModernCar_Martin"] = true,
+    ["Base.ModernCar_ez"] = true,
+    ["Base.OffRoad"] = true,
+    ["Base.PickUpTruck"] = true,
+    ["Base.PickUpTruckLights"] = true,
+    ["Base.PickUpTruckLightsFire"] = true,
+    ["Base.PickUpTruckMccoy"] = true,
+    ["Base.PickUpVan"] = true,
+    ["Base.PickUpVanLights"] = true,
+    ["Base.PickUpVanLightsFire"] = true,
+    ["Base.PickUpVanLightsPolice"] = true,
+    ["Base.PickUpVanMccoy"] = true,
+    ["Base.SUV"] = true,
+    ["Base.SmallCar"] = true,
+    ["Base.SmallCar02"] = true,
+    ["Base.SportsCar"] = true,
+    ["Base.SportsCar_ez"] = true,
+    ["Base.StepVan"] = true,
+    ["Base.StepVanMail"] = true,
+    ["Base.StepVan_Heralds"] = true,
+    ["Base.StepVan_Scarlet"] = true,
+    ["Base.Trailer"] = true,
+    ["Base.TrailerAdvert"] = true,
+    ["Base.TrailerCover"] = true,
+    ["Base.Van"] = true,
+    ["Base.VanAmbulance"] = true,
+    ["Base.VanRadio"] = true,
+    ["Base.VanRadio_3N"] = true,
+    ["Base.VanSeats"] = true,
+    ["Base.VanSpecial"] = true,
+    ["Base.VanSpiffo"] = true,
+    ["Base.Van_KnoxDisti"] = true,
+    ["Base.Van_LectroMax"] = true,
+    ["Base.Van_MassGenFac"] = true,
+    ["Base.Van_Transit"] = true,
 }
 
-local function pickVehicleType()
-    local merged, seen = {}, {}
-    for _, ft in ipairs(collectMilitaryVehicles()) do
-        if not seen[ft] then seen[ft] = true; merged[#merged + 1] = ft end
+-- 설치된 모든 차량 스크립트의 풀네임 수집.
+-- ScriptManager:getAllVehicleScripts()는 내부 공유 임시 리스트(vehicleScriptTempList)를
+-- clear() 후 재사용해 반환하므로, 반환값을 들고 있지 말고 즉시 문자열만 복사해야 한다.
+local function collectAllVehicles()
+    local sm = getScriptManager and getScriptManager()
+    if not sm then return {} end
+    local scripts = sm:getAllVehicleScripts()
+    local list = {}
+    if not scripts then return list end
+    for i = 0, scripts:size() - 1 do
+        local sc = scripts:get(i)
+        local fullType = sc and sc:getFullName()
+        if fullType and fullType ~= "" then
+            list[#list + 1] = fullType
+        end
     end
-    for _, ft in ipairs(collectPoolVehicles()) do
-        if not seen[ft] then seen[ft] = true; merged[#merged + 1] = ft end
+    return list
+end
+
+-- 파손/전소 변형 제외. 이름 접미사 규칙(Burnt / Smashed*)에 의존하므로
+-- 같은 규칙을 안 따르는 모드 차량은 걸러지지 않는다(알려진 한계).
+-- 바닐라 쪽은 VANILLA_VEHICLES가 애초에 정상 차량만 담고 있어 영향 없음.
+local function isWreckVariant(fullType)
+    local lower = string.lower(fullType)
+    if string.find(lower, "burnt", 1, true) then return true end
+    if string.find(lower, "smashed", 1, true) then return true end
+    return false
+end
+
+local SOURCE_VANILLA  = 1
+local SOURCE_MOD      = 2
+local SOURCE_BOTH     = 3
+local SOURCE_MILITARY = 4
+
+-- 드롭다운 값에 해당하는 기본 풀 구성.
+local function buildSourcePool(source)
+    if source == SOURCE_MILITARY then
+        return collectMilitaryVehicles()
+    end
+
+    local list = {}
+    for _, fullType in ipairs(collectAllVehicles()) do
+        if not isWreckVariant(fullType) then
+            local isVanilla = VANILLA_VEHICLES[fullType] == true
+            local accept = (source == SOURCE_BOTH)
+                or (source == SOURCE_VANILLA and isVanilla)
+                or (source == SOURCE_MOD and not isVanilla)
+            if accept and hasDriverSeat(fullType) then
+                list[#list + 1] = fullType
+            end
+        end
+    end
+    return list
+end
+
+-- 차종 선택: 드롭다운 풀 + 수동 입력 풀의 합집합에서 무작위.
+-- 수동 입력(VehicleDrop_Pool)은 드롭다운 필터를 타지 않는다 -- "큰 범위는 드롭다운으로
+-- 정하고, 거기 없는 특정 차를 손으로 더 얹는다"가 이 옵션의 용도이기 때문.
+-- 후보가 0개면 nil을 반환하고, 호출부(OpenKit)가 소환을 취소한다.
+local function pickVehicleType()
+    local sv = SandboxVars and SandboxVars.PongDu
+    local source = (sv and sv.VehicleDrop_Source) or SOURCE_MOD
+
+    local merged, seen = {}, {}
+    for _, fullType in ipairs(buildSourcePool(source)) do
+        if not seen[fullType] then seen[fullType] = true; merged[#merged + 1] = fullType end
+    end
+    for _, fullType in ipairs(collectPoolVehicles()) do
+        if not seen[fullType] then seen[fullType] = true; merged[#merged + 1] = fullType end
     end
 
     if #merged == 0 then
-        local ft = FALLBACK_VEHICLES[ZombRand(#FALLBACK_VEHICLES) + 1]
-        print("[t3VehicleDrop] No candidate vehicles, using fallback pool: " .. ft)
-        return ft
+        print("[t3VehicleDrop] No candidate vehicles for source=" .. tostring(source)
+            .. " (manual pool empty too), spawn cancelled")
+        return nil
     end
+
+    print("[t3VehicleDrop] Candidate pool size=" .. #merged .. " (source=" .. tostring(source) .. ")")
     return merged[ZombRand(#merged) + 1]
 end
 
@@ -256,6 +357,24 @@ function t3VehicleDrop.OpenKit(items, result, player)
 
     local donor       = findDonor(items)
     local vehicleType = pickVehicleType()
+    if not vehicleType then
+        -- OnCreate는 크래프팅이 끝난 뒤에 호출되므로 이 시점엔 키트가 이미 소모돼 있다.
+        -- 여기서 그냥 return하면 후원자는 아이템만 잃고 아무것도 못 받으므로 키트를 돌려준다.
+        -- 후원자 표기(이름 + modData.t3Donor)도 rewardManager의 최초 지급 시점과
+        -- 동일하게 복원해야 재개봉 시 키 이름에 후원자가 붙는다.
+        local kit = player:getInventory():AddItem("t3chzzkDonation.vehicle_drop_kit")
+        if kit then
+            if donor ~= "" then
+                kit:setName(donor .. "'s " .. kit:getDisplayName())
+            end
+            kit:getModData().t3Donor = donor
+            print("[t3VehicleDrop] Kit refunded (donor: " .. tostring(donor) .. ")")
+        else
+            print("[t3VehicleDrop] Kit refund FAILED (donor: " .. tostring(donor) .. ")")
+        end
+        player:Say(getText("IGUI_donation_vehicle_drop_nopool"))
+        return
+    end
     local sq          = findDropSquare(player)
 
     if not isClient() and not isServer() then

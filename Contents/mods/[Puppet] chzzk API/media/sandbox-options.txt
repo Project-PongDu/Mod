@@ -172,9 +172,16 @@ option PongDu.Delay_vehicle_drop = {
     page = PongDu, translation = PongDu_Delay_vehicle_drop,
 }
 
+option PongDu.VehicleDrop_Source = {
+    type = enum, numValues = 4, default = 2,
+    page = PongDu,
+    translation = PongDu_VehicleDrop_Source,
+    valueTranslation = PongDu_VehicleDrop_Source,
+}
+
 option PongDu.VehicleDrop_Pool = {
     type = string,
-    default = Base.97bushmaster;Base.97bushAmbulance,
+    default = ,
     page = PongDu, translation = PongDu_VehicleDrop_Pool,
 }
 
@@ -274,7 +281,7 @@ option PongDu.Rain_Count = {
 }
 
 option PongDu.Rain_SprinterPercent = {
-    type = integer, min = 0, max = 100, default = 20,
+    type = integer, min = 0, max = 100, default = 5,
     page = PongDu, translation = PongDu_Rain_SprinterPercent,
 }
 
