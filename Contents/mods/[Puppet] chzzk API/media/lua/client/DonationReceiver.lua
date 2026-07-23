@@ -112,6 +112,7 @@ local labelKey = {
     ["horde_night"]          = "IGUI_donation_horde_night",
     ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
     ["zombie_rain"]          = "IGUI_donation_zombie_rain",
+    ["fire_support"]         = "IGUI_donation_fire_support",
 }
 
 local colorMap = {
@@ -136,6 +137,7 @@ local colorMap = {
     ["horde_night"]          = {0.95, 0.0, 0.0},
     ["rise_up_dead_man"]     = {0.45, 0.0, 0.6},
     ["zombie_rain"]          = {0.15, 0.4, 0.95},
+    ["fire_support"]         = {0.22, 0.52, 0.18},
 }
 
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
@@ -157,18 +159,19 @@ local iconTexPath = {
     ["horde_night"]          = "media/textures/donation/horde_night.png",
     ["zombie_rain"]          = "media/textures/donation/zombie_rain.png",
     ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
+    ["fire_support"]         = "media/textures/donation/fire_support.png",
     
     
-    ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
-    ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
+    
     -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     
     -- ["exile"]                = "media/textures/donation/exile.png",
     -- ["backroom"]             = "media/textures/donation/backroom.png",
-
-
-
+    
+    
+    ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
+    ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
 }
 local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
 
@@ -189,6 +192,22 @@ end
 
 -- 슬롯 테두리는 이제 효과색이 아니라 항상 고정된 흰색 (col과 무관).
 local BORDER_COL = {1.0, 1.0, 1.0}
+
+-- PZ ISUIElement:drawText엔 아웃라인 인자가 없다. 스택 숫자 색(1, 0.95, 0.35)이
+-- BORDER_COL(흰색)과 밝기가 비슷해서 슬롯 테두리에 겹치면 가독성이 떨어지길래,
+-- 8방향 1px(스케일 적용) 오프셋으로 검정 텍스트를 먼저 깔고 그 위에 원래
+-- 텍스트를 그리는 방식으로 아웃라인을 흉내낸다.
+local function drawTextOutlined(uiElement, text, x, y, r, g, b, a, font)
+    local o = sc(2)
+    for dx = -o, o, o do
+        for dy = -o, o, o do
+            if dx ~= 0 or dy ~= 0 then
+                uiElement:drawText(text, x + dx, y + dy, 0, 0, 0, a, font)
+            end
+        end
+    end
+    uiElement:drawText(text, x, y, r, g, b, a, font)
+end
 
 local function getIconTexture(featureId)
     local path = iconTexPath[featureId]
@@ -352,8 +371,10 @@ function DonationEntryPanel:render()
     end
 
     -- 스택 개수 (좌하단, 참고 이미지 스타일). 진행 상황은 오버레이가 보여주니
-    -- 숫자는 "같은 효과가 몇 개 쌓여있는지"에만 씀.
-    self:drawText(tostring(e.stack or 1), sc(3), h - sc(16), 1, 0.95, 0.35, 1, UIFont.Medium)
+    -- 숫자는 "같은 효과가 몇 개 쌓여있는지"에만 씀. 단위(회)를 붙여 숫자만
+    -- 덩그러니 있을 때보다 무슨 값인지 바로 알 수 있게 한다.
+    drawTextOutlined(self, getText("IGUI_donation_stack_count", e.stack or 1),
+    sc(3), h - sc(16), 1, 0.95, 0.35, 1, UIFont.Medium)
 
     -- 마우스 호버 중일 때만 이 슬롯이 무슨 효과인지 슬롯 위에 툴팁으로 표시.
     -- 텍스트는 IG_UI_KO.txt 번역 키(labelKey/getText) 기반 순수 효과 이름만 씀
