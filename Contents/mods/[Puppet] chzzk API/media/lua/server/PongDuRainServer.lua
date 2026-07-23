@@ -102,6 +102,17 @@ local function flushBatch(session, force)
         ["zeds"]   = session.batch,
         ["sender"] = session.sender or "",   -- 스프린터 이름표용 (세션 공통)
     })
+    -- 어그로 스코프 공급: 이번 배치의 zid를 열려있는 어그로 창(pid 매칭)에
+    -- 추가한다 (features/aggro.lua "AddIds" 수신부). 낙하 좀비는 배치 분산
+    -- 스폰이라 창 오픈 시점엔 id가 없다 — 배치마다 증분 공급.
+    pcall(function()
+        local ids = {}
+        for i = 1, #session.batch do ids[i] = session.batch[i]["id"] end
+        sendServerCommand("PongDuAggro", "AddIds", {
+            ["pid"]  = session.player:getOnlineID(),
+            ["zeds"] = ids,
+        })
+    end)
     session.batch = {}
 end
 
@@ -204,12 +215,13 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     -- 아래 spawnRainZombie의 서버측 setTarget은 좀비 클라 권한 구조상 소유
     -- 클라 동기화에 덮여 실효가 없다 — 실제 어그로는 이 브로드캐스트를 받은
     -- 각 클라가 자기 소유 좀비에 건다. 좀비가 지속시간 내내 낙하하므로 창은
-    -- 준비지연 + 지속시간 + 착지 여유(8초)까지 연다. 반경은 컬럼 선정 반경
-    -- + 착지 후 미세 이동 여유.
+    -- 준비지연 + 지속시간 + 착지 여유(8초)까지 연다.
+    -- v4: 반경 필터 폐지 — zid는 위 flushBatch가 배치마다 AddIds로 공급하므로
+    -- 여기선 빈 창만 연다. 주변 기존 좀비는 더 이상 어그로 대상이 아니다.
     sendServerCommand("PongDuAggro", "Window", {
-        ["x"] = px, ["y"] = py, ["r"] = r + 10,
         ["dur"] = PREP_DELAY_MS + durMs + 8000,
         ["pid"] = player:getOnlineID(),
+        ["src"] = "rain",
     })
 
     print("[PongDuRain] prep pickMs=" .. tostring(tPick1 - tPick0)

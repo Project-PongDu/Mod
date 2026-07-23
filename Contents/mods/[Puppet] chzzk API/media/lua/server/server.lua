@@ -50,6 +50,7 @@ local function spawnZombies(x, y, z, amount, useHighStats, sprint, sender)
     amount       = amount or 1
     useHighStats = useHighStats ~= false
     sprint       = sprint or false
+    local spawnedIds = {}   -- 어그로 스코프용: 이번 도네가 만든 좀비 onlineID
 
     local highCognition = 4
     local highMemory    = 5
@@ -78,6 +79,7 @@ local function spawnZombies(x, y, z, amount, useHighStats, sprint, sender)
             getSandboxOptions():set("ZombieLore.Hearing",   origHearing)
         end
         if lastSpawned and lastSpawned:size() > 0 then
+            spawnedIds[#spawnedIds + 1] = lastSpawned:get(0):getOnlineID()
             if sprint then
                 lastSpawned:get(0):setWalkType("sprint4")
                 -- 뛰좀도 특좀 파이프라인에 태워 부활 시 뜀을 복원한다.
@@ -108,6 +110,7 @@ local function spawnZombies(x, y, z, amount, useHighStats, sprint, sender)
             end
         end
     end
+    return spawnedIds
 end
 
 -- ── 뮤턴트 소환 (mutant_spawn) ────────────────────────────────────────────────
@@ -144,7 +147,7 @@ local function spawnSpecialZombie(x, y, z, kind, sender)
         ["sender"] = sender or "",
     })
     registerMutant(zed, kind, sender) -- 부활 유지용 영속 등록 (후원자 포함)
-    return true
+    return zed:getOnlineID()   -- 어그로 스코프용 (실패 경로는 위에서 false)
 end
 
 -- 부활 좀비 재등록: 클라 적용기가 부활 좀비에 능력을 입힌 뒤 그놈의 "새" pid를
@@ -172,19 +175,24 @@ local function srvlog(msg)
     if w then w:write(os.date("%Y-%m-%d %H:%M:%S") .. " - " .. tostring(msg) .. "\n") w:close() end
 end
 
--- 소환 좀비 플레이어 어그로 창 브로드캐스트.
--- 클라 features/aggro.lua가 수신 -> 창 유지시간(dur) 동안 반경 내 자기 소유
--- 좀비에게 spotted(도네이터, true) + setLastHeardSound(도네이터 좌표)를 건다.
+-- 소환 좀비 플레이어 어그로 창 브로드캐스트 (v4: zid 화이트리스트 스코프).
+-- 클라 features/aggro.lua가 수신 -> 창 유지시간(dur) 동안 zeds 목록에 있는
+-- 자기 소유 좀비에게만 비강제 spotted 인계(근거리) / per-zombie 사운드응답
+-- 유인(원거리)을 건다. 반경 필터가 아니라 id 필터이므로 도네 효과와 무관한
+-- 주변 좀비는 건드리지 않는다.
 -- target이 박히면 ZombieGroupManager(랠리 무리배회)가 못 채가므로, 대량 스폰
 -- 좀비가 랠리 척력 벡터를 쫓아 방사형으로 흩어지는 현상을 차단한다.
 -- 좀비는 클라 권한이라 서버측 setTarget은 소유 클라 동기화에 덮인다 — 반드시
 -- 이 브로드캐스트 -> 클라 적용 경로여야 한다.
-local function broadcastAggro(player, x, y, r, durMs)
+-- ids=nil 허용: 강령술은 서버가 부활 좀비 zid를 모르므로(reanimate가 다음
+-- 틱) 빈 창만 열고, 클라 riseup.lua가 addLocalIds()로 채운다. src로 구분.
+local function broadcastAggro(player, ids, durMs, src)
     if not player then return end
     sendServerCommand("PongDuAggro", "Window", {
-        ["x"] = x, ["y"] = y, ["r"] = r,
-        ["dur"] = durMs,
-        ["pid"] = player:getOnlineID(),
+        ["zeds"] = ids,
+        ["dur"]  = durMs,
+        ["pid"]  = player:getOnlineID(),
+        ["src"]  = src or "?",
     })
 end
 
@@ -203,14 +211,13 @@ local function onClientCommand(module, command, player, data)
         if sprint == 0 then isSprint = false
         elseif sprint == 1 then isSprint = true end
         local sender = data["sender"] or ""
+        local spawnedIds
         local ok, err = pcall(function()
-            spawnZombies(x, y, z, amount, true, isSprint, sender)
+            spawnedIds = spawnZombies(x, y, z, amount, true, isSprint, sender)
         end)
         if ok then
-            srvlog("spawnZombies OK")
-            -- 서버 오프셋(±4) + 클라 zone 오프셋 포함 반경 15면 충분히 커버
-            -- (zombie.lua tagNew의 신규 좀비 판정 반경과 동일 기준)
-            broadcastAggro(player, x, y, 15, 8000)
+            srvlog("spawnZombies OK ids=" .. tostring(spawnedIds and #spawnedIds or 0))
+            broadcastAggro(player, spawnedIds, 8000, "spawn")
         else srvlog("spawnZombies ERROR: " .. tostring(err)) end
     elseif module == "PongDuMutant" and command == "MutantSpawn" then
         local x    = tonumber(data["ZedX"])
@@ -219,12 +226,13 @@ local function onClientCommand(module, command, player, data)
         local kind = tostring(data["kind"] or "roach")
         srvlog("MutantSpawn kind=" .. kind .. " x=" .. tostring(x) .. " y=" .. tostring(y))
         if x and y then
+            local zid
             local ok, err = pcall(function()
-                spawnSpecialZombie(x, y, z, kind, data["sender"] or "")
+                zid = spawnSpecialZombie(x, y, z, kind, data["sender"] or "")
             end)
             if ok then
-                srvlog("MutantSpawn OK")
-                broadcastAggro(player, x, y, 10, 8000)
+                srvlog("MutantSpawn OK zid=" .. tostring(zid))
+                if zid then broadcastAggro(player, { zid }, 8000, "mutant") end
             else srvlog("MutantSpawn ERROR: " .. tostring(err)) end
         end
     end
@@ -555,7 +563,9 @@ DOServer["PongDuRiseUp"]["RiseUp"] = function(player, data)
         -- (reanimatetimer 기반 AnimSet 조건)와 무관하고, 일어나는 즉시 추격
         -- 시작. target 보유 좀비는 랠리 편입에서 제외돼 흩어짐도 차단된다.
         -- 창 35초 = 밀집 더미 밟힘 리셋으로 인한 최대 기상 지연(관측 27초) + 여유.
-        broadcastAggro(player, cx, cy, r + 5, 35000)
+        -- zid는 서버가 모르므로(reanimate 다음 틱) 빈 창 — 각 클라 riseup.lua
+        -- layDown()이 부활 좀비 식별 시 addLocalIds()로 채운다.
+        broadcastAggro(player, nil, 35000, "riseup")
     end
 end
 

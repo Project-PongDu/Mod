@@ -1,5 +1,7 @@
 local _a = {}
 
+local aggro = require("features/aggro")
+
 -- 라이즈 업 데드 맨: 도네 플레이어 기준 반경 내 모든 시체(IsoDeadBody)를
 -- 좀비로 되살린다.
 --
@@ -197,6 +199,11 @@ local function layDown(z, zid, why)
     _done[zid] = true
     local ok, err = applyLaydown(z)
     if ok then _laid[zid] = { t = getTimestampMs(), tries = 0, laidOk = false, pinned = false } end
+    -- 어그로 스코프 등록: 여기서 눕힌 좀비 = 이번 강령술이 부활시킨 좀비
+    -- (서버는 reanimate가 다음 틱이라 새 zid를 모른다 — 클라 관측이 유일한
+    -- 식별점). src="riseup" 어그로 창이 열려있을 때만 실제 반영되므로,
+    -- 평시 realState 경로 laydown(스트리밍 인 시체 보정)은 자동 no-op.
+    pcall(function() aggro.addLocalIds({ zid }) end)
     print("[PongDu][RiseUp][Getup] laydown zid=" .. tostring(zid)
         .. " via=" .. why .. " ok=" .. tostring(ok)
         .. (ok and "" or (" err=" .. tostring(err))))
