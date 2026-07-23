@@ -56,8 +56,8 @@ end
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
 -- immediate=true 인 기능은 안전지대 안에서도 즉시 발동. zombie_roulette / sprinter5 /
 -- mutant_spawn 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
--- missile 은 immediate 가 함수라서 샌드박스 옵션(Bombard_SafeZoneBlock)에 따라
--- 런타임에 결정된다.
+-- missile / zombie_rain 은 immediate 가 함수라서 각각 샌드박스 옵션
+-- (Bombard_SafeZoneBlock / Rain_SafeZoneBlock)에 따라 런타임에 결정된다.
 local rewardHandlers = {
     ["debuff_roulette"] = {
         immediate = true,
@@ -267,7 +267,15 @@ local rewardHandlers = {
         end,
     },
     ["zombie_rain"] = {
-        immediate = true,
+        -- 안전지대 처리는 샌드박스 "세이프존 좀비 레인 방지"(Rain_SafeZoneBlock)를
+        -- 따른다. missile과 달리 기본값이 꺼짐이라, 옵션이 명시적으로 켜져 있을
+        -- 때만 대기(immediate=false)로 넘어간다.
+        --   옵션 OFF(기본) / 옵션 없음(구 세이브) -> immediate=true. 안전지대에서도 그대로 발동.
+        --   옵션 ON                              -> immediate=false. 벗어날 때까지 큐박스에서 락.
+        immediate = function()
+            local sv = SandboxVars and SandboxVars.PongDu
+            return not (sv ~= nil and sv.Rain_SafeZoneBlock == true)
+        end,
         fn = function(sender)
             global.b(" ZOMBIE RAIN START")
             zombierain.b(global.player, sender)           -- Zombie Rain
@@ -317,7 +325,8 @@ end
 -- applyReward(featureId, sender, callback)  [public name: .a]
 -- immediate 판정이 false인 기능은 플레이어가 안전지대를 벗어날 때까지 대기(5초마다 재확인).
 -- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn
--- 조건부 대기 대상: missile (샌드박스 Bombard_SafeZoneBlock 이 켜져 있을 때만)
+-- 조건부 대기 대상: missile (Bombard_SafeZoneBlock 켜짐, 기본 ON)
+--                   zombie_rain (Rain_SafeZoneBlock 켜짐, 기본 OFF)
 function rewardManager.a(featureId, sender, callback)
     global.player = getPlayer()
     if not global.player then return end

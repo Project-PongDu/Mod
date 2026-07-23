@@ -288,6 +288,11 @@ option PongDu.Rain_SprinterNameTag = {
     page = PongDu, translation = PongDu_Rain_SprinterNameTag,
 }
 
+option PongDu.Rain_SafeZoneBlock = {
+    type = boolean, default = false,
+    page = PongDu, translation = PongDu_Rain_SafeZoneBlock,
+}
+
 /***** PONGDU DEV (dummy / stub features) *****/
 
 option PongDu.Divider_Exile = {
