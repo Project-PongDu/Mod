@@ -366,9 +366,14 @@ DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
             end
         end
     end
-    -- 반경 내 차량 고철화.
-    local okv, errv = pcall(function() wreckVehiclesAround(e, cx, cy, r) end)
-    if not okv then srvlog("wreckVehiclesAround ERROR: " .. tostring(errv)) end
+    -- 반경 내 차량 고철화. 샌드박스에서 끌 수 있다(기본 켜짐).
+    local sv = SandboxVars and SandboxVars.PongDu
+    if sv == nil or sv.Bombard_VehicleDamage ~= false then
+        local okv, errv = pcall(function() wreckVehiclesAround(e, cx, cy, r) end)
+        if not okv then srvlog("wreckVehiclesAround ERROR: " .. tostring(errv)) end
+    else
+        srvlog("vehicle damage disabled by sandbox option")
+    end
 
     -- 좀비 킬은 서버에서 하지 않는다.
     -- B41 멀티에서 좀비는 클라이언트 권한(client-authoritative)이므로 서버사이드
