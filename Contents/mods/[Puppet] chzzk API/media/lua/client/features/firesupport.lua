@@ -102,7 +102,7 @@ local function heliCfg()
     return svInt("Heli_Duration", 30),
            svInt("Heli_Radius", 30),
            svInt("Heli_Interval", 100),
-           svInt("Heli_KillChance", 10)
+           svInt("Heli_KillChance", 30)
 end
 
 -- ── 종류별 실행부 (전부 미구현) ────────────────────────────────────────────
@@ -132,7 +132,7 @@ runners.drone = function(player, sender)
 end
 
 -- 헬기: 지속(김). 랜덤 지점 A -> B 로 이동하며 플레이어 반경 내 좀비를
--- 무차별 소사. 저격과 달리 발당 킬 확률(기본 5%)이 낮은 대신 연사가 빠르다.
+-- 무차별 소사. 저격과 달리 발당 킬 확률(기본 30%)이 낮은 대신 연사가 빠르다.
 -- A/B 산출, 대상 선정, 킬 룰렛, 발사 타이밍 전부 서버 job이 맡는다
 -- (이유는 저격과 동일 -- 킬 총량/타이밍의 단일 권위가 필요).
 runners.helicopter = function(player, sender)
@@ -379,10 +379,10 @@ local _heliStopAt = nil      -- 자체 정지 데드라인 (ms)
 -- 루프 사운드라도 emitter:setVolume(handle, v)로 실시간 볼륨 조절이 가능하다
 -- (Sound.volume에 저장되고 FileSound.tick이 매 틱 volume * clip볼륨으로 반영 --
 --  VehicleDropCraftSound.lua가 이미 쓰는 검증된 경로).
--- 헬기 위치는 그림자 보간 좌표(heliShadowPos)를 매 발마다 다시 읽어서
--- 플레이어와의 거리를 재고, 볼륨을 갱신하면 "멀리서 접근 -> 최근접(머리 위
--- 통과) -> 멀어짐" 연출이 된다. 경로가 플레이어 중심 원 위 A -> 반대편 B라
--- 최근접은 ~0(머리 위 스침), 최원은 A/B 지점의 D(플레이어 기준 반경)다.
+-- 헬기 위치는 실차량 좌표(heliCurPos -- 미스트리밍 시 경로 보간 폴백)를 매 틱
+-- 다시 읽어서 플레이어와의 거리를 재고, 볼륨을 갱신하면 "멀리서 접근 ->
+-- 최근접(머리 위 통과) -> 멀어짐" 연출이 된다. 경로가 플레이어 중심 원 위
+-- A -> 반대편 B라 최근접은 ~0(머리 위 스침), 최원은 A/B 지점의 D다.
 local HELI_VOL_NEAR     = 1.00   -- 최근접 시 로터음 볼륨
 local HELI_VOL_FAR      = 0.20   -- 최원거리 시 로터음 볼륨
 local HELI_LMG_VOL_NEAR = 0.85   -- 기관총음은 로터음보다 살짝 낮게
@@ -416,37 +416,46 @@ local function heliUpdateVolume(hx, hy)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  헬기 그림자 (바닐라 renderShadow 재사용)
+--  헬기 실체 (Base.PongDuHeli 차량)
 --
---  IsoDeadBody.renderShadow(x, y, z, forward, w, fm, bm, lightInfo, alpha)는
---  public static이고 (IsoDeadBody.java:780) 캐릭터/시체/마네킹이 전부 이걸로
---  바닐라 드랍섀도(media/textures/NewShadow.png)를 그린다. 임의 좌표 + 방향
---  벡터로 호출 가능하며, 내부에서 렌더 파이프라인의 현재 위치에 renderPoly로
---  enqueue하므로 OnPostFloorLayerDraw(바닥+엔진 그림자 직후, 그 층의 벽/캐릭터
---  전 -- IsoCell.java:910)에서 부르면 "바닥 위, 개체 아래"에 정확히 깔린다.
---  줌/카메라 변환도 내부 IsoUtils.XToScreenExact가 처리해서 수동 변환이 없다.
+--  그림자 스프라이트(IsoDeadBody.renderShadow) 연출을 실제 차량으로 교체했다.
+--  BetterHelicopterForMP의 UH-1 모델을 리네임한 Base.PongDuHeli를 서버가
+--  addVehicleDebug로 스폰하고, 대상 플레이어 클라(파일럿)가 물리 권한을 받아
+--  BH 모드와 동일한 리플렉션 텔레포트(setWorldTransform)로 경로를 비행시킨다.
 --
---  인자: forward = 진행 방향(그림자가 비행 방향으로 길게 눕는다),
---        w = 반폭, fm/bm = 전/후 길이(타일). lightInfo의 rgb 평균이 곱해져
---        어두운 곳에선 그림자도 옅어진다(엔진 특성 그대로).
---  필요 타입 3종(IsoDeadBody/Vector3f/ColorInfo) 모두 Lua 노출 확인,
---  Vector3f는 org.joml이라 renderShadow 시그니처와 동일 타입이다.
+--  MP 동기화 구조 (PZ-Library Java 검증 완료):
+--   ① 서버: addVehicleDebug 스폰 -> authorizationServerCollide(pid, true)로
+--      대상 클라에 LocalCollide 권한 강제 부여. serverUpdate가 연결별 상태
+--      비교로 감지해 VehicleAuthorizationPacket을 자동 브로드캐스트한다.
+--   ② 파일럿 클라: hasAuthorization=true -> 매 틱 이 파일이 경로 보간 좌표로
+--      텔레포트 -> 엔진이 150ms 간격 sendPhysic(패킷9) 스트림 -> 서버 릴레이.
+--   ③ 타 클라: VehicleInterpolation 버퍼로 보간 수신 (MP에서 달리는 모든
+--      차량이 쓰는 검증된 경로 -- 별도 코드 불필요).
+--   ④ LocalCollide 자동 회수는 "transform이 1초간 불변"일 때만 발동
+--      (WorldSimulation.java:140) -- 비행 중엔 매 틱 변하므로 안 뺏긴다.
+--   ⑤ 종료: 서버 permanentlyRemove() -> 제거 패킷(8) 브로드캐스트.
 --
---  위치는 HeliStart가 준 경로(ax,ay -> bx,by)와 진행률(elapsed/total)을 받아
---  로컬 시계 기준으로 매 프레임 보간한다 -- HeliFire(발사 간격) 주기보다 훨씬
---  부드럽다. 연장(급선회) 시 서버가 갱신된 경로/진행률로 HeliStart를 다시
---  보내면 _heliPath를 통째로 갈아끼워서 즉시 새 직선으로 전환된다.
+--  경로/타이밍은 기존 그대로 HeliStart의 (ax,ay)->(bx,by) + elapsed/total을
+--  로컬 시계로 보간한다. 급선회(중첩 후원) 시 서버가 새 경로로 HeliStart를
+--  다시 보내면 _heliPath 교체 + yaw 재설정으로 즉시 새 직선을 탄다.
+--
+--  블레이드 회전: BH와 동일하게 모델 8종(대)/4종(소)을 매 틱 순환 스왑.
+--  엔진 시동은 걸지 않으므로(무인) 차량 엔진음은 존재하지 않고, 로터음은
+--  기존 pongdu_heli 루프(아래 사운드 섹션)를 그대로 쓴다.
 -- ═══════════════════════════════════════════════════════════════════════════
 
-local SHADOW_W     = 1.6      -- 그림자 반폭 (타일)
-local SHADOW_LEN   = 2.4      -- 전/후 길이 (타일) -- 진행 방향으로 눕는 장축
-local SHADOW_ALPHA = 0.85     -- 엔진이 광량 평균 * 0.66을 추가로 곱한다
+local HELI_FLY_ALT = 3.0   -- 물리 y 고도. BH 조종 한계와 동일값(검증된 최대 렌더 고도).
+local HELI_YAW_OFF = 0     -- fbx 전방축 보정(도). 기수 방향이 틀어져 보이면 여기로 교정.
 
-local _heliPath   = nil   -- { ax, ay, bx, by, oz, t0(로컬 시작 시각), total }
-local _shadowFwd  = Vector3f.new()          -- 매 프레임 할당 방지용 캐시
-local _shadowLite = ColorInfo.new(1, 1, 1, 1)
+local _heliPath   = nil   -- { ax, ay, bx, by, oz, t0(로컬 시작 시각), total, yawSet }
+local _heliVid    = nil   -- 서버가 준 VehicleID
+local _amPilot    = false -- 내가 물리 권한 클라인가 (HeliStart의 pilot == 내 onlineID)
+local _wFieldNum  = nil   -- tempTransform 자바 필드 인덱스 캐시 (클래스 고정이라 재사용)
+local _heliWarned = false -- "차량 미스트리밍" 로그 1회 제한
+local _bladeInit  = false -- 첫 틱에 블레이드 전체 숨김 수행 여부
+local _bladeStep  = 0
 
-local function heliShadowPos()
+local function heliPathPos()
     if not _heliPath then return nil end
     local t = (getTimestampMs() - _heliPath.t0) / _heliPath.total
     if t < 0 then t = 0 elseif t > 1 then t = 1 end
@@ -455,42 +464,120 @@ local function heliShadowPos()
     return x, y, _heliPath.oz
 end
 
-Events.OnPostFloorLayerDraw.Add(function(z)
-    if not _heliPath then return end
-    if isServer() then return end
-    if not isIngameState() then return end
+local function findHeliVehicle()
+    if not _heliVid then return nil end
+    local ok, v = pcall(function() return getVehicleById(_heliVid) end)
+    if ok and v then return v end
+    return nil
+end
 
-    local pl = getSpecificPlayer(0)
-    if not pl then return end
-    -- 플레이어가 있는 층에만 그림: 다른 층 루프에서 중복으로 찍히는 것 방지
-    if z ~= math.floor(pl:getZ()) then return end
+-- 현재 헬기 좌표: 실차량 우선(화면과 정확히 일치), 스트리밍 전엔 경로 보간 폴백.
+local function heliCurPos()
+    local v = findHeliVehicle()
+    if v then return v:getX(), v:getY(), v:getZ() end
+    return heliPathPos()
+end
 
-    local hx, hy, hz = heliShadowPos()
-    if not hx then return end
+-- BH 모드 moveVehicle과 동일한 리플렉션 경로. BaseVehicle의 private
+-- tempTransform 필드를 꺼내 getWorldTransform/setWorldTransform으로 물리
+-- 원점을 직접 옮긴다 (클라 setWorldTransform은 내부에서 Bullet.teleportVehicle
+-- 호출 -- BaseVehicle.java:3453).
+local function heliFieldNum(obj, name)
+    for i = 0, getNumClassFields(obj) - 1 do
+        local f = getClassField(obj, i)
+        if luautils.stringEnds(tostring(f), "." .. name) then return i end
+    end
+    return nil
+end
 
-    -- 그림자 장축 = 비행 방향. 경로 길이 0 가드(정규화 NaN 방지).
+local function heliMoveTo(v, wx, wy)
+    if not _wFieldNum then _wFieldNum = heliFieldNum(v, "tempTransform") end
+    if not _wFieldNum then error("tempTransform field not found") end
+    local tmp    = getClassFieldVal(v, getClassField(v, _wFieldNum))
+    local tr     = v:getWorldTransform(tmp)
+    local origin = getClassFieldVal(tr, getClassField(tr, 1))
+    -- 물리축 매핑: origin.x = iso x(월드심 오프셋 좌표계), origin.y = 고도,
+    -- origin.z = iso y. 오프셋 값을 몰라도 되도록 iso 좌표 "델타"를 더한다
+    -- (BH moveVehicle 방식). 고도만 절대값으로 박아 중력 드리프트를 차단.
+    origin:set(origin:x() + (wx - v:getX()), HELI_FLY_ALT, origin:z() + (wy - v:getY()))
+    v:setWorldTransform(tr)
+end
+
+-- 기수 방향. addVehicleDebug의 savedRot 규약(dir.toAngle() + pi, Y축 회전)을
+-- 역산하면 진행방향 (dx,dy)의 yaw = atan2(dx, dy) (IsoDirections.java:307
+-- N=0/W=pi/2/S=pi/E=3pi/2 매핑으로 4방위 전수 검산함). setAngles는 도 단위.
+local function heliSetYaw(v)
     local dx, dy = _heliPath.bx - _heliPath.ax, _heliPath.by - _heliPath.ay
-    if dx == 0 and dy == 0 then dx = 1 end
-    _shadowFwd:set(dx, dy, 0)
-
-    -- 헬기 그림자 위치의 광량 반영: 어두우면 그림자도 옅게 (캐릭터와 동일 거동)
-    local sq = getCell():getGridSquare(math.floor(hx), math.floor(hy), math.floor(hz))
-    local ll = 1.0
-    if sq then
-        local ok, v = pcall(function() return sq:getLightLevel(0) end)
-        if ok and v then ll = v end
+    if dx == 0 and dy == 0 then return end
+    local yaw = math.deg(math.atan2(dx, dy)) + HELI_YAW_OFF
+    local ok, err = pcall(function() v:setAngles(0, yaw, 0) end)
+    if ok then
+        print(string.format("[PongDu] fire_support/heli: yaw set %.1f deg", yaw))
+    else
+        print("[PongDu] fire_support/heli: yaw set FAILED err=" .. tostring(err))
     end
-    _shadowLite:set(ll, ll, ll, 1)
+end
 
-    local ok, err = pcall(function()
-        IsoDeadBody.renderShadow(hx, hy, hz, _shadowFwd,
-            SHADOW_W, SHADOW_LEN, SHADOW_LEN, _shadowLite, SHADOW_ALPHA)
-    end)
-    if not ok and not _heliPath.shadowErr then
-        _heliPath.shadowErr = true
-        print("[PongDu] fire_support/heli: shadow render FAILED err=" .. tostring(err))
+-- 파일럿 틱: 경로 보간 좌표로 텔레포트. 권한 클라에서만 호출된다.
+local function heliPilotTick()
+    local v = findHeliVehicle()
+    if not v then
+        if not _heliWarned then
+            _heliWarned = true
+            print("[PongDu] fire_support/heli: pilot tick but vehicle not streamed yet vid="
+                .. tostring(_heliVid))
+        end
+        return
     end
-end)
+    _heliWarned = false
+    local wx, wy = heliPathPos()
+    if not wx then return end
+    if not _heliPath.yawSet then
+        _heliPath.yawSet = true
+        heliSetYaw(v)
+    end
+    local ok, err = pcall(function() heliMoveTo(v, wx, wy) end)
+    if not ok and not _heliPath.moveErr then
+        _heliPath.moveErr = true
+        print("[PongDu] fire_support/heli: move FAILED err=" .. tostring(err))
+    end
+end
+
+-- 블레이드 회전: 전 클라 공통, 매 틱 모델 순환 스왑 (BH rotateBlades 로직).
+-- 엔진 시동 여부와 무관하게 무조건 돌린다. 첫 틱엔 Init이 켜둔 랜덤 블레이드가
+-- 남지 않게 전체를 한 번 숨긴다.
+local function heliBladeTick()
+    local v = findHeliVehicle()
+    if not v then return end
+    local part = v:getPartById("heliblade")
+    local ps   = v:getPartById("helibladeSmall")
+    if not _bladeInit then
+        _bladeInit = true
+        if part then
+            for i = 1, 8 do part:setModelVisible("blade" .. i, false) end
+        end
+        if ps then
+            for i = 1, 4 do ps:setModelVisible("blade" .. i .. "Small", false) end
+        end
+    end
+    _bladeStep = _bladeStep + 1
+    if _bladeStep > 8 then _bladeStep = 1 end
+    if part then
+        local prev = _bladeStep - 1
+        if prev < 1 then prev = 8 end
+        part:setModelVisible("blade" .. prev, false)
+        part:setModelVisible("blade" .. _bladeStep, true)
+    end
+    if ps then
+        local s  = ((_bladeStep - 1) % 4) + 1
+        local sp = s - 1
+        if sp < 1 then sp = 4 end
+        ps:setModelVisible("blade" .. sp .. "Small", false)
+        ps:setModelVisible("blade" .. s .. "Small", true)
+    end
+    -- BH rotateBlades와 동일하게 스왑 직후 update()로 모델 상태 반영을 강제.
+    pcall(function() v:update() end)
+end
 
 -- 남은시간 패널 상태. hide는 heliSoundStop이 참조하므로 여기(앞)에 정의한다
 -- (뒤에 두면 Kahlua에서 전역(nil) 조회로 잡혀 "tried to call nil" 크래시).
@@ -513,6 +600,10 @@ local function heliSoundStop(reason)
     _lmgSound   = nil
     _heliStopAt = nil
     _heliPath   = nil
+    _heliVid    = nil    -- 차량 제거 자체는 서버(permanentlyRemove)가 한다
+    _amPilot    = false
+    _bladeInit  = false
+    _heliWarned = false
     heliTimerHide()
 end
 
@@ -565,6 +656,15 @@ end
 Events.OnTick.Add(function()
     if _heliStopAt and getTimestampMs() > _heliStopAt then
         heliSoundStop("local deadline")
+    end
+    if _heliPath then
+        if _amPilot then heliPilotTick() end   -- 권한 클라만 실제 이동
+        heliBladeTick()                        -- 로터 회전은 전 클라 로컬 연출
+        -- 볼륨 램프: 기존엔 HeliFire 수신 시에만 갱신돼 clear(정찰) 구간에서
+        -- 램프가 얼어붙었다. 매 틱 실좌표로 갱신해 교전 여부와 무관하게
+        -- 접근/이탈이 이어지게 한다.
+        local hx, hy = heliCurPos()
+        if hx then heliUpdateVolume(hx, hy) end
     end
 end)
 
@@ -633,9 +733,9 @@ local function handleHeliFire(args)
     local z = id and findZombieById(id) or nil
     if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
 
-    -- 클라 보간 그림자 위치가 있으면 그걸 예광탄 원점으로 쓴다 -- 서버 발사
-    -- 시점 좌표(ox,oy)보다 화면의 그림자와 정확히 일치한다.
-    local px2, py2 = heliShadowPos()
+    -- 실차량(또는 폴백 경로 보간) 좌표를 예광탄 원점으로 쓴다 -- 서버 발사
+    -- 시점 좌표(ox,oy)보다 화면의 헬기와 정확히 일치한다.
+    local px2, py2 = heliCurPos()
     if px2 then ox, oy = px2, py2 end
 
     -- 헬기 현재 위치 기준 로터음/기관총음 볼륨 갱신 (접근/이탈 연출)
@@ -682,11 +782,20 @@ Events.OnServerCommand.Add(function(module, command, args)
                 bx = tonumber(args.bx) or 0, by = tonumber(args.by) or 0,
                 oz = tonumber(args.oz) or 0,
                 total = tonumber(args.total) or 30000,
+                yawSet = false,   -- 새 경로마다 파일럿이 기수 방향 재설정
             }
             -- 로컬 시계 기준 시작점: 이미 elapsed만큼 진행된 상태에서 이어받는다
             -- (급선회로 갈아끼워질 때도 elapsed=0으로 오므로 자동으로 t0=now).
             _heliPath.t0 = getTimestampMs() - (tonumber(args.elapsed) or 0)
         end
+        -- 실차량 연동: 서버가 스폰한 VehicleID와 물리 권한 대상(pilot).
+        -- SP에선 양쪽 onlineID가 모두 -1이라 자동으로 파일럿이 된다.
+        if args.vid then _heliVid = tonumber(args.vid) end
+        local me = getSpecificPlayer(0)
+        _amPilot = (me ~= nil) and (args.pilot ~= nil)
+            and (tonumber(args.pilot) == me:getOnlineID())
+        print(string.format("[PongDu] fire_support/heli: start vid=%s pilot=%s amPilot=%s",
+            tostring(_heliVid), tostring(args.pilot), tostring(_amPilot)))
         heliSoundStart(args.remain)
         heliTimerShow(args.remain)
         return

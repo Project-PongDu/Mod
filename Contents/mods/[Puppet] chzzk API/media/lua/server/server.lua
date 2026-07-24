@@ -473,13 +473,78 @@ Events.OnTick.Add(processSniperJobs)
 -- 상태와 좀비 락온(job.target)은 급선회와 무관하므로 그대로 유지한다.
 local _heliJobs = {}
 
--- 클라 그림자/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
+-- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
+-- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
+-- 클라에 LocalCollide 물리 권한을 강제 부여(authorizationServerCollide) --
+-- serverUpdate가 연결별 상태 비교로 감지해 VehicleAuthorizationPacket을 자동
+-- 브로드캐스트하므로 별도 전송 코드가 필요 없다. 이후 이동은 파일럿 클라의
+-- firesupport.lua가 텔레포트로 수행하고 엔진 물리 스트림이 전 클라에 보간
+-- 전파한다. 스폰 실패 시 클라는 경로 보간 폴백(소리/탄/타이머)으로 동작하므로
+-- 후원 자체는 죽지 않는다.
+local function heliSpawnVehicle(job)
+    local okP, px, py = pcall(function()
+        return job.player:getX(), job.player:getY()
+    end)
+    if not okP then
+        print("[PongDu][Heli] vehicle spawn FAILED: player invalid")
+        return
+    end
+    local sq = nil
+    for step = 0, 9 do
+        local t  = step * 0.1
+        local sx = math.floor(job.ax + (px - job.ax) * t)
+        local sy = math.floor(job.ay + (py - job.ay) * t)
+        sq = getSquare(sx, sy, 0)
+        if sq then break end
+    end
+    if not sq then
+        print("[PongDu][Heli] vehicle spawn FAILED: no loaded square near A")
+        return
+    end
+    local ok, v = pcall(function()
+        return addVehicleDebug("Base.PongDuHeli", IsoDirections.N, 0, sq)
+    end)
+    if not ok or not v then
+        print("[PongDu][Heli] vehicle spawn FAILED err=" .. tostring(v))
+        return
+    end
+    pcall(function() v:setZombiesDontAttack(true) end)
+    job.vehicle = v
+    job.vid     = v:getId()
+    local okA, errA = pcall(function()
+        job.pilot = job.player:getOnlineID()
+        v:authorizationServerCollide(job.pilot, true)
+    end)
+    if not okA then
+        print("[PongDu][Heli] authorization grant FAILED err=" .. tostring(errA))
+    end
+    print(string.format("[PongDu][Heli] vehicle spawned vid=%s at %d,%d pilot=%s",
+        tostring(job.vid), sq:getX(), sq:getY(), tostring(job.pilot)))
+end
+
+-- 서버 권위 제거: permanentlyRemove가 제거 패킷(8)을 전 클라에 브로드캐스트
+-- 하고 VehiclesDB에서도 지운다 (월드 잔존/세이브 오염 방지).
+local function heliRemoveVehicle(job, reason)
+    if not job.vehicle then return end
+    local ok, err = pcall(function() job.vehicle:permanentlyRemove() end)
+    if ok then
+        print("[PongDu][Heli] vehicle removed vid=" .. tostring(job.vid)
+            .. " (" .. tostring(reason) .. ")")
+    else
+        print("[PongDu][Heli] vehicle remove FAILED err=" .. tostring(err))
+    end
+    job.vehicle, job.vid, job.pilot = nil, nil, nil
+end
+
+-- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
 -- 진행률을 넘기면 클라는 자기 로컬 시계 기준으로 이어서 보간할 수 있다.
+-- vid/pilot: 파일럿 클라가 어느 차량을 몰지 식별하는 키.
 local function heliStartPayload(job, remainMs)
     return {
         remain = remainMs,
         ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
         elapsed = getTimestampMs() - job.startAt, total = job.endAt - job.startAt,
+        vid = job.vid, pilot = job.pilot,
     }
 end
 
@@ -519,6 +584,16 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
             job.startAt    = now2
             job.endAt      = now2 + dur
 
+            -- 실차량: 최초 스폰이 실패했었다면 이번 발동에서 재시도.
+            -- 있으면 권한만 재부여(회수됐을 가능성 대비 -- 부여는 멱등이다).
+            if not job.vehicle then
+                heliSpawnVehicle(job)
+            elseif job.pilot then
+                pcall(function()
+                    job.vehicle:authorizationServerCollide(job.pilot, true)
+                end)
+            end
+
             local payload  = heliStartPayload(job, dur)
             local players  = getOnlinePlayers()
             for k = 0, players:size() - 1 do
@@ -549,6 +624,8 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         startAt = now, endAt = now + dur, nextAt = now,
     }
     _heliJobs[#_heliJobs + 1] = job
+
+    heliSpawnVehicle(job)
 
     local payload = heliStartPayload(job, dur)
     local players = getOnlinePlayers()
@@ -592,6 +669,7 @@ local function processHeliJobs()
     for i = #_heliJobs, 1, -1 do
         local job = _heliJobs[i]
         if now >= job.endAt then
+            heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
             local players = getOnlinePlayers()
             for k = 0, players:size() - 1 do
