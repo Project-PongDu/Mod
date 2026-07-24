@@ -171,7 +171,7 @@ Sandbox_KO = {
 	Sandbox_PongDu_Heli_Interval = "헬기: 발사 간격 (밀리초)",
 	Sandbox_PongDu_Heli_Interval_tooltip = "기관총이 한 발씩 발사되는 간격입니다. 값이 작을수록 빠르게 연사합니다. (기본 100 = 0.1초)",
 	Sandbox_PongDu_Heli_KillChance = "헬기: 발당 사살 확률 (%)",
-	Sandbox_PongDu_Heli_KillChance_tooltip = "기관총 한 발이 좀비를 사살할 확률입니다. 저격과 달리 난사이므로 낮은 확률로 명중합니다. (기본 10)",
+	Sandbox_PongDu_Heli_KillChance_tooltip = "기관총 한 발이 좀비를 사살할 확률입니다. 저격과 달리 난사이므로 낮은 확률로 명중합니다. (기본 30)",
 
 	    /***** GENERAL *****/
 
