@@ -402,6 +402,26 @@ option PongDu.Sniper_Interval = {
     page = PongDu_Dev, translation = PongDu_Sniper_Interval,
 }
 
+option PongDu.Heli_Duration = {
+    type = integer, min = 10, max = 120, default = 30,
+    page = PongDu_Dev, translation = PongDu_Heli_Duration,
+}
+
+option PongDu.Heli_Radius = {
+    type = integer, min = 10, max = 60, default = 30,
+    page = PongDu_Dev, translation = PongDu_Heli_Radius,
+}
+
+option PongDu.Heli_Interval = {
+    type = integer, min = 10, max = 2000, default = 100,
+    page = PongDu_Dev, translation = PongDu_Heli_Interval,
+}
+
+option PongDu.Heli_KillChance = {
+    type = integer, min = 1, max = 100, default = 10,
+    page = PongDu_Dev, translation = PongDu_Heli_KillChance,
+}
+
 /***** GENERAL *****/
 
 option Hitmans.General_KillCounter = {

@@ -21,4 +21,30 @@ module Base
         }
     }
 
+    /* 화력지원-헬기 로터음. loop = true 필수: PlaySound()의 loop 인자는
+       무시되므로(SoundManager.java) GameSound 플래그로만 루프가 성립한다.
+       재생/정지는 firesupport.lua가 emitter 핸들로 관리. */
+    sound pongdu_heli
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/heli.wav,
+        }
+    }
+
+    /* 화력지원-헬기 기관총음. 발당 트리거 대신 발동~종료 구간 내내 루프.
+       iv(0.1~0.2초)가 원본 sfx 길이보다 짧을 때 발당 재생이 emitter를
+       스틸하며 씹히는 문제를 피하기 위함. */
+    sound pongdu_heli_lmg
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/LMG.wav,
+        }
+    }
+
 }

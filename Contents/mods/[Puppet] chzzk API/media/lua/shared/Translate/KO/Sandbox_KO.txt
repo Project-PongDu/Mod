@@ -164,6 +164,14 @@ Sandbox_KO = {
 	Sandbox_PongDu_Sniper_Count_tooltip = "한 번의 저격 지원으로 사살하는 최대 좀비 수입니다. 특수좀비를 우선 사살하고, 특수좀비가 부족하면 가까운 일반좀비로 채웁니다. (기본 7)",
 	Sandbox_PongDu_Sniper_Interval = "저격: 발사 간격 (밀리초)",
 	Sandbox_PongDu_Sniper_Interval_tooltip = "저격탄이 한 발씩 날아오는 간격입니다. 값이 작을수록 빠르게 연사합니다. (기본 3000 = 3초)",
+	Sandbox_PongDu_Heli_Duration = "헬기: 지원 시간 (초)",
+	Sandbox_PongDu_Heli_Duration_tooltip = "헬기가 A지점에서 B지점으로 이동하며 사격하는 총 시간입니다. 지원 도중 같은 후원이 또 들어오면 이 시간만큼 연장됩니다. (기본 30)",
+	Sandbox_PongDu_Heli_Radius = "헬기: 사격 반경 (타일)",
+	Sandbox_PongDu_Heli_Radius_tooltip = "헬기가 사격할 좀비를 찾는 플레이어 기준 반경입니다. 헬기 자체는 이 반경 바깥의 화면 밖 경로로만 이동합니다. (기본 30)",
+	Sandbox_PongDu_Heli_Interval = "헬기: 발사 간격 (밀리초)",
+	Sandbox_PongDu_Heli_Interval_tooltip = "기관총이 한 발씩 발사되는 간격입니다. 값이 작을수록 빠르게 연사합니다. (기본 100 = 0.1초)",
+	Sandbox_PongDu_Heli_KillChance = "헬기: 발당 사살 확률 (%)",
+	Sandbox_PongDu_Heli_KillChance_tooltip = "기관총 한 발이 좀비를 사살할 확률입니다. 저격과 달리 난사이므로 낮은 확률로 명중합니다. (기본 10)",
 
 	    /***** GENERAL *****/
 

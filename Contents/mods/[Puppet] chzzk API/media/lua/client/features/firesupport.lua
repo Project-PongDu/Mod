@@ -97,6 +97,14 @@ local function sniperCfg()
            svInt("Sniper_Interval", 3000)
 end
 
+-- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_KillChance(%).
+local function heliCfg()
+    return svInt("Heli_Duration", 30),
+           svInt("Heli_Radius", 30),
+           svInt("Heli_Interval", 200),
+           svInt("Heli_KillChance", 5)
+end
+
 -- ── 종류별 실행부 (전부 미구현) ────────────────────────────────────────────
 -- 각 함수는 player, sender 를 받아 해당 연출/처치를 수행한다.
 -- 공통 파라미터는 샌드박스에서 읽되, SandboxVars 는 게임 로드 후에만 존재하므로
@@ -123,10 +131,17 @@ runners.drone = function(player, sender)
     -- TODO: 지속형 틱 루프 + 루프 사운드 핸들 관리
 end
 
--- 헬기: 지속(김). 로터음 루프 + 기관총. 어그로 없음.
+-- 헬기: 지속(김). 랜덤 지점 A -> B 로 이동하며 플레이어 반경 내 좀비를
+-- 무차별 소사. 저격과 달리 발당 킬 확률(기본 5%)이 낮은 대신 연사가 빠르다.
+-- A/B 산출, 대상 선정, 킬 룰렛, 발사 타이밍 전부 서버 job이 맡는다
+-- (이유는 저격과 동일 -- 킬 총량/타이밍의 단일 권위가 필요).
 runners.helicopter = function(player, sender)
-    print("[PongDu] fire_support/helicopter: not implemented yet")
-    -- TODO: 바닐라 헬기 사운드 이벤트명 확인 필요 (PZ-Library)
+    local dur, radius, interval, kc = heliCfg()
+    print(string.format("[PongDu] fire_support/heli request dur=%ds r=%d iv=%d kc=%d%%",
+        dur, radius, interval, kc))
+    sendClientCommand("PongDuFireSupport", "Heli", {
+        dur = dur, r = radius, iv = interval, kc = kc, sender = sender or "",
+    })
 end
 
 -- 공수: 히트맨 개체를 우호 진영으로 강하시켜 좀비를 사격.
@@ -187,11 +202,12 @@ local TARGET_ALT  = 70        -- 목표 고도(px). 좀비 상반신 높이
 
 local _tracers = {}
 
-local function addTracer(ox, oy, oz, tx, ty, tz)
+-- oalt: 원점 고도(px). 생략 시 저격수 고도(ORIGIN_ALT). 헬기는 더 높은 값을 준다.
+local function addTracer(ox, oy, oz, tx, ty, tz, oalt)
     _tracers[#_tracers + 1] = {
         ox = ox, oy = oy, oz = oz,
         tx = tx, ty = ty, tz = tz,
-        t = 0, hit = 0,
+        t = 0, hit = 0, oalt = oalt,
     }
 end
 
@@ -209,7 +225,7 @@ local function drawTracers()
         local sx, sy = ISCoordConversion.ToScreen(tr.ox, tr.oy, tr.oz)
         local ex, ey = ISCoordConversion.ToScreen(tr.tx, tr.ty, tr.tz)
         sx = sx / zoom
-        sy = sy / zoom - ORIGIN_ALT / zoom
+        sy = sy / zoom - (tr.oalt or ORIGIN_ALT) / zoom
         ex = ex / zoom
         ey = ey / zoom - TARGET_ALT / zoom
 
@@ -328,14 +344,151 @@ local function killZombieNow(z)
     z:setAttackedBy(fake)
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  헬기 로터음 (루프 사운드)
+--
+--  getSoundManager():PlaySound(name, loop, gain)은 loop/gain 인자를 통째로
+--  버린다(SoundManager.java:551 -- 내부에서 1인자 playSound만 호출). 루프는
+--  GameSound 스크립트의 loop = true 플래그로만 성립한다
+--  (FMODSoundEmitter$FileSound.tick: clip.gameSound.isLooped()면
+--   FMOD_LOOP_NORMAL 세팅). 그래서:
+--    ① t3_rewards_sounds.txt 에 pongdu_heli 를 loop = true 로 등록하고
+--    ② 로컬 플레이어 emitter 의 playSound 핸들을 보관, stopSound 로 정지한다
+--       (바닐라 TimedAction 들이 쓰는 패턴 -- ISBuildAction.lua 등).
+--  emitter:playSound 는 로컬 재생만 하고 네트워크 전송이 없으므로, 서버
+--  브로드캐스트(HeliStart)로 각 클라가 각자 1개씩 틀면 중복 없이 전원이 듣는다.
+--
+--  안전장치: HeliStop 유실(호스트 이탈 등)에 대비해 HeliStart 가 들려준
+--  남은 시간(ms)으로 로컬 데드라인을 잡고 OnTick 에서 자체 정지한다.
+--  중첩 후원은 서버가 지속시간을 연장하고 HeliStart 를 다시 보내므로,
+--  핸들이 살아있으면 데드라인만 갱신한다 (소리 1개 유지 -- 설계 제약 4).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local _heliSound  = nil      -- 로터음 emitter 핸들
+local _lmgSound   = nil      -- 기관총 발사음 emitter 핸들 (발당 재생 대신 루프)
+local _heliStopAt = nil      -- 자체 정지 데드라인 (ms)
+
+-- 발당 PlaySound("LMG", false, ...)로 짜봤는데, iv(0.1~0.2초)가 LMG.wav 길이보다
+-- 짧으면 매번 새 emitter가 잡히면서 기존 재생이 씹히는 문제가 있을 수 있다
+-- (getFreeEmitter가 여유 emitter를 못 잡으면 이전 채널을 스틸). 로터음과 동일하게
+-- t3_rewards_sounds.txt에 pongdu_heli_lmg를 loop = true로 등록해서, 발당 트리거가
+-- 아니라 로터음처럼 발동~종료 구간 내내 한 번만 틀어놓고 정지도 같이 관리한다.
+-- (PlaySound의 loop 인자는 무시되므로 스크립트 loop 플래그로만 루프가 성립 -- 위
+-- 로터음 주석 참고.)
+local function heliSoundStop(reason)
+    local pl = getSpecificPlayer(0)
+    if _heliSound then
+        if pl then pcall(function() pl:getEmitter():stopSound(_heliSound) end) end
+        print("[PongDu] fire_support/heli: rotor sound stopped (" .. tostring(reason) .. ")")
+    end
+    if _lmgSound then
+        if pl then pcall(function() pl:getEmitter():stopSound(_lmgSound) end) end
+        print("[PongDu] fire_support/heli: LMG loop stopped (" .. tostring(reason) .. ")")
+    end
+    _heliSound  = nil
+    _lmgSound   = nil
+    _heliStopAt = nil
+end
+
+local function heliSoundStart(remainMs)
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    if not _heliSound then
+        local ok, handle = pcall(function()
+            return pl:getEmitter():playSound("pongdu_heli")
+        end)
+        if ok and handle and handle ~= 0 then
+            _heliSound = handle
+        else
+            print("[PongDu] fire_support/heli: rotor sound start FAILED")
+        end
+    end
+    if not _lmgSound then
+        local ok, handle = pcall(function()
+            return pl:getEmitter():playSound("pongdu_heli_lmg")
+        end)
+        if ok and handle and handle ~= 0 then
+            _lmgSound = handle
+        else
+            print("[PongDu] fire_support/heli: LMG loop start FAILED")
+        end
+    end
+    -- 유실 대비 자체 데드라인. 서버 HeliStop이 정상 도착하면 그쪽이 먼저 끈다.
+    _heliStopAt = getTimestampMs() + (tonumber(remainMs) or 30000) + 2000
+end
+
+Events.OnTick.Add(function()
+    if _heliStopAt and getTimestampMs() > _heliStopAt then
+        heliSoundStop("local deadline")
+    end
+end)
+
+-- 헬기 사격 1발 처리. 저격과 달리 "적당히 탄이 튀는" 난사 연출:
+--   kill=true  -> 좀비 정조준(실명중). 소유 클라가 킬 수행.
+--   kill 없음  -> 좀비 근처 ±2타일 산탄 오프셋으로 빗나가는 탄만 그린다.
+--   id 없음    -> 반경 내 좀비가 없어 지면 난사(서버가 랜덤 지점 좌표를 보냄).
+local HELI_ALT     = 260     -- 헬기 원점 고도(px). 저격수(95)보다 훨씬 높게.
+local HELI_SCATTER = 2.0     -- 미스탄 산탄 반경(타일)
+
+local function handleHeliFire(args)
+    local ox = tonumber(args.ox) or 0
+    local oy = tonumber(args.oy) or 0
+    local oz = tonumber(args.oz) or 0
+    local id = tonumber(args.id)
+    local tx = tonumber(args.x) or 0
+    local ty = tonumber(args.y) or 0
+    local tz = tonumber(args.z) or 0
+    local kill = args.kill and true or false
+
+    local z = id and findZombieById(id) or nil
+    if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
+
+    if not kill then
+        -- 난사 느낌: 미스탄은 목표에서 살짝 빗나가게
+        tx = tx + (ZombRand(HELI_SCATTER * 200) - HELI_SCATTER * 100) / 100.0
+        ty = ty + (ZombRand(HELI_SCATTER * 200) - HELI_SCATTER * 100) / 100.0
+    end
+    addTracer(ox, oy, oz, tx, ty, tz, HELI_ALT)
+
+    -- 발당 트리거 없음: 총성은 heliSoundStart에서 튼 pongdu_heli_lmg 루프가
+    -- 발동~종료 구간 내내 재생 중이라 여기선 예광탄/킬 판정만 처리한다.
+
+    if kill and z and not z:isDead() then
+        if z:isRemoteZombie() then
+            pcall(function() z:playSound("BulletHitBody") end)
+        else
+            local ok, err = pcall(function() killZombieNow(z) end)
+            if ok then
+                pcall(function() z:playSound("BulletHitBody") end)
+                print("[PongDu] fire_support/heli KILL zid=" .. tostring(id))
+            else
+                print("[PongDu] fire_support/heli KILL FAILED zid="
+                    .. tostring(id) .. " err=" .. tostring(err))
+            end
+        end
+    end
+end
+
 -- 서버가 iv 간격으로 한 발씩 보내는 사격 명령 수신. 전 클라에 브로드캐스트되며,
 -- 각 클라는 연출(예광탄+총성)을 전부 그리되 킬은 자기가 소유한 좀비에 대해서만
--- 수행한다. 대상 선정/재선정과 타이밍은 전부 server.lua의 processSniperJobs가
--- 맡으므로, 여기서는 큐잉 없이 수신 즉시 그 한 발을 처리한다.
+-- 수행한다. 대상 선정/재선정과 타이밍은 전부 server.lua의 job 큐가 맡으므로,
+-- 여기서는 큐잉 없이 수신 즉시 그 한 발을 처리한다.
 Events.OnServerCommand.Add(function(module, command, args)
     if module ~= "PongDuFireSupport" then return end
-    if command ~= "SniperFire" then return end
     if not args then return end
+
+    if command == "HeliStart" then
+        heliSoundStart(args.remain)
+        return
+    elseif command == "HeliStop" then
+        heliSoundStop("server stop")
+        return
+    elseif command == "HeliFire" then
+        handleHeliFire(args)
+        return
+    end
+
+    if command ~= "SniperFire" then return end
 
     local ox = tonumber(args.ox) or 0
     local oy = tonumber(args.oy) or 0
@@ -385,6 +538,7 @@ end)
 -- 큐가 없다. 플레이어 사망/접속 종료 시 호출할 것. [public name: .b]
 function _a.b()
     _tracers = {}
+    heliSoundStop("cleanup")
 end
 
 return _a
