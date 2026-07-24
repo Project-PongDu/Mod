@@ -130,6 +130,8 @@ IGUI_KO = {
     IGUI_donation_fire_support_drone = "드론이 엄호한다!",
     IGUI_donation_fire_support_helicopter = "헬기다! 전부 갈아버려!",
     IGUI_donation_fire_support_airborne = "지원 병력이 도착했다!!",
+    IGUI_donation_fire_support_heli_timer = "공중지원 남은 시간:",
+    IGUI_donation_bombard_timer = "폭격까지 남은 시간:",
 
 
 	IGUI_donation_zombie_owner = "의 좀비",

@@ -379,10 +379,10 @@ local _heliStopAt = nil      -- 자체 정지 데드라인 (ms)
 -- 루프 사운드라도 emitter:setVolume(handle, v)로 실시간 볼륨 조절이 가능하다
 -- (Sound.volume에 저장되고 FileSound.tick이 매 틱 volume * clip볼륨으로 반영 --
 --  VehicleDropCraftSound.lua가 이미 쓰는 검증된 경로).
--- 헬기 위치는 서버가 HeliFire마다 ox,oy로 보내주므로, 매 발마다 플레이어와의
--- 거리를 재서 볼륨을 갱신하면 "멀리서 접근 -> 최근접 -> 멀어짐" 연출이 된다.
--- 경로 기하 자체가 그 커브다: 양 끝점(A/B)이 가장 멀고(odist*√2) 경로 중간
--- 수선의 발이 가장 가깝다(odist).
+-- 헬기 위치는 그림자 보간 좌표(heliShadowPos)를 매 발마다 다시 읽어서
+-- 플레이어와의 거리를 재고, 볼륨을 갱신하면 "멀리서 접근 -> 최근접(머리 위
+-- 통과) -> 멀어짐" 연출이 된다. 경로가 플레이어 중심 원 위 A -> 반대편 B라
+-- 최근접은 ~0(머리 위 스침), 최원은 A/B 지점의 D(플레이어 기준 반경)다.
 local HELI_VOL_NEAR     = 1.00   -- 최근접 시 로터음 볼륨
 local HELI_VOL_FAR      = 0.20   -- 최원거리 시 로터음 볼륨
 local HELI_LMG_VOL_NEAR = 0.85   -- 기관총음은 로터음보다 살짝 낮게
@@ -393,9 +393,8 @@ local function heliUpdateVolume(hx, hy)
     local pl = getSpecificPlayer(0)
     if not pl then return end
 
-    -- 경로 기하 기준 거리 범위: 최근접 = odist(r+25), 최원 = odist*1.414
-    local odist = svInt("Heli_Radius", 30) + 25
-    local dmin, dmax = odist, odist * 1.414
+    -- 경로 기하 기준 거리 범위: 머리 위 통과 경로라 최근접 ~0, 최원 = D(r+25)
+    local dmin, dmax = 0, svInt("Heli_Radius", 30) + 25
     local dx, dy = hx - pl:getX(), hy - pl:getY()
     local d = math.sqrt(dx * dx + dy * dy)
 
@@ -416,6 +415,90 @@ local function heliUpdateVolume(hx, hy)
     end
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  헬기 그림자 (바닐라 renderShadow 재사용)
+--
+--  IsoDeadBody.renderShadow(x, y, z, forward, w, fm, bm, lightInfo, alpha)는
+--  public static이고 (IsoDeadBody.java:780) 캐릭터/시체/마네킹이 전부 이걸로
+--  바닐라 드랍섀도(media/textures/NewShadow.png)를 그린다. 임의 좌표 + 방향
+--  벡터로 호출 가능하며, 내부에서 렌더 파이프라인의 현재 위치에 renderPoly로
+--  enqueue하므로 OnPostFloorLayerDraw(바닥+엔진 그림자 직후, 그 층의 벽/캐릭터
+--  전 -- IsoCell.java:910)에서 부르면 "바닥 위, 개체 아래"에 정확히 깔린다.
+--  줌/카메라 변환도 내부 IsoUtils.XToScreenExact가 처리해서 수동 변환이 없다.
+--
+--  인자: forward = 진행 방향(그림자가 비행 방향으로 길게 눕는다),
+--        w = 반폭, fm/bm = 전/후 길이(타일). lightInfo의 rgb 평균이 곱해져
+--        어두운 곳에선 그림자도 옅어진다(엔진 특성 그대로).
+--  필요 타입 3종(IsoDeadBody/Vector3f/ColorInfo) 모두 Lua 노출 확인,
+--  Vector3f는 org.joml이라 renderShadow 시그니처와 동일 타입이다.
+--
+--  위치는 HeliStart가 준 경로(ax,ay -> bx,by)와 진행률(elapsed/total)을 받아
+--  로컬 시계 기준으로 매 프레임 보간한다 -- HeliFire(발사 간격) 주기보다 훨씬
+--  부드럽다. 연장(급선회) 시 서버가 갱신된 경로/진행률로 HeliStart를 다시
+--  보내면 _heliPath를 통째로 갈아끼워서 즉시 새 직선으로 전환된다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local SHADOW_W     = 1.6      -- 그림자 반폭 (타일)
+local SHADOW_LEN   = 2.4      -- 전/후 길이 (타일) -- 진행 방향으로 눕는 장축
+local SHADOW_ALPHA = 0.85     -- 엔진이 광량 평균 * 0.66을 추가로 곱한다
+
+local _heliPath   = nil   -- { ax, ay, bx, by, oz, t0(로컬 시작 시각), total }
+local _shadowFwd  = Vector3f.new()          -- 매 프레임 할당 방지용 캐시
+local _shadowLite = ColorInfo.new(1, 1, 1, 1)
+
+local function heliShadowPos()
+    if not _heliPath then return nil end
+    local t = (getTimestampMs() - _heliPath.t0) / _heliPath.total
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    local x = _heliPath.ax + (_heliPath.bx - _heliPath.ax) * t
+    local y = _heliPath.ay + (_heliPath.by - _heliPath.ay) * t
+    return x, y, _heliPath.oz
+end
+
+Events.OnPostFloorLayerDraw.Add(function(z)
+    if not _heliPath then return end
+    if isServer() then return end
+    if not isIngameState() then return end
+
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    -- 플레이어가 있는 층에만 그림: 다른 층 루프에서 중복으로 찍히는 것 방지
+    if z ~= math.floor(pl:getZ()) then return end
+
+    local hx, hy, hz = heliShadowPos()
+    if not hx then return end
+
+    -- 그림자 장축 = 비행 방향. 경로 길이 0 가드(정규화 NaN 방지).
+    local dx, dy = _heliPath.bx - _heliPath.ax, _heliPath.by - _heliPath.ay
+    if dx == 0 and dy == 0 then dx = 1 end
+    _shadowFwd:set(dx, dy, 0)
+
+    -- 헬기 그림자 위치의 광량 반영: 어두우면 그림자도 옅게 (캐릭터와 동일 거동)
+    local sq = getCell():getGridSquare(math.floor(hx), math.floor(hy), math.floor(hz))
+    local ll = 1.0
+    if sq then
+        local ok, v = pcall(function() return sq:getLightLevel(0) end)
+        if ok and v then ll = v end
+    end
+    _shadowLite:set(ll, ll, ll, 1)
+
+    local ok, err = pcall(function()
+        IsoDeadBody.renderShadow(hx, hy, hz, _shadowFwd,
+            SHADOW_W, SHADOW_LEN, SHADOW_LEN, _shadowLite, SHADOW_ALPHA)
+    end)
+    if not ok and not _heliPath.shadowErr then
+        _heliPath.shadowErr = true
+        print("[PongDu] fire_support/heli: shadow render FAILED err=" .. tostring(err))
+    end
+end)
+
+-- 남은시간 패널 상태. hide는 heliSoundStop이 참조하므로 여기(앞)에 정의한다
+-- (뒤에 두면 Kahlua에서 전역(nil) 조회로 잡혀 "tried to call nil" 크래시).
+local _heliEndAt = nil
+local function heliTimerHide()
+    _heliEndAt = nil   -- 패널 update()가 다음 프레임에 스스로 제거한다
+end
+
 local function heliSoundStop(reason)
     local pl = getSpecificPlayer(0)
     if _heliSound then
@@ -429,6 +512,8 @@ local function heliSoundStop(reason)
     _heliSound  = nil
     _lmgSound   = nil
     _heliStopAt = nil
+    _heliPath   = nil
+    heliTimerHide()
 end
 
 local function heliSoundStart(remainMs)
@@ -446,19 +531,35 @@ local function heliSoundStart(remainMs)
             print("[PongDu] fire_support/heli: rotor sound start FAILED")
         end
     end
-    if not _lmgSound then
-        local ok, handle = pcall(function()
-            return pl:getEmitter():playSound("pongdu_heli_lmg")
-        end)
-        if ok and handle and handle ~= 0 then
-            _lmgSound = handle
-            pcall(function() pl:getEmitter():setVolume(handle, HELI_LMG_VOL_FAR) end)
-        else
-            print("[PongDu] fire_support/heli: LMG loop start FAILED")
-        end
-    end
+    -- 기관총 루프는 여기서 켜지 않는다: 서버의 engage/clear 상태머신이
+    -- HeliEngage(대상 발견) / HeliClear(대상 소진) 명령으로 켜고 끈다.
     -- 유실 대비 자체 데드라인. 서버 HeliStop이 정상 도착하면 그쪽이 먼저 끈다.
     _heliStopAt = getTimestampMs() + (tonumber(remainMs) or 30000) + 2000
+end
+
+-- 기관총 루프 시작/정지 (engage/clear 전환 전용)
+local function heliLmgStart()
+    if _lmgSound then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    local ok, handle = pcall(function()
+        return pl:getEmitter():playSound("pongdu_heli_lmg")
+    end)
+    if ok and handle and handle ~= 0 then
+        _lmgSound = handle
+        pcall(function() pl:getEmitter():setVolume(handle, HELI_LMG_VOL_FAR) end)
+        print("[PongDu] fire_support/heli: LMG loop ENGAGE")
+    else
+        print("[PongDu] fire_support/heli: LMG loop start FAILED")
+    end
+end
+
+local function heliLmgStop(reason)
+    if not _lmgSound then return end
+    local pl = getSpecificPlayer(0)
+    if pl then pcall(function() pl:getEmitter():stopSound(_lmgSound) end) end
+    _lmgSound = nil
+    print("[PongDu] fire_support/heli: LMG loop stopped (" .. tostring(reason) .. ")")
 end
 
 Events.OnTick.Add(function()
@@ -466,6 +567,51 @@ Events.OnTick.Add(function()
         heliSoundStop("local deadline")
     end
 end)
+
+-- ── 헬기 남은시간 표시 패널 (RainTimerDisplay/BombardTimerDisplay와 동일 스타일) ──
+-- 레인(h-180), 폭격(h-150)과 동시 표시될 수 있으므로 30px 위(h-210)에 배치.
+-- 남은시간은 HeliStart의 remain(ms)으로 로컬 데드라인을 잡아 계산한다.
+local _heliPanel   = nil
+
+local HeliTimerDisplay = ISPanel:derive("HeliTimerDisplay")
+
+function HeliTimerDisplay:new()
+    local w = getCore():getScreenWidth()
+    local h = getCore():getScreenHeight()
+    local o = ISPanel:new(w / 2 - 110, h - 210, 220, 25)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    return o
+end
+
+function HeliTimerDisplay:render()
+    if not _heliEndAt then return end
+    local ms = _heliEndAt - getTimestampMs()
+    if ms < 0 then ms = 0 end
+    local totalSec = math.floor(ms / 1000)
+    local m = math.floor(totalSec / 60)
+    local sec = totalSec % 60
+    self:drawTextCentre(getText("IGUI_donation_fire_support_heli_timer")
+        .. " " .. string.format("%02d:%02d", m, sec),
+        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Small)
+end
+
+function HeliTimerDisplay:update()
+    if not _heliEndAt or _heliEndAt - getTimestampMs() <= 0 then
+        self:removeFromUIManager()
+        _heliPanel = nil
+    end
+end
+
+local function heliTimerShow(remainMs)
+    _heliEndAt = getTimestampMs() + (tonumber(remainMs) or 0)
+    if not _heliPanel then
+        _heliPanel = HeliTimerDisplay:new()
+        _heliPanel:addToUIManager()
+        _heliPanel:setVisible(true)
+    end
+end
 
 -- 헬기 사격 1발 처리. 저격과 달리 "적당히 탄이 튀는" 난사 연출:
 --   kill=true  -> 좀비 정조준(실명중). 소유 클라가 킬 수행.
@@ -486,6 +632,11 @@ local function handleHeliFire(args)
 
     local z = id and findZombieById(id) or nil
     if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
+
+    -- 클라 보간 그림자 위치가 있으면 그걸 예광탄 원점으로 쓴다 -- 서버 발사
+    -- 시점 좌표(ox,oy)보다 화면의 그림자와 정확히 일치한다.
+    local px2, py2 = heliShadowPos()
+    if px2 then ox, oy = px2, py2 end
 
     -- 헬기 현재 위치 기준 로터음/기관총음 볼륨 갱신 (접근/이탈 연출)
     heliUpdateVolume(ox, oy)
@@ -525,10 +676,35 @@ Events.OnServerCommand.Add(function(module, command, args)
     if not args then return end
 
     if command == "HeliStart" then
+        if args.ax then
+            _heliPath = {
+                ax = tonumber(args.ax) or 0, ay = tonumber(args.ay) or 0,
+                bx = tonumber(args.bx) or 0, by = tonumber(args.by) or 0,
+                oz = tonumber(args.oz) or 0,
+                total = tonumber(args.total) or 30000,
+            }
+            -- 로컬 시계 기준 시작점: 이미 elapsed만큼 진행된 상태에서 이어받는다
+            -- (급선회로 갈아끼워질 때도 elapsed=0으로 오므로 자동으로 t0=now).
+            _heliPath.t0 = getTimestampMs() - (tonumber(args.elapsed) or 0)
+        end
         heliSoundStart(args.remain)
+        heliTimerShow(args.remain)
         return
     elseif command == "HeliStop" then
         heliSoundStop("server stop")
+        return
+    elseif command == "HeliEngage" then
+        heliLmgStart()
+        return
+    elseif command == "HeliClear" then
+        -- 교전 종료: 기관총 소리 끄고 "구역 정리" 무전 1회 재생.
+        -- 남은 시간 동안 헬기(로터음)는 계속 떠 있고, 좀비가 다시 감지되면
+        -- 서버가 HeliEngage를 다시 보내 사격을 재개한다.
+        heliLmgStop("area clear")
+        local okS = pcall(function()
+            getSoundManager():PlaySound("area_clear", false, 1.0)
+        end)
+        if not okS then print("[PongDu] fire_support/heli: area_clear sound failed") end
         return
     elseif command == "HeliFire" then
         handleHeliFire(args)

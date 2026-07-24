@@ -441,14 +441,22 @@ end
 Events.OnTick.Add(processSniperJobs)
 
 -- ── 화력 지원 / 헬기 ─────────────────────────────────────────────────────────
--- 가상의 헬기가 랜덤 지점 A에서 B로 duration 동안 이동하면서 iv 간격으로
--- 플레이어 반경 r 내 좀비를 무차별 소사한다. 발당 킬 확률 kc%(기본 5).
+-- 가상의 헬기가 랜덤 지점 A에서 B로 duration 동안 이동하며 지나간다. 클라가
+-- 그 경로 위에 바닐라 드랍섀도(IsoDeadBody.renderShadow)를 그려 실체를 표현
+-- 하므로 경로 자체를 화면 밖에 숨길 이유는 없지만, 스폰/디스폰만큼은 화면
+-- 밖에서 일어나야 자연스럽다.
 --
--- A/B 산출: 플레이어 기준 랜덤 방향 u로 (r+25)타일 떨어진 점 C를 잡고,
--- u에 수직인 방향 v로 C ± (r+25)를 A/B로 한다.
---   - A->B 직선의 플레이어 최소거리(수선의 발 = C까지) = r+25
---     -> 저격수 원점과 같은 "화면 밖" 기준이라 경로 전체가 시야 밖.
---   - A-B 거리 = (r+25)*2 (r=30이면 110타일) -> "너무 가깝지 않음" 고정 보장.
+-- A/B 산출: 플레이어 중심 반경 D(r+25 -- 저격 원점 기준과 통일, 화면 밖 보장)의
+-- 원 위 랜덤 각도에서 A, 반대편(±30도 지터)에서 B. 지터 덕에 경로가 정확히
+-- 머리 위가 아니라 근처를 스치듯 지나가기도 한다.
+-- A-B 거리는 최소 2D*cos(15도) ≈ 1.93D로 "너무 가깝지 않음" 보장.
+--
+-- engage/clear: 반경 내 좀비가 있으면 engage(사격), 없으면 clear(정찰만).
+-- 상태 전환 시에만 HeliEngage/HeliClear를 브로드캐스트하고, clear 상태에선
+-- HeliFire 자체를 보내지 않는다(구버전의 "랜덤 지면 난사" 제거). 클라는
+-- HeliClear 수신 시 기관총 루프를 끄고 area_clear 무전을 1회 재생, 이후
+-- 좀비가 재감지되면 HeliEngage로 재개한다. 로터음/그림자/타이머는 engage
+-- 여부와 무관하게 duration 내내 유지된다.
 --
 -- 킬 룰렛(kc%)을 서버가 굴리는 이유: 클라마다 굴리면 같은 발이 어떤 클라에선
 -- 킬, 어떤 클라에선 미스라 연출(정조준 vs 산탄)이 어긋나고, 소유 클라의 roll
@@ -456,11 +464,24 @@ Events.OnTick.Add(processSniperJobs)
 -- 전 클라 연출과 실제 킬이 일치한다.
 --
 -- 대상 선정: 저격(특좀 우선/최근접)과 달리 반경 내 랜덤 -- "무차별 난사" 컨셉.
--- 반경 내 좀비가 없으면 플레이어 주변 랜덤 지면에 쏜다(연출 유지, 킬 없음).
 --
--- 중첩 후원: 같은 플레이어의 헬기가 이미 떠 있으면 endAt만 연장한다
--- (경로/속도 유지, 클라 로터음도 1개 유지 -- firesupport.lua 설계 제약 4).
+-- 중첩 후원: endAt만 늘리면(구 방식) 이미 지나가고 있는 경로가 그대로 느려질
+-- 뿐이라 "새 지원이 왔다"는 체감이 없다. 대신 이번 발동 시점의 헬기 현재
+-- 위치(보간값)를 새 시작점 A'로 잡고, 거기서 새로운 랜덤 B'로 향하는 완전히
+-- 새 직선을 즉시 잇는다 -- 방향을 홱 트는 급선회 연출이 된다. dur/r/iv/kc도
+-- 최신 발동값으로 갱신(사실상 항상 동일 샌박값이라 큰 의미는 없음). engage
+-- 상태와 좀비 락온(job.target)은 급선회와 무관하므로 그대로 유지한다.
 local _heliJobs = {}
+
+-- 클라 그림자/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
+-- 진행률을 넘기면 클라는 자기 로컬 시계 기준으로 이어서 보간할 수 있다.
+local function heliStartPayload(job, remainMs)
+    return {
+        remain = remainMs,
+        ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
+        elapsed = getTimestampMs() - job.startAt, total = job.endAt - job.startAt,
+    }
+end
 
 DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
     local dur = (tonumber(data["dur"]) or 30) * 1000
@@ -468,44 +489,71 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
     local iv  = tonumber(data["iv"]) or 200
     local kc  = tonumber(data["kc"]) or 5
     local sender = data["sender"] or ""
+    local D = r + 25
 
-    -- 중첩: 기존 job 연장
+    -- 중첩: 기존 job이 있으면 현재 위치 A'에서 새 랜덤 B'로 즉시 급선회.
     for i = 1, #_heliJobs do
         local job = _heliJobs[i]
         if job.player == player then
-            job.endAt = job.endAt + dur
-            local remain = job.endAt - getTimestampMs()
-            local players = getOnlinePlayers()
+            local now2 = getTimestampMs()
+
+            -- 기존 경로 보간으로 "현재 위치"를 구해 새 시작점 A'로 삼는다.
+            local ot = (now2 - job.startAt) / math.max(job.endAt - job.startAt, 1)
+            if ot < 0 then ot = 0 elseif ot > 1 then ot = 1 end
+            local curX = job.ax + (job.bx - job.ax) * ot
+            local curY = job.ay + (job.by - job.ay) * ot
+
+            -- 새 B'는 플레이어 기준 반경 D 원 위 랜덤 각도(현재 위치의 플레이어
+            -- 기준 각도와 최소 ~90도 이상 벌어지게 해서 급선회가 눈에 띄게 함).
+            local pcx, pcy = player:getX(), player:getY()
+            local curAng   = math.atan2(curY - pcy, curX - pcx)
+            local turn     = 1.57 + ZombRand(105) / 100.0        -- 90~150도
+            if ZombRand(2) == 0 then turn = -turn end
+            local newAng   = curAng + turn
+            local nbx, nby = pcx + math.cos(newAng) * D, pcy + math.sin(newAng) * D
+
+            job.r, job.iv, job.kc, job.sender = r, iv, kc, sender
+            job.ax, job.ay = curX, curY
+            job.bx, job.by = nbx, nby
+            job.oz         = player:getZ()
+            job.startAt    = now2
+            job.endAt      = now2 + dur
+
+            local payload  = heliStartPayload(job, dur)
+            local players  = getOnlinePlayers()
             for k = 0, players:size() - 1 do
-                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart",
-                    { remain = remain })
+                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
             end
-            print(string.format("[PongDu][Heli] job EXTENDED +%dms remain=%dms sender=%s",
-                dur, remain, tostring(sender)))
+            print(string.format(
+                "[PongDu][Heli] job REROUTED dur=%dms A'=%d,%d B'=%d,%d sender=%s",
+                dur, math.floor(curX), math.floor(curY),
+                math.floor(nbx), math.floor(nby), tostring(sender)))
             return
         end
     end
 
+    -- 경로: 플레이어 "머리 위 통과". 그림자 연출(클라 OnPostFloorLayerDraw)이
+    -- 헬기의 실체를 표현하므로 시야 밖에 숨길 이유가 없다.
+    -- A = 플레이어 중심 반경 D의 원 위 랜덤 각도, B = 반대편(±30도 지터).
     local cx, cy = player:getX(), player:getY()
-    local odist  = r + 25
     local ang    = ZombRand(628) / 100.0
-    local ux, uy = math.cos(ang), math.sin(ang)
-    local vx, vy = -uy, ux                       -- u에 수직
-    local px, py = cx + ux * odist, cy + uy * odist   -- 수선의 발 C
-    local ax, ay = px - vx * odist, py - vy * odist
-    local bx, by = px + vx * odist, py + vy * odist
+    local jit    = (ZombRand(105) - 52) / 100.0      -- 약 ±30도 (0.52rad)
+    local ang2   = ang + 3.1416 + jit
+    local ax, ay = cx + math.cos(ang)  * D, cy + math.sin(ang)  * D
+    local bx, by = cx + math.cos(ang2) * D, cy + math.sin(ang2) * D
 
     local now = getTimestampMs()
-    _heliJobs[#_heliJobs + 1] = {
+    local job = {
         player = player, r = r, iv = iv, kc = kc, sender = sender,
         ax = ax, ay = ay, bx = bx, by = by, oz = player:getZ(),
         startAt = now, endAt = now + dur, nextAt = now,
     }
+    _heliJobs[#_heliJobs + 1] = job
 
+    local payload = heliStartPayload(job, dur)
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
-        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart",
-            { remain = dur })
+        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
     end
     print(string.format(
         "[PongDu][Heli] job queued dur=%dms r=%d iv=%d kc=%d%% A=%d,%d B=%d,%d sender=%s",
@@ -585,7 +633,21 @@ local function processHeliJobs()
                 end
             end
 
+            -- ── engage/clear 상태머신 ──
+            -- 대상 있음: engage 상태로 사격. 없음: 사격 자체를 중단(HeliFire
+            -- 미전송 -- 구버전의 "랜덤 지면 난사" 제거). 상태가 바뀌는 순간에만
+            -- HeliEngage/HeliClear를 브로드캐스트해서 클라가 기관총 루프음을
+            -- 켜고 끄게 한다. clear 전환은 "교전하다가 대상이 사라진" 경우에만
+            -- 발생한다(한 번도 교전 안 했으면 area clear 방송이 어색하므로).
             if target then
+                if not job.engaged then
+                    job.engaged = true
+                    local players = getOnlinePlayers()
+                    for k = 0, players:size() - 1 do
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliEngage", {})
+                    end
+                    print("[PongDu][Heli] ENGAGE")
+                end
                 payload.id = target:getOnlineID()
                 payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
                 if ZombRand(100) < job.kc then
@@ -594,24 +656,27 @@ local function processHeliJobs()
                     print("[PongDu][Heli] shot KILL zid=" .. payload.id)
                 end
             else
-                -- 좀비 없음: 플레이어 주변 랜덤 지면 난사 (연출만)
-                local okP, gx, gy, gz = pcall(function()
-                    return job.player:getX(), job.player:getY(), job.player:getZ()
-                end)
-                if okP then
-                    local ga = ZombRand(628) / 100.0
-                    local gd = ZombRand(job.r * 100) / 100.0
-                    payload.x = gx + math.cos(ga) * gd
-                    payload.y = gy + math.sin(ga) * gd
-                    payload.z = gz
+                if job.engaged then
+                    job.engaged = false
+                    local players = getOnlinePlayers()
+                    for k = 0, players:size() - 1 do
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", {})
+                    end
+                    print("[PongDu][Heli] CLEAR (no targets in radius)")
                 end
+                -- 사격 없음: 다음 스캔 예약만 하고 이번 발은 건너뛴다
+                job.nextAt = now + job.iv
             end
 
+            if not payload.id then
+                -- 대상이 없으면 아무것도 보내지 않는다
+            else
             local players = getOnlinePlayers()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "HeliFire", payload)
             end
             job.nextAt = now + job.iv
+            end
         end
     end
 end
