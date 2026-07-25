@@ -40,8 +40,7 @@ end
 -- SandboxVars는 파일 로드 시점엔 비어있을 수 있으므로 사용 시점에 읽는다.
 function _a.a(player)
     if not player then return end
-    local sv = SandboxVars and SandboxVars.PongDu
-    local radius = (sv and tonumber(sv.RiseUp_Radius)) or 55
+    local radius = SandboxVars.PongDu.RiseUp_Radius
 
     getSoundManager():PlaySound("necromance", false, 1.0)
     sendClientCommand("PongDuDonation", "PlayAlert", {

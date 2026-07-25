@@ -29,28 +29,20 @@ local PENDING_MS = 60000    -- RainMark 유효시간 (스트림아웃/원격 소
 -- 반경/스프린터비율에 더해 지속시간(Rain_Duration, 초)과 마리수(Rain_Count)도
 -- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (1틱 = 1 감산).
 local function rainCfg()
-    local sv  = SandboxVars and SandboxVars.PongDu
-    local r   = (sv and tonumber(sv.Rain_Radius))          or 55
-    local pct = (sv and tonumber(sv.Rain_SprinterPercent)) or 0
-    local dur = (sv and tonumber(sv.Rain_Duration))        or 30
-    local cnt = (sv and tonumber(sv.Rain_Count))           or 100
-    return r, pct, dur, cnt
+    local sv = SandboxVars.PongDu
+    return sv.Rain_Radius, sv.Rain_SprinterPercent, sv.Rain_Duration, sv.Rain_Count
 end
 
--- 스프린터 이름표 (Rain_SprinterNameTag, 기본 켜짐). 실제 렌더는 특수좀비
--- 이름표 시스템(mutantspawn.lua)이 담당하므로 Mutant_NameTag가 꺼져 있으면
+-- 스프린터 이름표 (Rain_SprinterNameTag). 실제 렌더는 특수좀비 이름표
+-- 시스템(mutantspawn.lua)이 담당하므로 Mutant_NameTag가 꺼져 있으면
 -- 이쪽을 켜도 표시되지 않는다.
 local function sprinterTagEnabled()
-    local sv = SandboxVars and SandboxVars.PongDu
-    if sv and sv.Rain_SprinterNameTag == false then return false end
-    return true
+    return SandboxVars.PongDu.Rain_SprinterNameTag
 end
 
--- 반경 표시 (Rain_ShowRadius, 기본 켜짐)
+-- 반경 표시 (Rain_ShowRadius)
 local function showRadiusEnabled()
-    local sv = SandboxVars and SandboxVars.PongDu
-    if sv and sv.Rain_ShowRadius == false then return false end
-    return true
+    return SandboxVars.PongDu.Rain_ShowRadius
 end
 
 -- 바닥 반경 마커: riseup.lua와 동일 API (ISSpawnHordeUI가 쓰는 것).

@@ -56,19 +56,21 @@ end
 -- ── Sandbox options (server-wide) ─────────────────────────────────────────────
 -- Read at use time (SandboxVars is not populated at file-load time).
 local function showPanelEnabled()
-    local sv = SandboxVars and SandboxVars.PongDu
-    if sv and sv.Donation_ShowPanel == false then return false end
-    return true      -- option missing (old save) -> default: show
+    return SandboxVars.PongDu.Donation_ShowPanel
 end
 
--- feature별 발동 대기시간: PongDu.Delay_<featureId> (0~60초, 기본 5).
--- 구 전역 옵션 Donation_PrepDelay는 제거됨 -- 옵션 없음(구 세이브)이면 5초.
+-- feature별 발동 대기시간: PongDu.Delay_<featureId> (0~60초).
+-- 다른 샌드박스 읽기와 달리 여기만 키가 런타임 조합이라, sandbox-options.txt에
+-- Delay_ 등록이 빠진 featureId가 새로 생기면 nil 산술로 후원 파이프라인 전체가
+-- 죽는다. 값 폴백이 아니라 등록 누락을 잡는 가드이므로 로그를 남긴다.
 local function prepDurationMs(featureId)
-    local sv = SandboxVars and SandboxVars.PongDu
-    local s = sv and featureId and tonumber(sv["Delay_" .. tostring(featureId)])
-    if s == nil then s = 5 end
-    if s < 0 then s = 0 elseif s > 60 then s = 60 end
-    return math.floor(s * 1000)
+    local s = SandboxVars.PongDu["Delay_" .. tostring(featureId)]
+    if s == nil then
+        print("[PongDu] SANDBOX OPTION MISSING: PongDu.Delay_" .. tostring(featureId)
+            .. " -- not registered in sandbox-options.txt, using 5s")
+        s = 5
+    end
+    return s * 1000
 end
 
 -- ── URL decode ────────────────────────────────────────────────────────────────
@@ -222,13 +224,11 @@ local function getIconTexture(featureId)
 end
 
 -- featureId별로 getText에 넘길 동적 인자(%1 등). 대부분은 nil -> 고정 텍스트 그대로.
--- sprinter5는 샌드박스 Sprinter_Count(1~10, 기본 5)에 맞춰 "뛰좀 N마리!"로 표시돼야 함
+-- sprinter5는 샌드박스 Sprinter_Count에 맞춰 "뛰좀 N마리!"로 표시돼야 함
 -- (rewardManager.lua의 실제 소환 마릿수도 이 값을 그대로 씀 -- 텍스트만 5로 박혀있던 버그).
 local function donationTextArg(featureId)
     if featureId == "sprinter5" then
-        local sv = SandboxVars and SandboxVars.PongDu
-        local n  = sv and tonumber(sv.Sprinter_Count)
-        return tostring(n or 5)
+        return tostring(SandboxVars.PongDu.Sprinter_Count)
     end
     return nil
 end
@@ -240,8 +240,7 @@ end
 -- SandboxVars는 게임 로드 후에만 존재하므로 파일 로드 시점이 아니라 여기서 읽는다.
 local function resolveLabelKey(featureId)
     if featureId == "missile" then
-        local sv = SandboxVars and SandboxVars.PongDu
-        if sv ~= nil and sv.Bombard_Injure == true then
+        if SandboxVars.PongDu.Bombard_Injure then
             return "IGUI_donation_bombard_guided"
         end
         return "IGUI_donation_bombard_support"

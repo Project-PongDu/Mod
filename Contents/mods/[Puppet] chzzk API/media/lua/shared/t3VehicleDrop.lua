@@ -144,11 +144,10 @@ end
 -- VehicleDrop_Pool ("Base.A;Base.B;Base.C") 파싱.
 -- 스크립트가 실제 존재하는 항목만 채택 (오타로 addVehicleDebug가 터지는 것 방지 + 원인 로그).
 local function collectPoolVehicles()
-    local sv = SandboxVars and SandboxVars.PongDu
-    local pool = sv and sv.VehicleDrop_Pool
+    local pool = SandboxVars.PongDu.VehicleDrop_Pool
 
     local list = {}
-    if pool and pool ~= "" then
+    if pool ~= "" then
         for token in string.gmatch(pool, "[^;]+") do
             local trimmed = token:match("^%s*(.-)%s*$")
             if trimmed ~= "" then
@@ -279,8 +278,7 @@ end
 -- 정하고, 거기 없는 특정 차를 손으로 더 얹는다"가 이 옵션의 용도이기 때문.
 -- 후보가 0개면 nil을 반환하고, 호출부(OpenKit)가 소환을 취소한다.
 local function pickVehicleType()
-    local sv = SandboxVars and SandboxVars.PongDu
-    local source = (sv and sv.VehicleDrop_Source) or SOURCE_MOD
+    local source = SandboxVars.PongDu.VehicleDrop_Source
 
     local merged, seen = {}, {}
     for _, fullType in ipairs(buildSourcePool(source)) do

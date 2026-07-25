@@ -1,5 +1,4 @@
 local _a = _a or {}
-local _b = require("config")
 require("ISUI/ISPanel")
 
 local BombardTimerDisplay = ISPanel:derive("BombardTimerDisplay")
@@ -76,11 +75,9 @@ end
 -- Blast injury applied LOCALLY on each affected client (donee + nearby players
 -- in range). Only injures a player who is outside; shared so everyone caught in
 -- the blast takes the same damage.
--- 부상 스위치: PongDu.Bombard_Injure (기본 꺼짐 = 부상 없음).
--- 옵션 없음(구 세이브)도 꺼짐 취급. SandboxVars는 사용 시점에 읽는다.
+-- 부상 스위치: PongDu.Bombard_Injure. SandboxVars는 사용 시점에 읽는다.
 local function injureEnabled()
-    local sv = SandboxVars and SandboxVars.PongDu
-    return sv ~= nil and sv.Bombard_Injure == true
+    return SandboxVars.PongDu.Bombard_Injure
 end
 
 local function applyBlastInjury(p)
@@ -160,10 +157,9 @@ local function doExplosion(a, b, handler, afterExplode)
     DOTex.alpha = 2
     getSoundManager():PlaySound("day_one_kaboom", false, 1.0)
 
-    -- 폭격 전용 반경 (Bombard_Radius, 5~60, 기본 55). 부활 반경과는 별개 변수.
+    -- 폭격 전용 반경 (Bombard_Radius). 부활 반경과는 별개 변수.
     -- SandboxVars는 파일 로드 시점엔 비어있을 수 있으므로 사용 시점에 읽는다.
-    local sv = SandboxVars and SandboxVars.PongDu
-    local radius = (sv and tonumber(sv.Bombard_Radius)) or 55
+    local radius = SandboxVars.PongDu.Bombard_Radius
     sendClientCommand("PongDuBombard", "Kaboom", {r = radius})
 
     killZombiesAround(e, f, radius)
@@ -185,10 +181,8 @@ _a.b = function(a)
     end
 
     local function startBomb()
-        -- 대기시간: Bombard_Delay(초, 10~300, 기본 60) * 60틱. 없으면 config 기본값(3600틱).
-        local sv  = SandboxVars and SandboxVars.PongDu
-        local sec = sv and tonumber(sv.Bombard_Delay)
-        b.bombTimer         = sec and (sec * 60) or _b.KaboomTime
+        -- 대기시간: Bombard_Delay(초) * 60틱.
+        b.bombTimer         = SandboxVars.PongDu.Bombard_Delay * 60
         b.timeBombActivated = true
 
         local handler

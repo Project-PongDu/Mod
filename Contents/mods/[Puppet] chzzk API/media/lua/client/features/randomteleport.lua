@@ -24,23 +24,20 @@ local state = nil   -- 진행 중이면 {origin, cx, cy, attempts, waitTicks}
 local tickHandler = nil
 
 -- ── 샌드박스 옵션 (사용 시점에 읽음) ─────────────────────────────────────────
--- 거리: PongDu.RT_MinDist / RT_MaxDist (기본 100~200). max < min이면 min으로 클램프.
+-- 거리: PongDu.RT_MinDist / RT_MaxDist. 두 옵션은 서로 독립이라 샌박에서
+-- max < min으로 설정할 수 있다 -- 이건 min으로 클램프한다(값 범위 자체는
+-- sandbox-options.txt가 보장하므로 하한 클램프는 없음).
 local function distCfg()
-    local sv = SandboxVars and SandboxVars.PongDu
-    local mn = (sv and tonumber(sv.RT_MinDist)) or 100
-    local mx = (sv and tonumber(sv.RT_MaxDist)) or 200
-    if mn < 1 then mn = 1 end
+    local sv = SandboxVars.PongDu
+    local mn, mx = sv.RT_MinDist, sv.RT_MaxDist
     if mx < mn then mx = mn end
     return mn, mx
 end
 
--- 생존 복귀: PongDu.RT_Return (기본 꺼짐) / RT_SurviveMinutes (기본 5분)
+-- 생존 복귀: PongDu.RT_Return / RT_SurviveMinutes
 local function returnCfg()
-    local sv = SandboxVars and SandboxVars.PongDu
-    local on = sv ~= nil and sv.RT_Return == true
-    local mins = (sv and tonumber(sv.RT_SurviveMinutes)) or 5
-    if mins < 1 then mins = 1 end
-    return on, mins
+    local sv = SandboxVars.PongDu
+    return sv.RT_Return, sv.RT_SurviveMinutes
 end
 
 -- 메타그리드 기준 사전 검사: 맵 범위 밖 / 존재하지 않는 셀 걸러냄

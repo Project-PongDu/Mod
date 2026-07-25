@@ -33,7 +33,7 @@ local global = require("global")
 local KINDS = { "sniper", "drone", "helicopter", "airborne" }
 
 -- 샌드박스 타입 필터: PongDu.FireSupport_<종류> 체크된 것만 룰렛 풀에 포함.
--- 옵션 없음(구 세이브) = 허용. 4종 전부 해제면 저격으로 폴백.
+-- 4종 전부 해제면 저격으로 폴백.
 local KIND_OPTION = {
     sniper     = "FireSupport_Sniper",
     drone      = "FireSupport_Drone",
@@ -51,10 +51,10 @@ local KIND_SAY = {
 }
 
 local function pickKind()
-    local sv = SandboxVars and SandboxVars.PongDu
+    local sv = SandboxVars.PongDu
     local pool = {}
     for _, k in ipairs(KINDS) do
-        if not (sv and sv[KIND_OPTION[k]] == false) then
+        if sv[KIND_OPTION[k]] then
             pool[#pool + 1] = k
         end
     end
@@ -70,41 +70,27 @@ end
 -- rawset 하므로 (SandboxOptions.java:1355) 게임 로드 후엔 nil 이 될 수 없다.
 -- 옵션 추가 전에 만든 구 세이브도 initSandboxVars() 가 fromTable -> toTable
 -- 순으로 돌아 sandbox-options.txt 의 default 가 채워진다.
--- 따라서 nil 이라는 건 sandbox-options.txt 등록 실패(오타/파싱 에러)뿐이고,
--- 그 상황에서 조용히 매직넘버로 굴러가면 샌박을 아무리 돌려도 안 먹는데
--- 로그가 안 남는다. 아래 비상값은 "후원이 통째로 먹통이 되지 않게" 하는
--- 최후 방어일 뿐 기본값이 아니므로, 탈 때마다 반드시 로그를 남긴다.
--- (기존 코드는 여기에 or 700 이 박혀 있었고 샌박 5000 과 조용히 어긋나 있었다.)
-local _optWarned = {}
-
-local function svInt(name, emergency)
-    local sv = SandboxVars and SandboxVars.PongDu
-    local v  = sv and tonumber(sv[name])
-    if v then return v end
-    if not _optWarned[name] then
-        _optWarned[name] = true
-        print("[PongDu] SANDBOX OPTION MISSING: PongDu." .. tostring(name)
-            .. " -- check sandbox-options.txt registration, falling back to "
-            .. tostring(emergency))
-    end
-    return emergency
-end
+-- 따라서 lua 쪽 폴백은 전부 도달 불가능한 데드코드이고, 오히려 샌박 값과
+-- 조용히 어긋날 위험만 만든다. 값 범위(min/max/default)는 sandbox-options.txt
+-- 한 곳에서만 정의한다.
 
 -- 저격 파라미터: Sniper_Radius / Sniper_Count / Sniper_Interval(ms).
 local function sniperCfg()
-    return svInt("Sniper_Radius", 30),
-           svInt("Sniper_Count", 10),
-           svInt("Sniper_Interval", 3000),
-           svInt("Sniper_PierceChance", 50),
-           svInt("Sniper_KnockdownChance", 50)
+    local sv = SandboxVars.PongDu
+    return sv.Sniper_Radius,
+           sv.Sniper_Count,
+           sv.Sniper_Interval,
+           sv.Sniper_PierceChance,
+           sv.Sniper_KnockdownChance
 end
 
 -- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_KillChance(%).
 local function heliCfg()
-    return svInt("Heli_Duration", 30),
-           svInt("Heli_Radius", 30),
-           svInt("Heli_Interval", 100),
-           svInt("Heli_KillChance", 30)
+    local sv = SandboxVars.PongDu
+    return sv.Heli_Duration,
+           sv.Heli_Radius,
+           sv.Heli_Interval,
+           sv.Heli_KillChance
 end
 
 -- ── 종류별 실행부 (전부 미구현) ────────────────────────────────────────────
@@ -122,8 +108,7 @@ runners.sniper = function(player, sender)
     local radius, count, interval, pcChance, kdChance = sniperCfg()
     -- 관통: 저격수와 주 표적 사이 직선상의 좀비를 전부 훑는다.
     -- 사살 여부/넉다운 여부는 서버가 굴려서 내려보낸다.
-    local sv = SandboxVars and SandboxVars.PongDu
-    local pierce = not (sv and sv.Sniper_Pierce == false)
+    local pierce = SandboxVars.PongDu.Sniper_Pierce
     print(string.format("[PongDu] fire_support/sniper request r=%d n=%d interval=%d pierce=%s chance=%d knockdown=%d",
         radius, count, interval, tostring(pierce), pcChance, kdChance))
     sendClientCommand("PongDuFireSupport", "Sniper", {

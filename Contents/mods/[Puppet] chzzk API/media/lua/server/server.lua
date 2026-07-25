@@ -881,8 +881,7 @@ DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
         end
     end
     -- 반경 내 차량 고철화. 샌드박스에서 끌 수 있다(기본 켜짐).
-    local sv = SandboxVars and SandboxVars.PongDu
-    if sv == nil or sv.Bombard_VehicleDamage ~= false then
+    if SandboxVars.PongDu.Bombard_VehicleDamage then
         local okv, errv = pcall(function() wreckVehiclesAround(e, cx, cy, r) end)
         if not okv then srvlog("wreckVehiclesAround ERROR: " .. tostring(errv)) end
     else

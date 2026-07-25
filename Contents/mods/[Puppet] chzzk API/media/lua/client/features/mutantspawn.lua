@@ -30,7 +30,7 @@ local global = require("global")
 local KINDS = { "screamer", "brute", "roach", "tracer" }
 
 -- 샌드박스 타입 필터: PongDu.Mutant_<종류> 체크된 것만 등장 풀에 포함.
--- 옵션 없음(구 세이브) = 허용. 4종 전부 해제면 스프린터 1마리로 폴백
+-- 4종 전부 해제면 스프린터 1마리로 폴백
 -- (서버 spawnSpecialZombie는 kind="sprinter"를 그대로 처리 -- modData 마킹 +
 --  MutantMark 브로드캐스트, 클라 initMutant가 walkType 적용).
 local KIND_OPTION = {
@@ -41,10 +41,10 @@ local KIND_OPTION = {
 }
 
 local function pickKind()
-    local sv = SandboxVars and SandboxVars.PongDu
+    local sv = SandboxVars.PongDu
     local pool = {}
     for _, k in ipairs(KINDS) do
-        if not (sv and sv[KIND_OPTION[k]] == false) then
+        if sv[KIND_OPTION[k]] then
             pool[#pool + 1] = k
         end
     end
@@ -841,12 +841,10 @@ local TAG_COLOR = {      -- 스크리머/브루트는 CDDA 원본 색, 로치는
 
 local _showTags = {}     -- [onlineID] = { zombie=, ttl=, tdo=TextDrawObject }
 
--- 서버 샌드박스 스위치. 기존 Donation_ShowPanel/PrepDelay와 동일하게
+-- 서버 샌드박스 스위치. 기존 Donation_ShowPanel과 동일하게
 -- 사용 시점에 읽는다 (SandboxVars는 파일 로드 시점엔 비어있음).
 local function nameTagEnabled()
-    local sv = SandboxVars and SandboxVars.PongDu
-    if sv and sv.Mutant_NameTag == false then return false end
-    return true      -- 옵션 없음(구버전 세이브) -> 기본값: 표시
+    return SandboxVars.PongDu.Mutant_NameTag
 end
 
 -- CDDA_GetScreenXY 이식: 월드좌표 -> 화면좌표 (줌 보정 포함)

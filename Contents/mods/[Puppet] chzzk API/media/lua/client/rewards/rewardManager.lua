@@ -83,13 +83,9 @@ local rewardHandlers = {
         immediate = false,
         fn = function(sender)
             global.b(" sprinter5 FUNCTION START")
-            -- 마릿수: 샌드박스 Sprinter_Count 고정값 (1~10, 기본 5).
+            -- 마릿수: 샌드박스 Sprinter_Count 고정값.
             -- 룰렛과 달리 랜덤 범위가 아니라 설정한 수만큼 정확히 소환.
-            -- 옵션 없음(구 세이브) -> 고정 5.
-            local sv = SandboxVars and SandboxVars.PongDu
-            local amount = (sv and tonumber(sv.Sprinter_Count)) or 5
-            if amount < 1 then amount = 1 elseif amount > 10 then amount = 10 end
-            handleZombieSpawn(amount, 1, sender)          -- Sprinter xN
+            handleZombieSpawn(SandboxVars.PongDu.Sprinter_Count, 1, sender)   -- Sprinter xN
             global.processingEvent = false
             global.b(" sprinter5 FUNCTION END")
         end,
@@ -163,10 +159,8 @@ local rewardHandlers = {
         --   옵션 ON(기본)  -> immediate=false. 좀비룰렛/뛰좀과 동일하게 큐박스에서
         --                     락이 걸리고, 안전지대를 벗어날 때까지 폭격이 미뤄진다.
         --   옵션 OFF      -> immediate=true. 기존 동작대로 안전지대에서도 그냥 터진다.
-        --   옵션 없음(구 세이브) -> nil이므로 기본값 ON 취급.
         immediate = function()
-            local sv = SandboxVars and SandboxVars.PongDu
-            return sv ~= nil and sv.Bombard_SafeZoneBlock == false
+            return not SandboxVars.PongDu.Bombard_SafeZoneBlock
         end,
         fn = function()
             global.b(" DONATION EXPLOSION START")
@@ -281,11 +275,10 @@ local rewardHandlers = {
         -- 안전지대 처리는 샌드박스 "세이프존 좀비 레인 방지"(Rain_SafeZoneBlock)를
         -- 따른다. missile과 달리 기본값이 꺼짐이라, 옵션이 명시적으로 켜져 있을
         -- 때만 대기(immediate=false)로 넘어간다.
-        --   옵션 OFF(기본) / 옵션 없음(구 세이브) -> immediate=true. 안전지대에서도 그대로 발동.
-        --   옵션 ON                              -> immediate=false. 벗어날 때까지 큐박스에서 락.
+        --   옵션 OFF(기본) -> immediate=true. 안전지대에서도 그대로 발동.
+        --   옵션 ON        -> immediate=false. 벗어날 때까지 큐박스에서 락.
         immediate = function()
-            local sv = SandboxVars and SandboxVars.PongDu
-            return not (sv ~= nil and sv.Rain_SafeZoneBlock == true)
+            return not SandboxVars.PongDu.Rain_SafeZoneBlock
         end,
         fn = function(sender)
             global.b(" ZOMBIE RAIN START")
