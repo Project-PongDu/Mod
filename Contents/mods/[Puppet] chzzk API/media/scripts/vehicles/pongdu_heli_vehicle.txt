@@ -475,41 +475,49 @@ module Base
 			model blade1
 			{
 				file = PongDuHeliBlade1,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade2
 			{
 				file = PongDuHeliBlade2,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade3
 			{
 				file = PongDuHeliBlade3,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade4
 			{
 				file = PongDuHeliBlade4,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade5
 			{
 				file = PongDuHeliBlade5,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade6
 			{
 				file = PongDuHeliBlade6,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade7
 			{
 				file = PongDuHeliBlade7,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			model blade8
 			{
 				file = PongDuHeliBlade8,
+				offset = 0.0000 9.0000 1.5000,
 			}
 
 			area = Engine,
@@ -530,21 +538,25 @@ module Base
 			model blade1Small
 			{
 				file = PongDuHeliBlade1S,
+				offset = -1.8000 13.0000 -56.0000,
 			}
 
 			model blade2Small
 			{
 				file = PongDuHeliBlade2S,
+				offset = -1.8000 13.0000 -56.0000,
 			}
 
 			model blade3Small
 			{
 				file = PongDuHeliBlade3S,
+				offset = -1.8000 13.0000 -56.0000,
 			}
 
 			model blade4Small
 			{
 				file = PongDuHeliBlade4S,
+				offset = -1.8000 13.0000 -56.0000,
 			}
 
 			area = Engine,
