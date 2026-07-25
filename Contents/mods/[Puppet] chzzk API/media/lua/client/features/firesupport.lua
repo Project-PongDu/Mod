@@ -94,7 +94,9 @@ end
 local function sniperCfg()
     return svInt("Sniper_Radius", 30),
            svInt("Sniper_Count", 10),
-           svInt("Sniper_Interval", 3000)
+           svInt("Sniper_Interval", 3000),
+           svInt("Sniper_PierceChance", 50),
+           svInt("Sniper_KnockdownChance", 50)
 end
 
 -- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_KillChance(%).
@@ -117,11 +119,16 @@ local runners = {}
 -- 기준이라 총합이 N을 넘어버린다(폭격처럼 반경 전체 킬이 아니라 "N마리"가
 -- 스펙이므로 서버 권위 선정이 필수).
 runners.sniper = function(player, sender)
-    local radius, count, interval = sniperCfg()
-    print(string.format("[PongDu] fire_support/sniper request r=%d n=%d interval=%d",
-        radius, count, interval))
+    local radius, count, interval, pcChance, kdChance = sniperCfg()
+    -- 관통: 저격수와 주 표적 사이 직선상의 좀비를 전부 훑는다.
+    -- 사살 여부/넉다운 여부는 서버가 굴려서 내려보낸다.
+    local sv = SandboxVars and SandboxVars.PongDu
+    local pierce = not (sv and sv.Sniper_Pierce == false)
+    print(string.format("[PongDu] fire_support/sniper request r=%d n=%d interval=%d pierce=%s chance=%d knockdown=%d",
+        radius, count, interval, tostring(pierce), pcChance, kdChance))
     sendClientCommand("PongDuFireSupport", "Sniper", {
         r = radius, n = count, iv = interval, sender = sender or "",
+        pc = pierce, pcc = pcChance, kd = kdChance,
     })
 end
 
@@ -343,6 +350,47 @@ local function killZombieNow(z)
     z:Hit(gun, fake, SNIPER_DMG, false, 1, false)
     z:setAttackedBy(fake)
 end
+
+-- 관통에 맞았지만 살아남은 좀비: 죽이지 않고 피격 반응만 준다.
+--
+--   knockDown(hitFromBehind) -- IsoZombie.java:3805. 데미지 없이 넘어뜨리는
+--     바닐라 API로, 내부에서 setKnockedDown/setStaggerBack/setHitForce와
+--     reportEvent("wasHit")까지 전부 처리한다.
+--   setHitReaction(name) + reportEvent("wasHit") -- 넘어지지 않는 "움찔".
+--     히트맨 ZAShoot의 hit()과 같은 방식이되 Hit()을 부르지 않는다.
+--     Hit()을 쓰면 체력이 깎여서 서버의 관통 확률 판정과 무관하게 죽어버린다.
+--
+-- 리액션 이름은 바닐라 AnimSets/zombie/hitreaction/Shot/ 의 노드명이다.
+local GRAZE_REACTIONS = {
+    "ShotBelly", "ShotBellyStep",
+    "ShotChestStepL", "ShotChestStepR",
+    "ShotShoulderStepL", "ShotShoulderStepR",
+    "ShotShoulderStaggerL", "ShotShoulderStaggerR",
+}
+
+local function grazeZombie(z, id, kdChance)
+    if not z or z:isDead() then return end
+    -- 피격 연출은 전 클라에서. 어그로와 무관한 로컬 효과다.
+    pcall(function() z:playSound("BulletHitBody") end)
+    pcall(function() z:splatBlood(2, 0.3) end)
+    -- 상태 변경(넉다운/리액션)은 소유 클라에서만. 원격 좀비에 걸면
+    -- 소유 클라 sync 패킷에 덮여서 무효다.
+    if z:isRemoteZombie() then return end
+    local ok, err = pcall(function()
+        if ZombRand(100) < (kdChance or 50) then
+            z:knockDown(false)
+        else
+            z:setBumpDone(true)
+            z:setHitReaction(GRAZE_REACTIONS[ZombRand(#GRAZE_REACTIONS) + 1])
+            z:reportEvent("wasHit")
+        end
+    end)
+    if not ok then
+        print("[PongDu] fire_support/sniper GRAZE FAILED zid="
+            .. tostring(id) .. " err=" .. tostring(err))
+    end
+end
+
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  헬기 로터음 (루프 사운드)
@@ -904,6 +952,38 @@ Events.OnServerCommand.Add(function(module, command, args)
         end
     else
         print("[PongDu] fire_support/sniper: target gone zid=" .. tostring(id))
+    end
+
+    -- 관통 사살: 서버가 저격수-주표적 선분 위에서 골라 확률 판정까지 마친 목록.
+    -- 예광탄이 이미 그 선을 지나므로 별도 연출은 필요 없다.
+    if args.ex then
+        for k = 1, #args.ex do
+            local eid = tonumber(args.ex[k])
+            local ez  = eid and findZombieById(eid) or nil
+            if ez and not ez:isDead() then
+                if ez:isRemoteZombie() then
+                    pcall(function() ez:playSound("BulletHitBody") end)
+                else
+                    local ok2, err2 = pcall(function() killZombieNow(ez) end)
+                    if ok2 then
+                        pcall(function() ez:playSound("BulletHitBody") end)
+                        print("[PongDu] fire_support/sniper KILL(pierce) zid=" .. tostring(eid))
+                    else
+                        print("[PongDu] fire_support/sniper KILL(pierce) FAILED zid="
+                            .. tostring(eid) .. " err=" .. tostring(err2))
+                    end
+                end
+            end
+        end
+    end
+
+    -- 관통에 맞았지만 확률 판정에서 살아남은 좀비: 넉다운 또는 움찔.
+    if args.gz then
+        local kd = tonumber(args.kd) or 50
+        for k = 1, #args.gz do
+            local gid = tonumber(args.gz[k])
+            grazeZombie(gid and findZombieById(gid) or nil, gid, kd)
+        end
     end
 end)
 

@@ -358,6 +358,9 @@ DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
     local r      = tonumber(data["r"])  or 30
     local n      = tonumber(data["n"])  or 10
     local iv     = tonumber(data["iv"]) or 3000
+    local pierce = data["pc"] and true or false
+    local pcChan = tonumber(data["pcc"]) or 50
+    local kdChan = tonumber(data["kd"])  or 50
     local sender = data["sender"] or ""
 
     -- 저격수 위치는 발동 시점 1회만 고정("한 곳에 자리잡은 저격수").
@@ -372,12 +375,14 @@ DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
     _sniperJobs[#_sniperJobs + 1] = {
         player = player, r = r, iv = iv, sender = sender,
         ox = ox, oy = oy, oz = oz,
+        pierce = pierce, pcChan = pcChan, kdChan = kdChan,
         remaining = n, nextAt = getTimestampMs(),
         shotZids = {},   -- 이 job에서 이미 쏜 zid는 재선정 대상에서 제외
     }
 
-    print(string.format("[PongDu][Sniper] job queued n=%d r=%d iv=%d origin=%d,%d sender=%s",
-        n, r, iv, math.floor(ox), math.floor(oy), tostring(sender)))
+    print(string.format("[PongDu][Sniper] job queued n=%d r=%d iv=%d pierce=%s chance=%d%% knockdown=%d%% origin=%d,%d sender=%s",
+        n, r, iv, tostring(pierce), pcChan, kdChan,
+        math.floor(ox), math.floor(oy), tostring(sender)))
 end
 
 -- job.player의 "현재" 좌표 기준으로 반경 내 미사살 좀비 중 최우선(특좀 > 근접) 1마리.
@@ -408,6 +413,57 @@ local function pickSniperTarget(job)
     return best
 end
 
+-- 관통: 저격수(job.ox,oy) -> 주 표적(tx,ty) 선분 위의 좀비를 마릿수 제한 없이
+-- 전부 훑는다. 히트맨 ZAShoot의 isPiercingBullets 경로와 같은 개념이지만,
+-- 저쪽은 Bresenham으로 타일을 훑는 반면 여기선 선분-점 수직거리로 판정한다.
+-- 서버는 렌더링 타일이 아니라 실수 좌표만 다루면 되고 그 편이 훨씬 싸다.
+-- math.sqrt를 쓰지 않도록 전부 제곱거리로 비교한다.
+--
+-- 사살 확률 굴림은 반드시 서버에서 한다 -- 클라마다 굴리면 같은 탄인데도
+-- 클라별로 죽는 놈이 갈린다. 죽을 놈(ex)과 맞고 살아남은 놈(gz)을 나눠 보낸다.
+local PIERCE_THR2 = 0.7 * 0.7   -- 선분에서 이 수직거리(제곱) 안이면 명중
+local function collectPierced(job, mainZid, tx, ty)
+    local ex, gz = {}, {}
+    if not job.pierce then return ex, gz end
+
+    local ok, cell = pcall(function() return job.player:getCell() end)
+    if not ok then return ex, gz end
+    local zl = cell and cell:getZombieList()
+    if not zl then return ex, gz end
+
+    local vx, vy = tx - job.ox, ty - job.oy
+    local len2 = vx * vx + vy * vy
+    if len2 <= 0.0001 then return ex, gz end
+
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local zid = z:getOnlineID()
+            -- 주 표적과 이미 사살된 놈은 제외. 맞고 살아남은 놈은 shotZids에
+            -- 넣지 않으므로 다음 탄에 다시 관통당할 수 있다(아직 살아있으니까).
+            if zid ~= mainZid and not job.shotZids[zid] then
+                local wx, wy = z:getX() - job.ox, z:getY() - job.oy
+                local t = (wx * vx + wy * vy) / len2
+                -- t 하한/상한으로 저격수 뒤쪽과 주 표적 너머를 제외한다.
+                -- 즉 관통 구간은 "저격수 ~ 주 표적 사이"뿐이다.
+                if t > 0.02 and t < 0.98 then
+                    local px, py = job.ox + vx * t, job.oy + vy * t
+                    local dx, dy = z:getX() - px, z:getY() - py
+                    if (dx * dx + dy * dy) <= PIERCE_THR2 then
+                        if ZombRand(100) < job.pcChan then
+                            ex[#ex + 1] = zid
+                            job.shotZids[zid] = true
+                        else
+                            gz[#gz + 1] = zid
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ex, gz
+end
+
 local function processSniperJobs()
     if #_sniperJobs == 0 then return end
     local now = getTimestampMs()
@@ -423,7 +479,11 @@ local function processSniperJobs()
                 job.shotZids[zid] = true
                 payload.id = zid
                 payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
-                print("[PongDu][Sniper] shot zid=" .. zid .. " remaining_after=" .. (job.remaining - 1))
+                local ex, gz = collectPierced(job, zid, payload.x, payload.y)
+                payload.ex, payload.gz, payload.kd = ex, gz, job.kdChan
+                print("[PongDu][Sniper] shot zid=" .. zid
+                    .. " pierced=" .. #ex .. " grazed=" .. #gz
+                    .. " remaining_after=" .. (job.remaining - 1))
             else
                 print("[PongDu][Sniper] shot MISS: no target in radius r=" .. job.r)
             end

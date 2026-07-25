@@ -402,6 +402,21 @@ option PongDu.Sniper_Interval = {
     page = PongDu_Dev, translation = PongDu_Sniper_Interval,
 }
 
+option PongDu.Sniper_Pierce = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_Sniper_Pierce,
+}
+
+option PongDu.Sniper_PierceChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Dev, translation = PongDu_Sniper_PierceChance,
+}
+
+option PongDu.Sniper_KnockdownChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Dev, translation = PongDu_Sniper_KnockdownChance,
+}
+
 option PongDu.Heli_Duration = {
     type = integer, min = 10, max = 120, default = 30,
     page = PongDu_Dev, translation = PongDu_Heli_Duration,
