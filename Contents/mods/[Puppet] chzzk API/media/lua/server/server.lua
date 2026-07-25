@@ -244,6 +244,7 @@ DOServer = DOServer or {}
 DOServer["PongDuBombard"]  = DOServer["PongDuBombard"]  or {}
 DOServer["PongDuRiseUp"]   = DOServer["PongDuRiseUp"]   or {}
 DOServer["PongDuDonation"] = DOServer["PongDuDonation"] or {}
+DOServer["PongDuFireSupport"] = DOServer["PongDuFireSupport"] or {}
 
 -- ── 폭격 반경 내 차량 파괴 ────────────────────────────────────────────────────
 -- setScript()로 불탄 차량 스크립트를 씌우는 방식은 바닐라에 Burnt 변형이
@@ -336,6 +337,519 @@ local function wreckVehiclesAround(cell, cx, cy, r)
         .. " glassSmashed=" .. tostring(glass)
         .. " doorsStripped=" .. tostring(doors))
 end
+
+-- ── 화력 지원 / 저격 ─────────────────────────────────────────────────────────
+-- 대상 선정을 서버가 하는 이유: 킬 자체는 좀비 소유 클라가 해야 하지만
+-- (B41 MP 좀비는 클라 권한), 각 클라가 독립적으로 "가까운 7마리"를 뽑으면
+-- 자기 소유 좀비 기준이라 총합이 7을 훌쩍 넘는다. 폭격처럼 "반경 전체"가
+-- 아니라 "정확히 N마리"가 스펙이므로 선정은 서버 권위여야 한다.
+--
+-- 우선순위: 특수좀비(modData PuppetMutant) 먼저, 같은 등급 안에서는 가까운 순.
+-- 특수좀비가 N마리에 못 미치면 나머지는 일반좀비로 채운다.
+-- 저격수는 "한 곳에 자리잡고" 쏘지만, 대상은 매 발마다 다시 고른다 --
+-- 플레이어가 반경 안에서 움직이면 그때그때 플레이어와 가장 가까운(특좀 우선)
+-- 좀비를 노려야 하므로, 발동 시점에 N마리를 한꺼번에 스냅샷해서 순차 처리하면
+-- 안 된다(그 사이 좀비가 죽거나 자리를 뜨면 허공에 쏘거나 뒤늦게 안 맞는
+-- 문제가 생긴다). 대신 job을 큐에 넣고 매 iv마다 그 시점의 플레이어 좌표
+-- 기준으로 재선정한다.
+local _sniperJobs = {}
+
+DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
+    local r      = tonumber(data["r"])  or 30
+    local n      = tonumber(data["n"])  or 10
+    local iv     = tonumber(data["iv"]) or 3000
+    local pierce = data["pc"] and true or false
+    local pcChan = tonumber(data["pcc"]) or 50
+    local kdChan = tonumber(data["kd"])  or 50
+    local sender = data["sender"] or ""
+
+    -- 저격수 위치는 발동 시점 1회만 고정("한 곳에 자리잡은 저격수").
+    -- r+50 타일 거리면 통상 줌에서 화면 밖이다. 
+    local cx, cy = player:getX(), player:getY()
+    local ang    = ZombRand(628) / 100.0
+    local odist  = r + 00
+    local ox     = cx + math.cos(ang) * odist
+    local oy     = cy + math.sin(ang) * odist
+    local oz     = player:getZ()
+
+    _sniperJobs[#_sniperJobs + 1] = {
+        player = player, r = r, iv = iv, sender = sender,
+        ox = ox, oy = oy, oz = oz,
+        pierce = pierce, pcChan = pcChan, kdChan = kdChan,
+        remaining = n, nextAt = getTimestampMs(),
+        shotZids = {},   -- 이 job에서 이미 쏜 zid는 재선정 대상에서 제외
+    }
+
+    print(string.format("[PongDu][Sniper] job queued n=%d r=%d iv=%d pierce=%s chance=%d%% knockdown=%d%% origin=%d,%d sender=%s",
+        n, r, iv, tostring(pierce), pcChan, kdChan,
+        math.floor(ox), math.floor(oy), tostring(sender)))
+end
+
+-- job.player의 "현재" 좌표 기준으로 반경 내 미사살 좀비 중 최우선(특좀 > 근접) 1마리.
+local function pickSniperTarget(job)
+    local ok, cx, cy, cell = pcall(function()
+        return job.player:getX(), job.player:getY(), job.player:getCell()
+    end)
+    if not ok then return nil end
+    local zl = cell and cell:getZombieList()
+    if not zl then return nil end
+
+    local r2 = job.r * job.r
+    local best, bd, bm = nil, nil, -1
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() and not job.shotZids[z:getOnlineID()] then
+            local dx, dy = z:getX() - cx, z:getY() - cy
+            local d2 = dx * dx + dy * dy
+            if d2 <= r2 then
+                local md = z:getModData()
+                local isMut = (md and md["PuppetMutant"]) and 1 or 0
+                if isMut > bm or (isMut == bm and d2 < (bd or math.huge)) then
+                    best, bd, bm = z, d2, isMut
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- 관통: 저격수(job.ox,oy) -> 주 표적(tx,ty) 선분 위의 좀비를 마릿수 제한 없이
+-- 전부 훑는다. 히트맨 ZAShoot의 isPiercingBullets 경로와 같은 개념이지만,
+-- 저쪽은 Bresenham으로 타일을 훑는 반면 여기선 선분-점 수직거리로 판정한다.
+-- 서버는 렌더링 타일이 아니라 실수 좌표만 다루면 되고 그 편이 훨씬 싸다.
+-- math.sqrt를 쓰지 않도록 전부 제곱거리로 비교한다.
+--
+-- 사살 확률 굴림은 반드시 서버에서 한다 -- 클라마다 굴리면 같은 탄인데도
+-- 클라별로 죽는 놈이 갈린다. 죽을 놈(ex)과 맞고 살아남은 놈(gz)을 나눠 보낸다.
+local PIERCE_THR2 = 0.7 * 0.7   -- 선분에서 이 수직거리(제곱) 안이면 명중
+local function collectPierced(job, mainZid, tx, ty)
+    local ex, gz = {}, {}
+    if not job.pierce then return ex, gz end
+
+    local ok, cell = pcall(function() return job.player:getCell() end)
+    if not ok then return ex, gz end
+    local zl = cell and cell:getZombieList()
+    if not zl then return ex, gz end
+
+    local vx, vy = tx - job.ox, ty - job.oy
+    local len2 = vx * vx + vy * vy
+    if len2 <= 0.0001 then return ex, gz end
+
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local zid = z:getOnlineID()
+            -- 주 표적과 이미 사살된 놈은 제외. 맞고 살아남은 놈은 shotZids에
+            -- 넣지 않으므로 다음 탄에 다시 관통당할 수 있다(아직 살아있으니까).
+            if zid ~= mainZid and not job.shotZids[zid] then
+                local wx, wy = z:getX() - job.ox, z:getY() - job.oy
+                local t = (wx * vx + wy * vy) / len2
+                -- t 하한/상한으로 저격수 뒤쪽과 주 표적 너머를 제외한다.
+                -- 즉 관통 구간은 "저격수 ~ 주 표적 사이"뿐이다.
+                if t > 0.02 and t < 0.98 then
+                    local px, py = job.ox + vx * t, job.oy + vy * t
+                    local dx, dy = z:getX() - px, z:getY() - py
+                    if (dx * dx + dy * dy) <= PIERCE_THR2 then
+                        if ZombRand(100) < job.pcChan then
+                            ex[#ex + 1] = zid
+                            job.shotZids[zid] = true
+                        else
+                            gz[#gz + 1] = zid
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ex, gz
+end
+
+local function processSniperJobs()
+    if #_sniperJobs == 0 then return end
+    local now = getTimestampMs()
+    for i = #_sniperJobs, 1, -1 do
+        local job = _sniperJobs[i]
+        if job.remaining <= 0 then
+            table.remove(_sniperJobs, i)
+        elseif now >= job.nextAt then
+            local target  = pickSniperTarget(job)
+            local payload = { ox = job.ox, oy = job.oy, oz = job.oz, sender = job.sender }
+            if target then
+                local zid = target:getOnlineID()
+                job.shotZids[zid] = true
+                payload.id = zid
+                payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
+                local ex, gz = collectPierced(job, zid, payload.x, payload.y)
+                payload.ex, payload.gz, payload.kd = ex, gz, job.kdChan
+                print("[PongDu][Sniper] shot zid=" .. zid
+                    .. " pierced=" .. #ex .. " grazed=" .. #gz
+                    .. " remaining_after=" .. (job.remaining - 1))
+            else
+                print("[PongDu][Sniper] shot MISS: no target in radius r=" .. job.r)
+            end
+
+            local players = getOnlinePlayers()
+            for k = 0, players:size() - 1 do
+                sendServerCommand(players:get(k), "PongDuFireSupport", "SniperFire", payload)
+            end
+
+            job.remaining = job.remaining - 1
+            job.nextAt    = now + job.iv
+        end
+    end
+end
+Events.OnTick.Add(processSniperJobs)
+
+-- ── 화력 지원 / 헬기 ─────────────────────────────────────────────────────────
+-- 가상의 헬기가 랜덤 지점 A에서 B로 duration 동안 이동하며 지나간다. 클라가
+-- 그 경로 위에 바닐라 드랍섀도(IsoDeadBody.renderShadow)를 그려 실체를 표현
+-- 하므로 경로 자체를 화면 밖에 숨길 이유는 없지만, 스폰/디스폰만큼은 화면
+-- 밖에서 일어나야 자연스럽다.
+--
+-- A/B 산출: 플레이어 중심 반경 D(r+25 -- 저격 원점 기준과 통일, 화면 밖 보장)의
+-- 원 위 랜덤 각도에서 A, 반대편(±30도 지터)에서 B. 지터 덕에 경로가 정확히
+-- 머리 위가 아니라 근처를 스치듯 지나가기도 한다.
+-- A-B 거리는 최소 2D*cos(15도) ≈ 1.93D로 "너무 가깝지 않음" 보장.
+--
+-- engage/clear: 반경 내 좀비가 있으면 engage(사격), 없으면 clear(정찰만).
+-- 상태 전환 시에만 HeliEngage/HeliClear를 브로드캐스트하고, clear 상태에선
+-- HeliFire 자체를 보내지 않는다(구버전의 "랜덤 지면 난사" 제거). 클라는
+-- HeliClear 수신 시 기관총 루프를 끄고 area_clear 무전을 1회 재생, 이후
+-- 좀비가 재감지되면 HeliEngage로 재개한다. 로터음/그림자/타이머는 engage
+-- 여부와 무관하게 duration 내내 유지된다.
+--
+-- 킬 룰렛(kc%)을 서버가 굴리는 이유: 클라마다 굴리면 같은 발이 어떤 클라에선
+-- 킬, 어떤 클라에선 미스라 연출(정조준 vs 산탄)이 어긋나고, 소유 클라의 roll
+-- 결과를 남이 알 수 없다. 서버가 kill 플래그를 박아 브로드캐스트해야
+-- 전 클라 연출과 실제 킬이 일치한다.
+--
+-- 대상 선정: 저격(특좀 우선/최근접)과 달리 반경 내 랜덤 -- "무차별 난사" 컨셉.
+--
+-- 중첩 후원: endAt만 늘리면(구 방식) 이미 지나가고 있는 경로가 그대로 느려질
+-- 뿐이라 "새 지원이 왔다"는 체감이 없다. 대신 이번 발동 시점의 헬기 현재
+-- 위치(보간값)를 새 시작점 A'로 잡고, 거기서 새로운 랜덤 B'로 향하는 완전히
+-- 새 직선을 즉시 잇는다 -- 방향을 홱 트는 급선회 연출이 된다. dur/r/iv/kc도
+-- 최신 발동값으로 갱신(사실상 항상 동일 샌박값이라 큰 의미는 없음). engage
+-- 상태와 좀비 락온(job.target)은 급선회와 무관하므로 그대로 유지한다.
+local _heliJobs = {}
+
+-- 미탐지 히스테리시스 임계값: 연속 몇 회 스캔이 비어야 CLEAR로 전환할지.
+-- iv(기본 100ms) 기준 3회 = 약 300ms. 너무 크면 clear 반응이 굼떠 보이고,
+-- 1이면(=즉시) 반경 경계 진동으로 LMG 루프가 재시작되며 끊겨 들린다.
+local HELI_MISS_THRESHOLD = 3
+
+-- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
+-- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
+-- 클라에 LocalCollide 물리 권한을 강제 부여(authorizationServerCollide) --
+-- serverUpdate가 연결별 상태 비교로 감지해 VehicleAuthorizationPacket을 자동
+-- 브로드캐스트하므로 별도 전송 코드가 필요 없다. 이후 이동은 파일럿 클라의
+-- firesupport.lua가 텔레포트로 수행하고 엔진 물리 스트림이 전 클라에 보간
+-- 전파한다. 스폰 실패 시 클라는 경로 보간 폴백(소리/탄/타이머)으로 동작하므로
+-- 후원 자체는 죽지 않는다.
+local function heliSpawnVehicle(job)
+    local okP, px, py = pcall(function()
+        return job.player:getX(), job.player:getY()
+    end)
+    if not okP then
+        print("[PongDu][Heli] vehicle spawn FAILED: player invalid")
+        return
+    end
+    local sq = nil
+    for step = 0, 9 do
+        local t  = step * 0.1
+        local sx = math.floor(job.ax + (px - job.ax) * t)
+        local sy = math.floor(job.ay + (py - job.ay) * t)
+        sq = getSquare(sx, sy, 0)
+        if sq then break end
+    end
+    if not sq then
+        print("[PongDu][Heli] vehicle spawn FAILED: no loaded square near A")
+        return
+    end
+    local ok, v = pcall(function()
+        return addVehicleDebug("Base.PongDuHeli", IsoDirections.N, 0, sq)
+    end)
+    if not ok or not v then
+        print("[PongDu][Heli] vehicle spawn FAILED err=" .. tostring(v))
+        return
+    end
+    pcall(function() v:setZombiesDontAttack(true) end)
+    job.vehicle = v
+    job.vid     = v:getId()
+    -- 권한 부여: authorizationServerCollide(short,boolean)는 Kahlua가 primitive
+    -- short 인자를 변환 못해 RuntimeException이 난다(컨버터가 boxed Short만 등록).
+    -- authorizationChanged(IsoGameCharacter)로 대체 -- 견인 로직이 쓰는 검증
+    -- 경로이며 Local 권한이라 1초 무변동 자동회수(LocalCollide 전용) 대상도 아니다.
+    local okA, errA = pcall(function()
+        job.pilot = job.player:getOnlineID()
+        v:authorizationChanged(job.player)
+    end)
+    if not okA then
+        print("[PongDu][Heli] authorization grant FAILED err=" .. tostring(errA))
+    end
+    print(string.format("[PongDu][Heli] vehicle spawned vid=%s at %d,%d pilot=%s",
+        tostring(job.vid), sq:getX(), sq:getY(), tostring(job.pilot)))
+end
+
+-- 서버 권위 제거: permanentlyRemove가 제거 패킷(8)을 전 클라에 브로드캐스트
+-- 하고 VehiclesDB에서도 지운다 (월드 잔존/세이브 오염 방지).
+local function heliRemoveVehicle(job, reason)
+    if not job.vehicle then return end
+    local ok, err = pcall(function() job.vehicle:permanentlyRemove() end)
+    if ok then
+        print("[PongDu][Heli] vehicle removed vid=" .. tostring(job.vid)
+            .. " (" .. tostring(reason) .. ")")
+    else
+        print("[PongDu][Heli] vehicle remove FAILED err=" .. tostring(err))
+    end
+    job.vehicle, job.vid, job.pilot = nil, nil, nil
+end
+
+-- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
+-- 진행률을 넘기면 클라는 자기 로컬 시계 기준으로 이어서 보간할 수 있다.
+-- vid/pilot: 파일럿 클라가 어느 차량을 몰지 식별하는 키.
+local function heliStartPayload(job, remainMs)
+    return {
+        remain = remainMs,
+        ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
+        elapsed = getTimestampMs() - job.startAt, total = job.endAt - job.startAt,
+        vid = job.vid, pilot = job.pilot,
+    }
+end
+
+DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
+    local dur = (tonumber(data["dur"]) or 30) * 1000
+    local r   = tonumber(data["r"])  or 30
+    local iv  = tonumber(data["iv"]) or 200
+    local kc  = tonumber(data["kc"]) or 5
+    local sender = data["sender"] or ""
+    local D = r + 50
+
+    -- 중첩: 기존 job이 있으면 현재 위치 A'에서 새 랜덤 B'로 즉시 급선회.
+    for i = 1, #_heliJobs do
+        local job = _heliJobs[i]
+        if job.player == player then
+            local now2 = getTimestampMs()
+
+            -- 기존 경로 보간으로 "현재 위치"를 구해 새 시작점 A'로 삼는다.
+            local ot = (now2 - job.startAt) / math.max(job.endAt - job.startAt, 1)
+            if ot < 0 then ot = 0 elseif ot > 1 then ot = 1 end
+            local curX = job.ax + (job.bx - job.ax) * ot
+            local curY = job.ay + (job.by - job.ay) * ot
+
+            -- 새 B'는 플레이어 기준 반경 D 원 위 랜덤 각도(현재 위치의 플레이어
+            -- 기준 각도와 최소 ~90도 이상 벌어지게 해서 급선회가 눈에 띄게 함).
+            local pcx, pcy = player:getX(), player:getY()
+            local curAng   = math.atan2(curY - pcy, curX - pcx)
+            local turn     = 1.57 + ZombRand(105) / 100.0        -- 90~150도
+            if ZombRand(2) == 0 then turn = -turn end
+            local newAng   = curAng + turn
+            local nbx, nby = pcx + math.cos(newAng) * D, pcy + math.sin(newAng) * D
+
+            job.r, job.iv, job.kc, job.sender = r, iv, kc, sender
+            job.missStreak = 0
+            job.ax, job.ay = curX, curY
+            job.bx, job.by = nbx, nby
+            job.oz         = player:getZ()
+            job.startAt    = now2
+            job.endAt      = now2 + dur
+
+            -- 실차량: 최초 스폰이 실패했었다면 이번 발동에서 재시도.
+            -- 있으면 권한만 재부여(회수됐을 가능성 대비 -- 부여는 멱등이다).
+            if not job.vehicle then
+                heliSpawnVehicle(job)
+            elseif job.pilot then
+                pcall(function()
+                    job.vehicle:authorizationChanged(job.player)
+                end)
+            end
+
+            local payload  = heliStartPayload(job, dur)
+            local players  = getOnlinePlayers()
+            for k = 0, players:size() - 1 do
+                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
+            end
+            print(string.format(
+                "[PongDu][Heli] job REROUTED dur=%dms A'=%d,%d B'=%d,%d sender=%s",
+                dur, math.floor(curX), math.floor(curY),
+                math.floor(nbx), math.floor(nby), tostring(sender)))
+            return
+        end
+    end
+
+    -- 경로: 플레이어 "머리 위 통과". 그림자 연출(클라 OnPostFloorLayerDraw)이
+    -- 헬기의 실체를 표현하므로 시야 밖에 숨길 이유가 없다.
+    -- A = 플레이어 중심 반경 D의 원 위 랜덤 각도, B = 반대편(±30도 지터).
+    local cx, cy = player:getX(), player:getY()
+    local ang    = ZombRand(628) / 100.0
+    local jit    = (ZombRand(105) - 52) / 100.0      -- 약 ±30도 (0.52rad)
+    local ang2   = ang + 3.1416 + jit
+    local ax, ay = cx + math.cos(ang)  * D, cy + math.sin(ang)  * D
+    local bx, by = cx + math.cos(ang2) * D, cy + math.sin(ang2) * D
+
+    local now = getTimestampMs()
+    local job = {
+        player = player, r = r, iv = iv, kc = kc, sender = sender,
+        ax = ax, ay = ay, bx = bx, by = by, oz = player:getZ(),
+        startAt = now, endAt = now + dur, nextAt = now,
+        missStreak = 0,
+    }
+    _heliJobs[#_heliJobs + 1] = job
+
+    heliSpawnVehicle(job)
+
+    local payload = heliStartPayload(job, dur)
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
+    end
+    print(string.format(
+        "[PongDu][Heli] job queued dur=%dms r=%d iv=%d kc=%d%% A=%d,%d B=%d,%d sender=%s",
+        dur, r, iv, kc, math.floor(ax), math.floor(ay),
+        math.floor(bx), math.floor(by), tostring(sender)))
+end
+
+-- 반경 내 랜덤 좀비 1마리. 헬기는 이 좀비를 "락온"해서 사살할 때까지 계속
+-- 쏘고, 죽으면 다음 타겟을 다시 랜덤으로 고른다 (매 발 랜덤 대상 아님).
+local function pickHeliTarget(job)
+    local ok, cx, cy, cell = pcall(function()
+        return job.player:getX(), job.player:getY(), job.player:getCell()
+    end)
+    if not ok then return nil end
+    local zl = cell and cell:getZombieList()
+    if not zl then return nil end
+
+    local r2 = job.r * job.r
+    local pool = {}
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local dx, dy = z:getX() - cx, z:getY() - cy
+            if dx * dx + dy * dy <= r2 then
+                pool[#pool + 1] = z
+            end
+        end
+    end
+    if #pool == 0 then return nil end
+    return pool[ZombRand(#pool) + 1]
+end
+
+local function processHeliJobs()
+    if #_heliJobs == 0 then return end
+    local now = getTimestampMs()
+    for i = #_heliJobs, 1, -1 do
+        local job = _heliJobs[i]
+        if now >= job.endAt then
+            heliRemoveVehicle(job, "job finished")
+            table.remove(_heliJobs, i)
+            local players = getOnlinePlayers()
+            for k = 0, players:size() - 1 do
+                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { t = 1 })
+            end
+            print("[PongDu][Heli] job finished")
+        elseif now >= job.nextAt then
+            -- 헬기 현재 위치: A -> B 선형 보간 (연장돼도 endAt 기준이라 왕복 없이
+            -- 남은 시간 동안 더 천천히 B에 도달하는 정도의 차이만 생긴다)
+            local t  = (now - job.startAt) / (job.endAt - job.startAt)
+            if t > 1 then t = 1 end
+            local hx = job.ax + (job.bx - job.ax) * t
+            local hy = job.ay + (job.by - job.ay) * t
+
+            local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender }
+
+            -- 락온 유지 검사: 죽었거나 반경을 벗어났으면 락 해제 후 재선정.
+            -- (킬은 소유 클라가 수행하므로 kill 전송 후에도 서버에서 isDead()가
+            --  반영되기까지 지연이 있다 -- kill 보낸 발에서 즉시 락을 풀어
+            --  같은 좀비에 탄을 낭비하지 않는다.)
+            local target = job.target
+            if target then
+                local okV, valid = pcall(function()
+                    if target:isDead() then return false end
+                    local dx = target:getX() - job.player:getX()
+                    local dy = target:getY() - job.player:getY()
+                    return dx * dx + dy * dy <= job.r * job.r
+                end)
+                if not okV or not valid then
+                    target = nil
+                    job.target = nil
+                end
+            end
+            if not target then
+                target = pickHeliTarget(job)
+                job.target = target
+                if target then
+                    print("[PongDu][Heli] lock zid=" .. target:getOnlineID())
+                end
+            end
+
+            -- 미탐지 히스테리시스: 반경 경계에서 좀비가 순간적으로 들락날락하면
+            -- 매 스캔 CLEAR<->ENGAGE가 반복돼 LMG 루프가 재시작될 때마다
+            -- 끊겨 들린다("씹힘"). 연속 3회(iv 100ms 기준 약 300ms) 미탐지가
+            -- 확인돼야만 진짜로 소진된 것으로 보고 clear 전환한다.
+            if target then
+                job.missStreak = 0
+            else
+                job.missStreak = (job.missStreak or 0) + 1
+            end
+
+            -- ── engage/clear 상태머신 ──
+            -- 대상 있음: engage 상태로 사격. 없음: 사격 자체를 중단(HeliFire
+            -- 미전송 -- 구버전의 "랜덤 지면 난사" 제거). 상태가 바뀌는 순간에만
+            -- HeliEngage/HeliClear를 브로드캐스트해서 클라가 기관총 루프음을
+            -- 켜고 끄게 한다.
+            -- job.engaged 3상태: nil(초기 스캔 전) / true(교전 중) / false(clear
+            -- 방송 완료). 교전하다 대상이 소진되면 즉시 clear, 시작부터 반경이
+            -- 비어 있으면 도착 연출을 위해 3초 유예 후 "구역 이상무" 1회 방송.
+            if target then
+                if job.engaged ~= true then
+                    job.engaged = true
+                    local players = getOnlinePlayers()
+                    for k = 0, players:size() - 1 do
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliEngage", { t = 1 })
+                    end
+                    print("[PongDu][Heli] ENGAGE")
+                end
+                payload.id = target:getOnlineID()
+                payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
+                if ZombRand(100) < job.kc then
+                    payload.kill = true
+                    job.target = nil   -- 사살 -> 다음 발에 새 타겟 랜덤 선정
+                    print("[PongDu][Heli] shot KILL zid=" .. payload.id)
+                end
+            else
+                if job.engaged == true and job.missStreak >= HELI_MISS_THRESHOLD then
+                    job.engaged = false
+                    local players = getOnlinePlayers()
+                    for k = 0, players:size() - 1 do
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { t = 1 })
+                    end
+                    print("[PongDu][Heli] CLEAR (targets depleted)")
+                elseif job.engaged == nil and now - job.startAt >= 3000
+                    and job.missStreak >= HELI_MISS_THRESHOLD then
+                    job.engaged = false
+                    local players = getOnlinePlayers()
+                    for k = 0, players:size() - 1 do
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { t = 1 })
+                    end
+                    print("[PongDu][Heli] CLEAR (initial sweep, no targets)")
+                end
+                -- 사격 없음: 다음 스캔 예약만 하고 이번 발은 건너뛴다
+                job.nextAt = now + job.iv
+            end
+
+            if not payload.id then
+                -- 대상이 없으면 아무것도 보내지 않는다
+            else
+            local players = getOnlinePlayers()
+            for k = 0, players:size() - 1 do
+                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliFire", payload)
+            end
+            job.nextAt = now + job.iv
+            end
+        end
+    end
+end
+Events.OnTick.Add(processHeliJobs)
 
 DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
     local cx = player:getX()

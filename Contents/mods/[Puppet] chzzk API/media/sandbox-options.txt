@@ -357,6 +357,86 @@ option PongDu.Delay_horde_night = {
     page = PongDu_Dev, translation = PongDu_Delay_horde_night,
 }
 
+option PongDu.Divider_FireSupport = {
+    type = boolean, default = false,
+    page = PongDu_Dev, translation = PongDu_Divider_FireSupport,
+}
+
+option PongDu.Delay_fire_support = {
+    type = integer, min = 0, max = 60, default = 5,
+    page = PongDu_Dev, translation = PongDu_Delay_fire_support,
+}
+
+option PongDu.FireSupport_Sniper = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_FireSupport_Sniper,
+}
+
+option PongDu.FireSupport_Drone = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_FireSupport_Drone,
+}
+
+option PongDu.FireSupport_Helicopter = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_FireSupport_Helicopter,
+}
+
+option PongDu.FireSupport_Airborne = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_FireSupport_Airborne,
+}
+
+option PongDu.Sniper_Radius = {
+    type = integer, min = 10, max = 60, default = 30,
+    page = PongDu_Dev, translation = PongDu_Sniper_Radius,
+}
+
+option PongDu.Sniper_Count = {
+    type = integer, min = 1, max = 15, default = 10,
+    page = PongDu_Dev, translation = PongDu_Sniper_Count,
+}
+
+option PongDu.Sniper_Interval = {
+    type = integer, min = 200, max = 10000, default = 3000,
+    page = PongDu_Dev, translation = PongDu_Sniper_Interval,
+}
+
+option PongDu.Sniper_Pierce = {
+    type = boolean, default = true,
+    page = PongDu_Dev, translation = PongDu_Sniper_Pierce,
+}
+
+option PongDu.Sniper_PierceChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Dev, translation = PongDu_Sniper_PierceChance,
+}
+
+option PongDu.Sniper_KnockdownChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Dev, translation = PongDu_Sniper_KnockdownChance,
+}
+
+option PongDu.Heli_Duration = {
+    type = integer, min = 10, max = 120, default = 30,
+    page = PongDu_Dev, translation = PongDu_Heli_Duration,
+}
+
+option PongDu.Heli_Radius = {
+    type = integer, min = 10, max = 60, default = 30,
+    page = PongDu_Dev, translation = PongDu_Heli_Radius,
+}
+
+option PongDu.Heli_Interval = {
+    type = integer, min = 10, max = 2000, default = 100,
+    page = PongDu_Dev, translation = PongDu_Heli_Interval,
+}
+
+option PongDu.Heli_KillChance = {
+    type = integer, min = 1, max = 100, default = 30,
+    page = PongDu_Dev, translation = PongDu_Heli_KillChance,
+}
+
 /***** GENERAL *****/
 
 option Hitmans.General_KillCounter = {

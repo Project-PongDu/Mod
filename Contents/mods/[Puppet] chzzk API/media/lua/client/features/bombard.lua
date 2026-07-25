@@ -35,7 +35,8 @@ Events.OnResolutionChange.Add(DOTex.SizeChange)
 function BombardTimerDisplay:new(a, b)
     local c = getCore():getScreenWidth()
     local d = getCore():getScreenHeight()
-    local e = ISPanel:new(c / 2 - 50, d - 150, 100, 25)
+    -- 접두어 텍스트("폭격까지 남은 시간:")가 붙으면서 폭 100 -> 220으로 확장
+    local e = ISPanel:new(c / 2 - 110, d - 150, 220, 25)
     setmetatable(e, self)
     self.__index = self
     e.player      = a
@@ -48,7 +49,9 @@ function BombardTimerDisplay:render()
     local a = math.floor(self.currentTime / 60)
     local b = math.floor(a / 60)
     local c = a % 60
-    self:drawTextCentre(string.format("%02d:%02d", b, c), self.width / 2, 0, 1, 1, 1, 1, UIFont.Small)
+    self:drawTextCentre(getText("IGUI_donation_bombard_timer")
+        .. " " .. string.format("%02d:%02d", b, c),
+        self.width / 2, 0, 1, 1, 1, 1, UIFont.Small)
 end
 function BombardTimerDisplay:update()
     local a = self.player:getModData()

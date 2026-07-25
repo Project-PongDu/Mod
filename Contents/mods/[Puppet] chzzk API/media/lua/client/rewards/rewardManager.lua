@@ -11,6 +11,7 @@ local riseup     = require("features/riseup")
 local mutantspawn = require("features/mutantspawn")
 local zombierain = require("features/zombierain")
 local randomteleport = require("features/randomteleport")
+local firesupport = require("features/firesupport")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -263,6 +264,16 @@ local rewardHandlers = {
         immediate = true,
         fn = function(sender)
             -- TODO: 호드나이트
+            global.processingEvent = false
+        end,
+    },
+    ["fire_support"] = {
+        -- 화력 지원(저격/드론/헬기/공수 룰렛). 환경 무피해 지원 계열이라
+        -- 세이프하우스 안에서도 그대로 발동한다(immediate=true).
+        immediate = true,
+        fn = function(sender)
+            -- TODO: 화력 지원 (features/firesupport.lua 구현 후 활성화)
+            firesupport.a(global.player, sender)
             global.processingEvent = false
         end,
     },

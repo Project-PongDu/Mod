@@ -85,6 +85,20 @@ local function spawnRainZombie(session, col)
     local p = session.player
     pcall(function() zed:setTarget(p) end)
     pcall(function() zed:setTurnAlertedValues(math.floor(p:getX()), math.floor(p:getY())) end)
+    -- 서버측 특좀 마킹: 이게 있어야 시체(IsoDeadBody)에 계승되어 강령술
+    -- (RiseUp)이 b:getModData()["PuppetMutant"]를 읽고 스프린터로 부활시킨다.
+    -- 기존엔 클라 RainMark 수신부에서만 마킹해서 서버 시체엔 아무것도 안 남았고,
+    -- 그래서 레인 스프린터가 전부 일반좀비로 부활했다 (sprinter5/좀비룰렛은
+    -- server.lua spawnZombies에서 같은 마킹을 하고 있어 정상 동작했음).
+    -- PuppetMutantZid 스탬프 필수 -- 없으면 staleSweep이 풀 재활용으로 오인해 즉시 지운다.
+    if sprint == 1 then
+        local md = zed:getModData()
+        md["PuppetMutant"]    = "sprinter"
+        md["PuppetMutantZid"] = zed:getOnlineID()
+        if session.sender and session.sender ~= "" then
+            md["PuppetMutantSender"] = session.sender
+        end
+    end
     session.batch[#session.batch + 1] = {
         ["id"] = zed:getOnlineID(),
         ["h"]  = zed:getHealth(),   -- 착지 후 원복할 낙하 전 체력
