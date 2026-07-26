@@ -1,6 +1,7 @@
 local _a = {}
 
 local global = require("global")
+local timerStack = require("utils/timerStack")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화력 지원 (fire_support): 저격 / 드론 / 헬기 / 공수 중 1종 랜덤 발동. [스텁]
@@ -1022,8 +1023,9 @@ local DroneTimerDisplay = ISPanel:derive("DroneTimerDisplay")
 
 function DroneTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local h = getCore():getScreenHeight()
-    local o = ISPanel:new(w / 2 - 110, h - 240, 220, 25)
+    -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
+    -- 폭 220 -> 240: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
+    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -1037,11 +1039,12 @@ function DroneTimerDisplay:render()
     local totalSec = math.floor(ms / 1000)
     self:drawTextCentre(getText("IGUI_donation_fire_support_drone_timer")
         .. " " .. string.format("%02d:%02d", math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Small)
+        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
 end
 
 function DroneTimerDisplay:update()
     if not _droneEndAt or _droneEndAt - getTimestampMs() <= 0 then
+        timerStack.unregister(self)
         self:removeFromUIManager()
         _dronePanel = nil
     end
@@ -1054,6 +1057,7 @@ local function droneTimerShow(orbitMs)
         _dronePanel = DroneTimerDisplay:new()
         _dronePanel:addToUIManager()
         _dronePanel:setVisible(true)
+        timerStack.register(_dronePanel)
     end
 end
 
@@ -1174,8 +1178,9 @@ local HeliTimerDisplay = ISPanel:derive("HeliTimerDisplay")
 
 function HeliTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local h = getCore():getScreenHeight()
-    local o = ISPanel:new(w / 2 - 110, h - 210, 220, 25)
+    -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
+    -- 폭 220 -> 240: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
+    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -1191,11 +1196,12 @@ function HeliTimerDisplay:render()
     local sec = totalSec % 60
     self:drawTextCentre(getText("IGUI_donation_fire_support_heli_timer")
         .. " " .. string.format("%02d:%02d", m, sec),
-        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Small)
+        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
 end
 
 function HeliTimerDisplay:update()
     if not _heliEndAt or _heliEndAt - getTimestampMs() <= 0 then
+        timerStack.unregister(self)
         self:removeFromUIManager()
         _heliPanel = nil
     end
@@ -1207,6 +1213,7 @@ local function heliTimerShow(remainMs)
         _heliPanel = HeliTimerDisplay:new()
         _heliPanel:addToUIManager()
         _heliPanel:setVisible(true)
+        timerStack.register(_heliPanel)
     end
 end
 

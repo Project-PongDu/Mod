@@ -480,6 +480,27 @@ repositionPanels = function()
     end
 end
 
+-- ── 외부 노출 ──────────────────────────────────────────────────────────────────
+-- 다른 기능(봄바드/화력지원/좀비레인 카운트다운 패널)이 큐박스 호버 툴팁과
+-- 겹치지 않게 위치를 잡을 수 있도록, 툴팁 상단 Y좌표를 계산해준다.
+-- DonationEntryPanel:render()의 ty = -boxH - sc(4) 공식과 반드시 맞춰서 유지할 것.
+-- 큐박스가 비어있어도(패널 없음) defaultAnchor()로 "만약 뜬다면 어디에 뜰지"를
+-- 그대로 계산한다 -- 핫바 위치를 무시하는 임의의 폴백값을 쓰면 안 됨(핫바와 겹침).
+local function getTooltipTopY()
+    local sz = sc(ICON_SIZE)
+    local y0
+    if #panelList > 0 then
+        y0 = panelList[1]:getY()
+    elseif uiSettings.anchorY ~= nil then
+        y0 = uiSettings.anchorY
+    else
+        local _, defaultY = defaultAnchor(sz, 1)
+        y0 = defaultY
+    end
+    local boxH = sc(25)
+    return y0 - boxH - sc(4)
+end
+
 local function addPanel(entry)
     if not showPanelEnabled() then return end   -- sandbox: UI off -> no panel, effect unaffected
     local p = DonationEntryPanel:new(entry)
@@ -912,3 +933,5 @@ end)
 -- ── Init ──────────────────────────────────────────────────────────────────────
 Events.OnGameStart.Add(loadUISettings)
 Events.OnGameStart.Add(loadPendingQueue)
+
+return { getTooltipTopY = getTooltipTopY }

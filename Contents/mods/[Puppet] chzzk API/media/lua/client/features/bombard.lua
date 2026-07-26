@@ -1,5 +1,6 @@
 local _a = _a or {}
 require("ISUI/ISPanel")
+local timerStack = require("utils/timerStack")
 
 local BombardTimerDisplay = ISPanel:derive("BombardTimerDisplay")
 
@@ -33,9 +34,9 @@ Events.OnResolutionChange.Add(DOTex.SizeChange)
 
 function BombardTimerDisplay:new(a, b)
     local c = getCore():getScreenWidth()
-    local d = getCore():getScreenHeight()
-    -- 접두어 텍스트("폭격까지 남은 시간:")가 붙으면서 폭 100 -> 220으로 확장
-    local e = ISPanel:new(c / 2 - 110, d - 150, 220, 25)
+    -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
+    -- 폭 220 -> 240: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
+    local e = ISPanel:new(c / 2 - 120, 0, 240, 30)
     setmetatable(e, self)
     self.__index = self
     e.player      = a
@@ -50,12 +51,13 @@ function BombardTimerDisplay:render()
     local c = a % 60
     self:drawTextCentre(getText("IGUI_donation_bombard_timer")
         .. " " .. string.format("%02d:%02d", b, c),
-        self.width / 2, 0, 1, 1, 1, 1, UIFont.Small)
+        self.width / 2, 0, 1, 1, 1, 1, UIFont.Medium)
 end
 function BombardTimerDisplay:update()
     local a = self.player:getModData()
     self.currentTime = a.bombTimer or 0
     if self.currentTime <= 0 then
+        timerStack.unregister(self)
         self:removeFromUIManager()
     end
 end
@@ -68,6 +70,7 @@ function _a.a(a)
         local d = BombardTimerDisplay:new(a, c)
         d:addToUIManager()
         d:setVisible(true)
+        timerStack.register(d)
     end
 end
 

@@ -1,5 +1,6 @@
 local _a = {}
 require("ISUI/ISPanel")
+local timerStack = require("utils/timerStack")
 
 -- ── 좀비 레인 (zombie_rain) 클라이언트 ── [프로토타입: 런타임 스퀘어 생성] ─────
 -- 역할 4가지:
@@ -70,9 +71,9 @@ local RainTimerDisplay = ISPanel:derive("RainTimerDisplay")
 
 function RainTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local h = getCore():getScreenHeight()
-    -- 폭격 타이머(h-150)와 동시 표시될 수 있으므로 30px 위에 배치
-    local o = ISPanel:new(w / 2 - 80, h - 180, 160, 25)
+    -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
+    -- 폭 160 -> 180: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
+    local o = ISPanel:new(w / 2 - 90, 0, 180, 30)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -84,11 +85,12 @@ function RainTimerDisplay:render()
     local m = math.floor(totalSec / 60)
     local s = totalSec % 60
     self:drawTextCentre(getText("IGUI_donation_zombie_rain") .. " " .. string.format("%02d:%02d", m, s),
-        self.width / 2, 0, 0.55, 0.75, 1, 1, UIFont.Small)
+        self.width / 2, 0, 0.55, 0.75, 1, 1, UIFont.Medium)
 end
 
 function RainTimerDisplay:update()
     if _rainTicks <= 0 then
+        timerStack.unregister(self)
         self:removeFromUIManager()
         _panel = nil
     end
@@ -243,6 +245,7 @@ function _a.b(player, sender)
         _panel = RainTimerDisplay:new()
         _panel:addToUIManager()
         _panel:setVisible(true)
+        timerStack.register(_panel)
     end
 end
 
