@@ -93,6 +93,20 @@ local function heliCfg()
            sv.Heli_KillChance
 end
 
+-- 드론 파라미터: Drone_Duration(s) / Drone_OrbitRadius / Drone_DetectRadius /
+-- Drone_Interval(ms) / Drone_KillChance(%) / Drone_KnockdownChance(%) /
+-- Drone_OrbitPeriod(s).
+local function droneCfg()
+    local sv = SandboxVars.PongDu
+    return sv.Drone_Duration,
+           sv.Drone_OrbitRadius,
+           sv.Drone_DetectRadius,
+           sv.Drone_Interval,
+           sv.Drone_KillChance,
+           sv.Drone_KnockdownChance,
+           sv.Drone_OrbitPeriod
+end
+
 -- ── 종류별 실행부 (전부 미구현) ────────────────────────────────────────────
 -- 각 함수는 player, sender 를 받아 해당 연출/처치를 수행한다.
 -- 공통 파라미터는 샌드박스에서 읽되, SandboxVars 는 게임 로드 후에만 존재하므로
@@ -118,9 +132,18 @@ runners.sniper = function(player, sender)
 end
 
 -- 드론: 지속(짧음). interval 마다 소수 처치. 모터음 루프.
+-- 드론: 저격과 같은 방식으로 뽑은 화면 밖 지점에서 접근해, 플레이어를 중심으로
+-- 시계방향 공전하며 사격한다. 공전 위치/타겟팅/킬 굴림은 전부 서버 job이
+-- 맡는다(저격·헬기와 동일한 이유 -- 킬 판정의 단일 권위가 필요).
 runners.drone = function(player, sender)
-    print("[PongDu] fire_support/drone: not implemented yet")
-    -- TODO: 지속형 틱 루프 + 루프 사운드 핸들 관리
+    local dur, orbitR, detR, iv, kc, kd, period = droneCfg()
+    print(string.format(
+        "[PongDu] fire_support/drone request dur=%ds orbitR=%d detR=%d iv=%d kc=%d%% kd=%d%% period=%ds",
+        dur, orbitR, detR, iv, kc, kd, period))
+    sendClientCommand("PongDuFireSupport", "Drone", {
+        dur = dur, orad = orbitR, dr = detR, iv = iv,
+        kc = kc, kd = kd, pd = period, sender = sender or "",
+    })
 end
 
 -- 헬기: 지속(김). 랜덤 지점 A -> B 로 이동하며 플레이어 반경 내 좀비를
@@ -715,6 +738,342 @@ local function heliLmgStop(reason)
     print("[PongDu] fire_support/heli: LMG loop stopped (" .. tostring(reason) .. ")")
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  드론 실체 (Base.PongDuDrone 차량)
+--
+--  헬기와 공유하는 것: 서버 addVehicleDebug 스폰 + authorizationServerCollide
+--  물리 권한 위임 + 파일럿 클라의 리플렉션 텔레포트(setWorldTransform).
+--  MP 동기화 구조는 헬기 섹션 주석과 완전히 동일하므로 반복하지 않는다.
+--
+--  헬기와 다른 것 세 가지:
+--   ① 경로 좌표를 서버에서 받지 않는다. 공전 중심이 "대상 플레이어의 현재
+--      좌표"라 계속 움직이므로, 각 클라가 매 틱 droneCenter()로 직접 읽는다.
+--      서버가 내려주는 건 스폰점/진입각/반경/주기뿐이다.
+--   ② 3단계 상태머신(APPROACH 1s -> ORBIT dur -> DEPART 1s). 단계는 t0
+--      경과시간에서 유도하므로 서버/클라가 같은 결과를 보장한다.
+--   ③ 락온 캐시가 없다. 스펙상 "더 가까운 좀비가 나타나면 즉시 변경"이라
+--      서버가 매 발 재선정한다.
+--
+--  ※ 이 블록은 반드시 Events.OnTick.Add(...) 등록보다 **앞**에 있어야 한다.
+--    Kahlua는 렉시컬 스코프라, OnTick 클로저 생성 시점에 아래 local function
+--    들이 선언돼 있지 않으면 전역(nil) 조회로 잡혀 "tried to call nil"로
+--    즉사한다(파일 상단 _heliEndAt 주석과 같은 함정).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local DRONE_FLY_ALT     = 3.0     -- 물리 y 고도. iso 층 환산 = y/2.46 -> 약 1.2층.
+                                  -- 헬기(8.0)보다 낮아야 "근접 호위" 느낌이 산다.
+local DRONE_YAW_OFF     = 0       -- fbx 전방축 보정(도)
+local DRONE_ALT_PX      = 100     -- 예광탄 원점 고도(px). 헬기가 쓴 비율
+                                  -- (≒86.7px/unit)을 3.0에 적용한 값.
+local DRONE_APPROACH_MS = 1000
+local DRONE_DEPART_MS   = 1000
+local DRONE_DEPART_DIST = 60      -- 이탈 비행 거리(타일). 1초에 이만큼 = 화면 밖
+local DRONE_TWO_PI      = 6.2831853
+
+-- 거리 기반 볼륨 램프. 헬기와 같은 원리(emitter:setVolume 실시간 조절)지만
+-- 거리 프로파일이 다르다: 접근(58->4타일) 페이드인 -> 공전(4타일 고정) 최대
+-- -> 이탈(4->64타일) 페이드아웃. 공전 중엔 거의 최대 볼륨으로 붙어 있는다.
+local DRONE_VOL_NEAR    = 0.95
+local DRONE_VOL_FAR     = 0.10
+
+local _drone          = nil   -- { sx, sy, oz, th0, orbitR, orbitMs, periodMs, t0 }
+local _droneVid       = nil
+local _droneAmPilot   = false
+local _droneTarget    = nil   -- 공전 중심이 될 플레이어 username
+local _droneSound     = nil   -- 모터음 emitter 핸들
+local _droneStopAt    = nil   -- 서버 DroneStop 유실 대비 자체 데드라인
+local _droneWarned    = false
+local _droneBladeInit = false
+local _droneBladeStep = 0
+local _droneYawWobble = false
+
+-- 공전 중심 = 대상 플레이어의 현재 좌표. 대상이 스트리밍 밖이면 nil.
+local function droneCenter()
+    local p = getSpecificPlayer(0)
+    if p and p:getUsername() == _droneTarget then return p:getX(), p:getY() end
+    local ps = getOnlinePlayers()
+    if ps then
+        for i = 0, ps:size() - 1 do
+            local o = ps:get(i)
+            if o and o:getUsername() == _droneTarget then return o:getX(), o:getY() end
+        end
+    end
+    return nil
+end
+
+-- 서버 droneComputePos와 **반드시 같은 식**. 한쪽만 고치면 실차량과 탄착점이
+-- 어긋난다. theta 증가 = 화면상 시계방향(IsoUtils.XToScreen ∝ x-y,
+-- YToScreen ∝ x+y 로 4방위 검산 완료).
+local function droneComputePos()
+    if not _drone then return nil end
+    local cx, cy = droneCenter()
+    if not cx then return nil end
+
+    local el = getTimestampMs() - _drone.t0
+    if el < 0 then el = 0 end
+
+    if el < DRONE_APPROACH_MS then
+        local t  = el / DRONE_APPROACH_MS
+        local ex = cx + math.cos(_drone.th0) * _drone.orbitR
+        local ey = cy + math.sin(_drone.th0) * _drone.orbitR
+        return _drone.sx + (ex - _drone.sx) * t,
+               _drone.sy + (ey - _drone.sy) * t, _drone.oz, "APPROACH"
+    end
+
+    local oel = el - DRONE_APPROACH_MS
+    if oel < _drone.orbitMs then
+        local th = _drone.th0 + (oel / _drone.periodMs) * DRONE_TWO_PI
+        return cx + math.cos(th) * _drone.orbitR,
+               cy + math.sin(th) * _drone.orbitR, _drone.oz, "ORBIT", th
+    end
+
+    -- 이탈: 궤도 종료 지점에서 접선 방향(시계방향이므로 -sin, cos)으로 직진.
+    local t = (oel - _drone.orbitMs) / DRONE_DEPART_MS
+    if t > 1 then t = 1 end
+    local thE = _drone.th0 + (_drone.orbitMs / _drone.periodMs) * DRONE_TWO_PI
+    local ex  = cx + math.cos(thE) * _drone.orbitR
+    local ey  = cy + math.sin(thE) * _drone.orbitR
+    return ex - math.sin(thE) * DRONE_DEPART_DIST * t,
+           ey + math.cos(thE) * DRONE_DEPART_DIST * t, _drone.oz, "DEPART", thE
+end
+
+local function findDroneVehicle()
+    if not _droneVid then return nil end
+    local ok, v = pcall(function() return getVehicleById(_droneVid) end)
+    if ok and v then return v end
+    return nil
+end
+
+-- 현재 드론 좌표: 실차량 우선, 스트리밍 전엔 계산 좌표 폴백(헬기와 동일).
+local function droneCurPos()
+    local v = findDroneVehicle()
+    if v then return v:getX(), v:getY(), v:getZ() end
+    return droneComputePos()
+end
+
+-- heliMoveTo와 동일한 리플렉션 경로. _wFieldNum은 BaseVehicle 공용 필드
+-- 인덱스라 헬기 쪽 캐시를 그대로 재사용한다(클래스가 같다).
+local function droneMoveTo(v, wx, wy)
+    if not _wFieldNum then _wFieldNum = heliFieldNum(v, "tempTransform") end
+    if not _wFieldNum then error("tempTransform field not found") end
+    local tmp    = getClassFieldVal(v, getClassField(v, _wFieldNum))
+    local tr     = v:getWorldTransform(tmp)
+    local origin = getClassFieldVal(tr, getClassField(tr, 1))
+    origin:set(origin:x() + (wx - v:getX()), DRONE_FLY_ALT, origin:z() + (wy - v:getY()))
+    v:setWorldTransform(tr)
+end
+
+-- 기수 방향. yaw = atan2(dx, dy) 규약은 헬기와 동일(heliSetYaw 주석 참조).
+--
+-- 그림자 폴리곤 갱신이 공전 중엔 공짜로 해결된다: polyDirty는 setAngles로
+-- 각도가 실제 변할 때만 서는데, 공전은 접선 방향이 매 틱 바뀌므로 자연히
+-- 선다. 헬기가 필요로 했던 ±0.6도 흔들기는 직진 구간(APPROACH/DEPART)
+-- 에서만 의미가 있어 그 두 단계에서만 적용한다.
+local function droneSetYaw(v, phase, th, wx, wy)
+    local yaw
+    if phase == "ORBIT" and th then
+        -- 접선 방향 (-sin, cos)를 진행방향으로 넣는다.
+        yaw = math.deg(math.atan2(-math.sin(th), math.cos(th))) + DRONE_YAW_OFF
+    else
+        local dx, dy = wx - v:getX(), wy - v:getY()
+        if dx == 0 and dy == 0 then return end
+        _droneYawWobble = not _droneYawWobble
+        yaw = math.deg(math.atan2(dx, dy)) + DRONE_YAW_OFF
+            + (_droneYawWobble and 0.6 or -0.6)
+    end
+    pcall(function() v:setAngles(0, yaw, 0) end)
+end
+
+-- 파일럿 틱: 계산 좌표로 텔레포트. 권한 클라에서만 호출된다.
+local function dronePilotTick()
+    local v = findDroneVehicle()
+    if not v then
+        if not _droneWarned then
+            _droneWarned = true
+            print("[PongDu] fire_support/drone: pilot tick but vehicle not streamed yet vid="
+                .. tostring(_droneVid))
+        end
+        return
+    end
+    _droneWarned = false
+    local wx, wy, _, phase, th = droneComputePos()
+    if not wx then return end
+    local ok, err = pcall(function()
+        droneMoveTo(v, wx, wy)
+        droneSetYaw(v, phase, th, wx, wy)
+    end)
+    if not ok and not _drone.moveErr then
+        _drone.moveErr = true
+        print("[PongDu] fire_support/drone: move FAILED err=" .. tostring(err))
+    end
+end
+
+-- 블레이드 순환: 전 클라 공통. 파트가 하나뿐이라 헬기(대/소 2파트)보다 단순.
+-- 첫 틱엔 Init이 켜둔 랜덤 블레이드가 남지 않게 전체를 한 번 숨긴다.
+local function droneBladeTick()
+    local v = findDroneVehicle()
+    if not v then return end
+    local part = v:getPartById("droneblade")
+    if not part then return end
+
+    if not _droneBladeInit then
+        _droneBladeInit = true
+        for i = 1, 8 do part:setModelVisible("blade" .. i, false) end
+    end
+
+    _droneBladeStep = _droneBladeStep + 1
+    if _droneBladeStep > 8 then _droneBladeStep = 1 end
+    local prev = _droneBladeStep - 1
+    if prev < 1 then prev = 8 end
+    part:setModelVisible("blade" .. prev, false)
+    part:setModelVisible("blade" .. _droneBladeStep, true)
+end
+
+-- 모터음 거리 볼륨. 헬기와 달리 dmax를 detR+50(스폰 거리)로 잡는다 --
+-- 접근 시작점이 정확히 그 거리이므로 페이드인이 0에서 자연스럽게 시작한다.
+local function droneUpdateVolume(dx, dy)
+    if not _droneSound then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+
+    local dmax = SandboxVars.PongDu.Drone_DetectRadius + 50
+    local ddx, ddy = dx - pl:getX(), dy - pl:getY()
+    local d = math.sqrt(ddx * ddx + ddy * ddy)
+
+    local k = 1 - d / dmax
+    if k < 0 then k = 0 elseif k > 1 then k = 1 end
+
+    pcall(function()
+        pl:getEmitter():setVolume(_droneSound,
+            DRONE_VOL_FAR + (DRONE_VOL_NEAR - DRONE_VOL_FAR) * k)
+    end)
+end
+
+-- ── 남은시간 패널 (헬기 h-210과 겹치지 않게 h-240) ────────────────────────
+-- _droneEndAt은 droneStop이 참조하므로 패널보다 앞에 정의한다(헬기와 동일).
+local _droneEndAt = nil
+local _dronePanel = nil
+
+local DroneTimerDisplay = ISPanel:derive("DroneTimerDisplay")
+
+function DroneTimerDisplay:new()
+    local w = getCore():getScreenWidth()
+    local h = getCore():getScreenHeight()
+    local o = ISPanel:new(w / 2 - 110, h - 240, 220, 25)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    return o
+end
+
+function DroneTimerDisplay:render()
+    if not _droneEndAt then return end
+    local ms = _droneEndAt - getTimestampMs()
+    if ms < 0 then ms = 0 end
+    local totalSec = math.floor(ms / 1000)
+    self:drawTextCentre(getText("IGUI_donation_fire_support_drone_timer")
+        .. " " .. string.format("%02d:%02d", math.floor(totalSec / 60), totalSec % 60),
+        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Small)
+end
+
+function DroneTimerDisplay:update()
+    if not _droneEndAt or _droneEndAt - getTimestampMs() <= 0 then
+        self:removeFromUIManager()
+        _dronePanel = nil
+    end
+end
+
+-- 카운터는 공전 진입 시점부터. 접근 1초는 제외한다.
+local function droneTimerShow(orbitMs)
+    _droneEndAt = getTimestampMs() + DRONE_APPROACH_MS + (tonumber(orbitMs) or 0)
+    if not _dronePanel then
+        _dronePanel = DroneTimerDisplay:new()
+        _dronePanel:addToUIManager()
+        _dronePanel:setVisible(true)
+    end
+end
+
+local function droneStop(reason)
+    local pl = getSpecificPlayer(0)
+    if _droneSound then
+        if pl then pcall(function() pl:getEmitter():stopSound(_droneSound) end) end
+        print("[PongDu] fire_support/drone: motor sound stopped (" .. tostring(reason) .. ")")
+    end
+    _droneSound     = nil
+    _droneStopAt    = nil
+    _drone          = nil
+    _droneVid       = nil    -- 차량 제거 자체는 서버(permanentlyRemove)가 한다
+    _droneAmPilot   = false
+    _droneTarget    = nil
+    _droneBladeInit = false
+    _droneBladeStep = 0
+    _droneWarned    = false
+    _droneEndAt     = nil    -- 패널 update()가 다음 프레임에 스스로 제거한다
+end
+
+local function droneStart(orbitMs)
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    if not _droneSound then
+        local ok, handle = pcall(function()
+            return pl:getEmitter():playSound("pongdu_drone")
+        end)
+        if ok and handle and handle ~= 0 then
+            _droneSound = handle
+            -- 원거리 볼륨으로 시작. 이후 매 틱 거리 기반 갱신.
+            pcall(function() pl:getEmitter():setVolume(handle, DRONE_VOL_FAR) end)
+        else
+            print("[PongDu] fire_support/drone: motor sound start FAILED")
+        end
+    end
+    -- 유실 대비 자체 데드라인. 서버 DroneStop이 정상 도착하면 그쪽이 먼저 끈다.
+    _droneStopAt = getTimestampMs() + DRONE_APPROACH_MS
+        + (tonumber(orbitMs) or 60000) + DRONE_DEPART_MS + 2000
+end
+
+-- 드론 사격 1발 처리. 저격 SniperFire와 같은 구조지만 관통이 없고,
+-- 킬/그레이즈 판정은 서버가 이미 굴려서 내려보낸 결과를 그대로 적용한다.
+local function handleDroneFire(args)
+    local ox = tonumber(args.ox) or 0
+    local oy = tonumber(args.oy) or 0
+    local oz = tonumber(args.oz) or 0
+    local id = tonumber(args.id)
+
+    if not id then
+        -- 인식 반경 내 대상 없음. 연출 없이 스킵(로그도 남기지 않는다 --
+        -- iv가 100ms라 대상 없는 구간에서 콘솔이 폭발한다).
+        return
+    end
+
+    local z = findZombieById(id)
+    -- 서버 좌표는 선정 시점 값이라 그 사이 움직였을 수 있다. 살아있으면 현재
+    -- 좌표로 조준한다(저격과 동일).
+    local tx, ty, tz = tonumber(args.tx) or 0, tonumber(args.ty) or 0, tonumber(args.tz) or 0
+    if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
+    addTracer(ox, oy, oz, tx, ty, tz, DRONE_ALT_PX)
+
+    if not z or z:isDead() then return end
+
+    if args.kill then
+        if z:isRemoteZombie() then
+            -- 소유 클라가 아님 -> 연출만. 킬은 소유 클라가 수행한다.
+            pcall(function() z:playSound("BulletHitBody") end)
+        else
+            local ok, err = pcall(function() killZombieNow(z) end)
+            if ok then
+                pcall(function() z:playSound("BulletHitBody") end)
+            else
+                print("[PongDu] fire_support/drone KILL FAILED zid="
+                    .. tostring(id) .. " err=" .. tostring(err))
+            end
+        end
+    else
+        -- 사살 실패: 히트리액션만 반드시 재생(스펙). grazeZombie가 사운드/혈흔/
+        -- 소유 클라 판정까지 전부 처리한다.
+        grazeZombie(z, id, tonumber(args.kd) or 50)
+    end
+end
+
 Events.OnTick.Add(function()
     if _heliStopAt and getTimestampMs() > _heliStopAt then
         heliSoundStop("local deadline")
@@ -727,6 +1086,16 @@ Events.OnTick.Add(function()
         -- 접근/이탈이 이어지게 한다.
         local hx, hy = heliCurPos()
         if hx then heliUpdateVolume(hx, hy) end
+    end
+    -- 드론: 헬기와 독립적으로 동작한다(동시 발동 가능).
+    if _droneStopAt and getTimestampMs() > _droneStopAt then
+        droneStop("local deadline")
+    end
+    if _drone then
+        if _droneAmPilot then dronePilotTick() end   -- 권한 클라만 실제 이동
+        droneBladeTick()                             -- 로터 회전은 전 클라 로컬 연출
+        local dx, dy = droneCurPos()
+        if dx then droneUpdateVolume(dx, dy) end
     end
 end)
 
@@ -893,6 +1262,37 @@ Events.OnServerCommand.Add(function(module, command, args)
     elseif command == "HeliFire" then
         handleHeliFire(args)
         return
+    elseif command == "DroneStart" then
+        _drone = {
+            sx       = tonumber(args.sx) or 0,
+            sy       = tonumber(args.sy) or 0,
+            oz       = tonumber(args.oz) or 0,
+            th0      = tonumber(args.th0) or 0,
+            orbitR   = tonumber(args.orbitR) or 4,
+            orbitMs  = tonumber(args.orbitMs) or 60000,
+            periodMs = tonumber(args.periodMs) or 6000,
+            t0       = getTimestampMs(),
+        }
+        _droneVid    = args.vid and tonumber(args.vid) or nil
+        _droneTarget = args.target
+        _droneBladeInit = false
+        _droneBladeStep = 0
+        -- SP에선 양쪽 onlineID가 모두 -1이라 자동으로 파일럿이 된다(헬기와 동일).
+        local meD = getSpecificPlayer(0)
+        _droneAmPilot = (meD ~= nil) and (args.pilot ~= nil)
+            and (tonumber(args.pilot) == meD:getOnlineID())
+        print(string.format("[PongDu] fire_support/drone: start vid=%s pilot=%s amPilot=%s target=%s",
+            tostring(_droneVid), tostring(args.pilot), tostring(_droneAmPilot),
+            tostring(_droneTarget)))
+        droneStart(_drone.orbitMs)
+        droneTimerShow(_drone.orbitMs)
+        return
+    elseif command == "DroneStop" then
+        droneStop("server stop")
+        return
+    elseif command == "DroneFire" then
+        handleDroneFire(args)
+        return
     end
 
     if command ~= "SniperFire" then return end
@@ -978,6 +1378,7 @@ end)
 function _a.b()
     _tracers = {}
     heliSoundStop("cleanup")
+    droneStop("cleanup")
 end
 
 return _a

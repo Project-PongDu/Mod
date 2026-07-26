@@ -47,4 +47,18 @@ module Base
         }
     }
 
+    /* 화력지원-드론 모터음. 로터음과 같은 이유로 loop = true 필수.
+       재생/정지와 거리 볼륨 램프는 firesupport.lua가 emitter 핸들로 관리.
+       ※ GameSound 스크립트는 게임 부팅 시에만 로드된다 -- 추가 후 반드시
+         게임을 완전히 재시작해야 인식된다. */
+    sound pongdu_drone
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/drone.wav,
+        }
+    }
+
 }

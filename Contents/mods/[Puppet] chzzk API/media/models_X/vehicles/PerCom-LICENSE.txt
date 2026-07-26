@@ -1,0 +1,4 @@
+// Copyright © 2023 DSR. Contacts: <sornik9947@mail.ru>
+// Copyright © 2023 RalleDJ. Contacts: <evgennyj@gmail.com>
+// Copyright © 2023-2033 KBPR3Team. All rights reserved. Contacts: <metro2033nik@gmail.com>
+// License: http://opensource.org/licenses/MIT

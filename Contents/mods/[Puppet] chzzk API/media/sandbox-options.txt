@@ -437,6 +437,41 @@ option PongDu.Heli_KillChance = {
     page = PongDu_Dev, translation = PongDu_Heli_KillChance,
 }
 
+option PongDu.Drone_Duration = {
+    type = integer, min = 10, max = 120, default = 60,
+    page = PongDu_Dev, translation = PongDu_Drone_Duration,
+}
+
+option PongDu.Drone_OrbitRadius = {
+    type = integer, min = 2, max = 12, default = 4,
+    page = PongDu_Dev, translation = PongDu_Drone_OrbitRadius,
+}
+
+option PongDu.Drone_DetectRadius = {
+    type = integer, min = 4, max = 30, default = 8,
+    page = PongDu_Dev, translation = PongDu_Drone_DetectRadius,
+}
+
+option PongDu.Drone_Interval = {
+    type = integer, min = 10, max = 2000, default = 100,
+    page = PongDu_Dev, translation = PongDu_Drone_Interval,
+}
+
+option PongDu.Drone_KillChance = {
+    type = integer, min = 1, max = 100, default = 40,
+    page = PongDu_Dev, translation = PongDu_Drone_KillChance,
+}
+
+option PongDu.Drone_KnockdownChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Dev, translation = PongDu_Drone_KnockdownChance,
+}
+
+option PongDu.Drone_OrbitPeriod = {
+    type = integer, min = 2, max = 20, default = 6,
+    page = PongDu_Dev, translation = PongDu_Drone_OrbitPeriod,
+}
+
 /***** GENERAL *****/
 
 option Hitmans.General_KillCounter = {

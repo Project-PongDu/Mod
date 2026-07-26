@@ -1,0 +1,344 @@
+module Base
+{
+	/* ═══════════════════════════════════════════════════════════════════
+	   화력 지원 / 드론 실체 차량 (fire_support drone)
+
+	   PerCom(KBPR3Team, MIT)의 droneMm.fbx를 분해해서 만들었다. 원본은
+	   본체·로터·랜딩기어가 전부 융합된 단일 메시(50,081 tris)라 그대로는
+	   파트 분리가 불가능했고, 다음 처리를 거쳤다:
+
+	   - 연결 요소 분해로 로터 4개(90/80/75/70 verts)를 본체에서 분리
+	   - 각 로터의 회전축을 180도 점대칭 최적점으로 산출
+	       prop A ( 3.8952,  1.4192)  r=4.146  theta= 20.0
+	       prop B (-1.3534,  3.8956)  r=4.124  theta=109.2
+	       prop C (-3.8318, -1.4123)  r=4.084  theta=200.2
+	       prop D ( 1.4169, -3.8719)  r=4.123  theta=290.1
+	     대칭 잔차 0.14~0.47% (블레이드 span 대비) -> 축 정확
+	   - 22.5도 간격 8프레임을 구움. 2엽이라 주기가 180도이므로 8프레임이
+	     한 바퀴다. 프레임마다 로터 4개가 전부 들어 있어 파트는 하나뿐이며,
+	     헬기의 heliblade/helibladeSmall 2파트 구조가 필요 없다.
+	   - 본체는 3,000 tris로 감축. Hausdorff RMS가 원본 대비 0.013%,
+	     bbox는 소수점까지 동일 -> 원본 49,263 tris가 형상 대비 과잉이었다.
+
+	   블레이드 좌표는 원본 지오메트리 공간 절대 위치를 그대로 유지했으므로
+	   part model offset이 전부 0이다 (헬기는 0 9 1.5 같은 실측값 필요).
+
+	   ─── 스케일 산출 ───
+	   VehicleScript.Loaded()가 extents / physicsChassisShape /
+	   shadowExtents / shadowOffset / centerOfMassOffset 전부에
+	   getModelScale()(= 아래 vehicle 블록의 model{scale})을 곱한다.
+	   따라서 스케일을 vehicle 블록에 몰아두고 model 스크립트는 1.0으로
+	   두면 이 값들을 메시 단위 그대로 적을 수 있다.
+
+	     프로펠러 포함 최대 span = 8.28 메시 유닛 (blade3 프레임 기준)
+	     목표 월드 span         = 약 2.2 유닛 (바닐라 승용차 전장 5.2 대비)
+	     model scale            = 2.2 / 8.28 = 0.265
+
+	   ※ 이 스케일과 shadowExtents는 인게임 1회 확인이 필요한 시작값이다.
+	     너무 크면 model{scale}만 줄이면 extents/그림자가 같이 따라간다.
+
+	   ─── 헬기에서 그대로 가져온 설계 ───
+	   - extents를 0.3으로 축소: PolygonalMap2.VehiclePoly.init의 이동 차단
+	     폴리곤은 extents 기반 2D 지면 폴리곤이라 비행 고도를 무시한다.
+	     실제 크기를 넣으면 하늘에 떠 있어도 바닥에 투명 벽이 생긴다.
+	     렌더/그림자는 model scale과 shadowExtents가 담당하므로 무관.
+	   - part Engine 없음(의도적): addToWorld -> trySpawnKey가
+	     getPartById("Engine") 존재를 게이트로 쓰므로, 파트를 빼면 스폰 시
+	     주변에 차키가 생성되는 경로가 원천 차단된다.
+	   - 엔진 사운드: 시동을 걸지 않으므로 미정의 이름을 넣어 무음 보장.
+	   ═══════════════════════════════════════════════════════════════════ */
+
+	model PongDuDroneBody
+	{
+		mesh = vehicles/pongdu_drone_body,
+		shader = vehicle,
+		static = TRUE,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade1
+	{
+		mesh = vehicles/pongdu_drone_blade1,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade2
+	{
+		mesh = vehicles/pongdu_drone_blade2,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade3
+	{
+		mesh = vehicles/pongdu_drone_blade3,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade4
+	{
+		mesh = vehicles/pongdu_drone_blade4,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade5
+	{
+		mesh = vehicles/pongdu_drone_blade5,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade6
+	{
+		mesh = vehicles/pongdu_drone_blade6,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade7
+	{
+		mesh = vehicles/pongdu_drone_blade7,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+	model PongDuDroneBlade8
+	{
+		mesh = vehicles/pongdu_drone_blade8,
+		texture = Vehicles/Vehicle_PongDuDrone,
+		shader = vehiclewheel,
+		scale = 1.0,
+	}
+
+	vehicle PongDuDrone
+	{
+		mechanicType = 1,
+		offRoadEfficiency = 10.2,
+		engineRepairLevel = 8,
+		playerDamageProtection = 1.2,
+
+		model
+		{
+			file = PongDuDroneBody,
+			scale = 0.2650,
+			offset = 0.0000 0.0000 0.0000,
+		}
+
+		skin
+		{
+			texture = Vehicles/Vehicle_PongDuDrone,
+		}
+
+		textureShadow = Shadows/shadowPongDuDrone,
+		spawnOffsetY = 0.0000,
+
+		sound
+		{
+			horn = VehicleHorn,
+			engine = PongDuDroneSilence,
+			engineStart = PongDuDroneSilence,
+		}
+
+		/* 아래 5개 값은 로드 시 model{scale}=0.265가 곱해진다.
+		   extents            0.3    -> 0.0795 (충돌 폴리곤 무력화)
+		   shadowExtents      4.14   -> 1.0971 (월드 span 2.194, 정사각)
+		   shadowOffset       0      -> 0      (본체 중심이 원점: x 0.006 z 0.004)
+		   centerOfMassOffset 0      -> 0                                        */
+		extents = 0.3000 0.3000 0.3000,
+		mass = 120,
+		centerOfMassOffset = 0.0000 0.0000 0.0000,
+		shadowExtents = 4.1400 4.1400,
+		shadowOffset = 0.0000 0.0000,
+		physicsChassisShape = 0.3000 0.3000 0.3000,
+		engineForce = 15500,
+		maxSpeed = 70f,
+		engineLoudness = 0,
+		engineQuality = 70,
+		brakingForce = 50,
+		stoppingMovementForce = 4.0f,
+		rollInfluence = 1.0f,
+		steeringIncrement = 0.04,
+		steeringClamp = 0.3,
+		suspensionStiffness = 20,
+		suspensionCompression = 4.83,
+		suspensionDamping = 3.88,
+		maxSuspensionTravelCm = 14,
+		suspensionRestLength = 0.20f,
+		wheelFriction = 1.4f,
+		frontEndHealth = 165,
+		rearEndHealth = 130,
+		seats = 4,
+		template = PassengerSeat4,
+
+		passenger FrontLeft
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatFrontLeft,
+			}
+		}
+
+		passenger FrontRight
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatFrontRight,
+			}
+		}
+
+		passenger RearLeft
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatRearLeft,
+			}
+		}
+
+		passenger RearRight
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatRearRight,
+			}
+		}
+
+		area Engine
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatFrontLeft
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatFrontRight
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatRearLeft
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatRearRight
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		template = Seat/part/SeatFrontLeft,
+		template = Seat/part/SeatFrontRight,
+		template = Seat/part/SeatRearLeft,
+		template = Seat/part/SeatRearRight,
+
+		part PassengerCompartment
+		{
+			category = nodisplay,
+
+			lua
+			{
+				update = Vehicles.Update.PassengerCompartment,
+			}
+		}
+
+		/* 로터 4개가 프레임 하나에 전부 들어 있으므로 파트도 하나.
+		   blade 좌표가 원본 절대 위치라 offset이 전부 0이다. */
+		part droneblade
+		{
+			model blade1
+			{
+				file = PongDuDroneBlade1,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade2
+			{
+				file = PongDuDroneBlade2,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade3
+			{
+				file = PongDuDroneBlade3,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade4
+			{
+				file = PongDuDroneBlade4,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade5
+			{
+				file = PongDuDroneBlade5,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade6
+			{
+				file = PongDuDroneBlade6,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade7
+			{
+				file = PongDuDroneBlade7,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			model blade8
+			{
+				file = PongDuDroneBlade8,
+				offset = 0.0000 0.0000 0.0000,
+			}
+
+			area = Engine,
+			category = blade,
+			specificItem = false,
+			mechanicRequireKey = false,
+			repairMechanic = true,
+
+			lua
+			{
+				create = PongDuDroneBlades.Create.rotors,
+				init = PongDuDroneBlades.Init.rotors,
+			}
+		}
+	}
+}

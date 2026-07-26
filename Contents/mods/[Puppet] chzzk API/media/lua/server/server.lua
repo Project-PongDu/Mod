@@ -1339,3 +1339,250 @@ local function onDonationStats(module, command, player, data)
 end
 Events.OnClientCommand.Add(onDonationStats)
 
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  드론 화력지원 — server.lua 삽입 블록
+--
+--  배치: _sniperJobs 블록(355~501) 과 헬기 블록(535~) 사이, 또는 헬기 블록
+--        바로 아래. Events.OnTick.Add(processDroneJobs) 는 파일 끝쪽
+--        Events.OnTick.Add(processSniperJobs) 옆에 두면 된다.
+--
+--  헬기와의 구조 차이 (그대로 베끼면 안 되는 지점):
+--   ① 헬기는 A→B 직선 1개짜리 단일 상태였지만 드론은 접근/공전/이탈 3단계다.
+--      job.t0 기준 경과시간으로 단계를 나눈다 (별도 phase 필드 불필요 —
+--      시간에서 유도되므로 서버/클라가 같은 결과를 보장한다).
+--   ② 공전 중심이 "플레이어 현재 좌표"라 계속 움직인다. 헬기처럼 고정
+--      좌표쌍을 클라에 내려보내면 안 되고, 양쪽이 매 틱 player 좌표를 직접
+--      읽어야 한다. 그래서 DroneStart 페이로드에 경로 좌표가 없다.
+--   ③ 락온을 유지하지 않는다. 헬기는 사살까지 target을 붙들지만 드론은
+--      매 발 재선정한다(스펙 4번). job.target 캐시 자체가 없다.
+--
+--  타겟 선정 규칙이 저격/헬기 어느 쪽과도 다르다:
+--      필터 = 드론 기준 detect 반경        정렬 = 플레이어 기준 최근접
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local _droneJobs = {}
+
+local DRONE_APPROACH_MS = 1000    -- 스폰점 → 궤도 진입까지
+local DRONE_DEPART_MS   = 1000    -- 궤도 이탈 → 소멸까지
+local DRONE_DEPART_DIST = 60      -- 이탈 비행 거리(타일). 1초에 이만큼 = 화면 밖
+local DRONE_TWO_PI      = 6.2831853
+
+-- 공전 위치. 서버와 파일럿 클라가 **같은 식**을 써야 한다(클라 쪽 사본은
+-- firesupport.lua droneComputePos). 한쪽만 고치면 실차량과 탄착점이 어긋난다.
+--
+-- theta 증가 = 화면상 시계방향. IsoUtils.XToScreen ∝ (x-y),
+-- YToScreen ∝ (x+y) 이므로 theta 0/90/180/270 이 화면상 4:30/7:30/10:30/1:30
+-- 에 대응한다 — 즉 증가 방향이 시계방향이다(엔진 소스로 4방위 검산 완료).
+local function droneComputePos(j, cx, cy, now)
+    local el = now - j.t0
+    if el < 0 then el = 0 end
+
+    if el < DRONE_APPROACH_MS then
+        local t  = el / DRONE_APPROACH_MS
+        local ex = cx + math.cos(j.theta0) * j.orbitR
+        local ey = cy + math.sin(j.theta0) * j.orbitR
+        return j.sx + (ex - j.sx) * t, j.sy + (ey - j.sy) * t, "APPROACH"
+    end
+
+    local oel = el - DRONE_APPROACH_MS
+    if oel < j.orbitMs then
+        local th = j.theta0 + (oel / j.periodMs) * DRONE_TWO_PI
+        return cx + math.cos(th) * j.orbitR, cy + math.sin(th) * j.orbitR, "ORBIT"
+    end
+
+    -- 이탈: 궤도 종료 지점에서 접선 방향으로 직진. 시계방향 진행이므로
+    -- 접선은 theta+90도, 즉 (-sin, cos).
+    local t = (oel - j.orbitMs) / DRONE_DEPART_MS
+    if t > 1 then t = 1 end
+    local thE = j.theta0 + (j.orbitMs / j.periodMs) * DRONE_TWO_PI
+    local ex  = cx + math.cos(thE) * j.orbitR
+    local ey  = cy + math.sin(thE) * j.orbitR
+    return ex - math.sin(thE) * DRONE_DEPART_DIST * t,
+           ey + math.cos(thE) * DRONE_DEPART_DIST * t, "DEPART"
+end
+
+-- 실차량 스폰. 헬기 droneSpawn 대응물 — 청크 미로드 시 nil 을 돌려주고
+-- 호출측이 좌표만으로 진행하게 둔다(연출 없이도 킬은 돌아야 하므로).
+local function droneSpawnVehicle(x, y, z)
+    local sq = getCell():getGridSquare(math.floor(x), math.floor(y), math.floor(z))
+    if not sq then
+        print("[PongDu][Drone] spawn square not loaded at "
+            .. math.floor(x) .. "," .. math.floor(y) .. " — visual skipped")
+        return nil
+    end
+    local ok, v = pcall(function()
+        return addVehicleDebug("Base.PongDuDrone", IsoDirections.N, 0, sq)
+    end)
+    if not ok or not v then
+        print("[PongDu][Drone] addVehicleDebug FAILED err=" .. tostring(v))
+        return nil
+    end
+    return v
+end
+
+DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
+    local dur    = tonumber(data["dur"]) or 60     -- 공전 지속(초)
+    local orbitR = tonumber(data["orad"])  or 4      -- 공전 반경(타일)
+    local detR   = tonumber(data["dr"])  or 8      -- 인식 반경(타일)
+    local iv     = tonumber(data["iv"])  or 100    -- 발사 간격(ms)
+    local kc     = tonumber(data["kc"])  or 40     -- 발당 사살 확률(%)
+    local kd     = tonumber(data["kd"])  or 50     -- 넉다운 확률(%)
+    local period = tonumber(data["pd"])  or 6      -- 1회전 주기(초)
+    local sender = data["sender"] or ""
+
+    -- 스폰점은 저격과 동일 로직(발동 시점 1회 고정, 화면 밖 랜덤 방위).
+    -- 저격의 odist 는 server.lua:369 의 `r + 00` 을 그대로 따르지 말고
+    -- 드론은 명시적으로 detR + 50 을 쓴다 — 접근 연출이 스펙이라
+    -- 스폰점이 가까우면 APPROACH 단계가 사실상 사라진다.
+    local cx, cy = player:getX(), player:getY()
+    local ang    = ZombRand(628) / 100.0
+    local odist  = detR + 50
+    local sx     = cx + math.cos(ang) * odist
+    local sy     = cy + math.sin(ang) * odist
+    local oz     = player:getZ()
+
+    local now = getTimestampMs()
+    local job = {
+        player  = player,
+        sx = sx, sy = sy, oz = oz,
+        -- 궤도 진입 각도 = 접근해온 방향. 이래야 APPROACH → ORBIT 전환에서
+        -- 위치가 튀지 않는다.
+        theta0  = math.atan2(sy - cy, sx - cx),
+        orbitR  = orbitR,
+        dr      = detR,
+        iv      = iv, kc = kc, kd = kd,
+        orbitMs = dur * 1000,
+        periodMs = period * 1000,
+        t0      = now,
+        nextAt  = now + DRONE_APPROACH_MS,   -- 접근 중엔 사격하지 않는다
+        endAt   = now + DRONE_APPROACH_MS + dur * 1000 + DRONE_DEPART_MS,
+        sender  = sender,
+        vehicle = nil,
+    }
+
+    local v = droneSpawnVehicle(sx, sy, oz)
+    if v then
+        job.vehicle = v
+        local vid = v:getId()
+        -- 헬기와 동일: 대상 클라에 LocalCollide 물리 권한을 강제 부여해
+        -- 그 클라가 텔레포트로 비행시킨다.
+        local pid = player:getOnlineID()
+        local ok, err = pcall(function() v:authorizationServerCollide(pid, true) end)
+        if not ok then
+            print("[PongDu][Drone] authorizationServerCollide FAILED err=" .. tostring(err))
+        end
+        job.vid = vid
+    end
+
+    _droneJobs[#_droneJobs + 1] = job
+
+    -- 전 클라에 시작 통보. 경로 좌표는 보내지 않는다 — 공전 중심이
+    -- 플레이어라 각 클라가 매 틱 직접 읽어야 하기 때문(헬기와 다른 지점).
+    local payload = {
+        vid = job.vid, pilot = player:getOnlineID(),
+        sx = sx, sy = sy, oz = oz, th0 = job.theta0,
+        orbitR = orbitR, orbitMs = job.orbitMs, periodMs = job.periodMs,
+        target = player:getUsername(), sender = sender,
+    }
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStart", payload)
+    end
+
+    print(string.format(
+        "[PongDu][Drone] job queued dur=%ds orbitR=%d detR=%d iv=%d kc=%d%% kd=%d%% period=%ds spawn=%d,%d vid=%s sender=%s",
+        dur, orbitR, detR, iv, kc, kd, period,
+        math.floor(sx), math.floor(sy), tostring(job.vid), tostring(sender)))
+end
+
+-- 필터는 드론 기준, 정렬은 플레이어 기준. pickSniperTarget(플레이어 최근접)
+-- 과도 pickHeliTarget(플레이어 반경 내 랜덤)과도 다른 제3의 규칙이다.
+-- table.sort 는 Kahlua TableLib 미등록이므로 단일 패스 최소값 탐색으로 처리.
+local function pickDroneTarget(job, dx, dy)
+    local ok, cx, cy, cell = pcall(function()
+        return job.player:getX(), job.player:getY(), job.player:getCell()
+    end)
+    if not ok then return nil end
+    local zl = cell and cell:getZombieList()
+    if not zl then return nil end
+
+    local dr2 = job.dr * job.dr
+    local best, bestPD2 = nil, nil
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local zx, zy = z:getX(), z:getY()
+            local ddx, ddy = zx - dx, zy - dy
+            if (ddx * ddx + ddy * ddy) <= dr2 then          -- 드론 기준 인식
+                local pdx, pdy = zx - cx, zy - cy
+                local pd2 = pdx * pdx + pdy * pdy
+                if (not bestPD2) or pd2 < bestPD2 then      -- 플레이어 기준 최근접
+                    best, bestPD2 = z, pd2
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function droneFinish(job, reason)
+    if job.vid then
+        local ok, v = pcall(function() return getVehicleById(job.vid) end)
+        if ok and v then pcall(function() v:permanentlyRemove() end) end
+    end
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", {})
+    end
+    print("[PongDu][Drone] job finished (" .. tostring(reason) .. ")")
+end
+
+local function processDroneJobs()
+    if #_droneJobs == 0 then return end
+    local now = getTimestampMs()
+
+    for i = #_droneJobs, 1, -1 do
+        local job = _droneJobs[i]
+
+        local alive, cx, cy = pcall(function()
+            return job.player:getX(), job.player:getY()
+        end)
+        if not alive then
+            droneFinish(job, "player gone")
+            table.remove(_droneJobs, i)
+        elseif now >= job.endAt then
+            droneFinish(job, "duration elapsed")
+            table.remove(_droneJobs, i)
+        else
+            local dx, dy, phase = droneComputePos(job, cx, cy, now)
+
+            -- 사격은 ORBIT 단계에서만. 접근/이탈 중엔 쏘지 않는다.
+            if phase == "ORBIT" and now >= job.nextAt then
+                job.nextAt = now + job.iv
+                local z = pickDroneTarget(job, dx, dy)
+                local payload = { ox = dx, oy = dy, oz = job.oz, sender = job.sender }
+                if z then
+                    payload.id = z:getOnlineID()
+                    payload.tx = z:getX()
+                    payload.ty = z:getY()
+                    payload.tz = z:getZ()
+                    -- 사살 굴림은 반드시 서버에서. 클라마다 굴리면 같은 탄인데
+                    -- 클라별로 죽는 놈이 갈린다(저격과 동일한 이유).
+                    if ZombRand(100) < job.kc then
+                        payload.kill = true
+                    else
+                        payload.kd = job.kd    -- 빗나감 → 히트리액션만(스펙 5번)
+                    end
+                end
+                local players = getOnlinePlayers()
+                for k = 0, players:size() - 1 do
+                    sendServerCommand(players:get(k), "PongDuFireSupport", "DroneFire", payload)
+                end
+            end
+        end
+    end
+end
+
+Events.OnTick.Add(processDroneJobs)

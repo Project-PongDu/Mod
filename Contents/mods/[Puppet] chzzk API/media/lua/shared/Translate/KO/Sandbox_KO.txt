@@ -178,6 +178,20 @@ Sandbox_KO = {
 	Sandbox_PongDu_Heli_Interval_tooltip = "기관총이 한 발씩 발사되는 간격입니다. 값이 작을수록 빠르게 연사합니다. (기본 100 = 0.1초)",
 	Sandbox_PongDu_Heli_KillChance = "헬기: 발당 사살 확률 (%)",
 	Sandbox_PongDu_Heli_KillChance_tooltip = "기관총 한 발이 좀비를 사살할 확률입니다. 저격과 달리 난사이므로 낮은 확률로 명중합니다. (기본 30)",
+	Sandbox_PongDu_Drone_Duration = "드론: 공전 시간 (초)",
+	Sandbox_PongDu_Drone_Duration_tooltip = "드론이 플레이어 주위를 돌며 사격하는 시간입니다. 접근/이탈에 걸리는 각 1초는 여기 포함되지 않습니다. (기본 60)",
+	Sandbox_PongDu_Drone_OrbitRadius = "드론: 공전 반경 (타일)",
+	Sandbox_PongDu_Drone_OrbitRadius_tooltip = "드론이 플레이어로부터 유지하는 거리입니다. 이 반경을 지키며 시계방향으로 공전합니다. (기본 4)",
+	Sandbox_PongDu_Drone_DetectRadius = "드론: 인식 반경 (타일)",
+	Sandbox_PongDu_Drone_DetectRadius_tooltip = "드론이 좀비를 탐지하는 드론 기준 반경입니다. 이 안의 좀비 중 플레이어와 가장 가까운 좀비를 우선 공격합니다. (기본 8)",
+	Sandbox_PongDu_Drone_Interval = "드론: 발사 간격 (밀리초)",
+	Sandbox_PongDu_Drone_Interval_tooltip = "드론이 한 발씩 발사하는 간격입니다. 값이 작을수록 빠르게 연사합니다. (기본 100 = 0.1초)",
+	Sandbox_PongDu_Drone_KillChance = "드론: 발당 사살 확률 (%)",
+	Sandbox_PongDu_Drone_KillChance_tooltip = "드론 한 발이 좀비를 사살할 확률입니다. 사살에 실패해도 피격 반응은 반드시 재생됩니다. (기본 40)",
+	Sandbox_PongDu_Drone_KnockdownChance = "드론: 넉다운 확률 (%)",
+	Sandbox_PongDu_Drone_KnockdownChance_tooltip = "사살에 실패했을 때 좀비를 넘어뜨릴 확률입니다. 나머지는 움찔 반응만 재생됩니다. (기본 50)",
+	Sandbox_PongDu_Drone_OrbitPeriod = "드론: 1회전 주기 (초)",
+	Sandbox_PongDu_Drone_OrbitPeriod_tooltip = "드론이 플레이어를 한 바퀴 도는 데 걸리는 시간입니다. 값이 작을수록 빠르게 돕니다. (기본 6)",
 
 	    /***** GENERAL *****/
 

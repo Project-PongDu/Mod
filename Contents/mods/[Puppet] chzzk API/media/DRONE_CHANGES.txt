@@ -1,0 +1,43 @@
+드론 화력지원 (fire_support / runners.drone) — 변경 요약
+========================================================
+기준: Project-PongDu/Mod main @ f477517
+
+[수정된 파일]
+  lua/client/features/firesupport.lua   droneCfg / runners.drone 교체 /
+                                        드론 실체 블록 / OnTick 분기 /
+                                        DroneStart·DroneFire·DroneStop 핸들러 /
+                                        _a.b() 정리 훅
+  lua/server/server.lua                 드론 서버 job 블록 append
+  scripts/t3_rewards_sounds.txt         sound pongdu_drone (loop = true)
+  sandbox-options.txt                   Drone_* 7종
+  lua/shared/Translate/KO/Sandbox_KO.txt   Drone_* 14키 (UTF-16 BE+BOM+CRLF)
+  lua/shared/Translate/KO/IG_UI_KO.txt     drone_timer 1키 (UTF-16 BE+BOM+CRLF)
+
+[신규 파일]
+  sound/drone.wav                       모터음 루프 (48kHz 스테레오 4.73초)
+  models_X/vehicles/pongdu_drone_body.fbx        3,000 tris
+  models_X/vehicles/pongdu_drone_blade1..8.fbx   818 tris each
+  scripts/vehicles/pongdu_drone_vehicle.txt      vehicle PongDuDrone
+  lua/server/Vehicles/PongDuDroneBlades.lua      블레이드 파트 create/init
+  textures/Vehicles/Vehicle_PongDuDrone.png
+  textures/Shadows/shadowPongDuDrone.png
+
+[!] GameSound 스크립트는 게임 부팅 시에만 로드된다.
+    pongdu_drone 을 인식시키려면 게임을 완전히 재시작할 것.
+
+[인게임 실측이 필요한 값]
+  pongdu_drone_vehicle.txt  model{scale} = 0.2650   bbox 기반 계산값
+  pongdu_drone_vehicle.txt  shadowExtents = 4.1400  scale 에 종속
+  firesupport.lua           DRONE_FLY_ALT = 3.0     "근접 호위" 기준 추정
+  firesupport.lua           DRONE_ALT_PX  = 100     FLY_ALT 바꾸면 같이 조정
+
+[동작]
+  APPROACH 1초  스폰점(플레이어 기준 detR+50 타일, 랜덤 방위) -> 궤도 진입점
+  ORBIT    60초 공전 반경 4타일, 시계방향, 1회전 6초. 이 구간만 사격/타이머
+  DEPART   1초  접선 방향 60타일 직진 후 permanentlyRemove
+
+  타겟: 드론 기준 8타일 내 좀비 중 "플레이어와 가장 가까운" 1마리.
+        락온 캐시 없음 — 매 발 재선정하므로 더 가까운 좀비가 오면 즉시 전환.
+  사격: 발당 40% 사살. 실패해도 grazeZombie 로 히트리액션 반드시 재생.
+        굴림은 전부 서버(클라마다 굴리면 죽는 놈이 갈린다).
+  사운드: 거리 볼륨 램프. dmax = detR+50 이라 접근 시작점에서 페이드인 0.
