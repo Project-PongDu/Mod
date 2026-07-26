@@ -382,7 +382,11 @@ local GRAZE_REACTIONS = {
     "ShotShoulderStaggerL", "ShotShoulderStaggerR",
 }
 
-local function grazeZombie(z, id, kdChance)
+-- kdForced: nil 이면 kdChance 로 로컬 굴림(저격 경로 -- 기존 동작 유지),
+-- true/false 면 서버가 이미 굴린 결과를 그대로 적용한다(드론 경로). 서버가
+-- 굴려야 하는 이유는 server.lua 의 processDroneJobs 주석 참고 -- 클라마다
+-- 굴리면 넘어진 놈이 클라별로 갈리고, 서버가 억제창을 걸 수 없다.
+local function grazeZombie(z, id, kdChance, kdForced)
     if not z or z:isDead() then return end
     -- 피격 연출은 전 클라에서. 어그로와 무관한 로컬 효과다.
     pcall(function() z:playSound("BulletHitBody") end)
@@ -390,8 +394,14 @@ local function grazeZombie(z, id, kdChance)
     -- 상태 변경(넉다운/리액션)은 소유 클라에서만. 원격 좀비에 걸면
     -- 소유 클라 sync 패킷에 덮여서 무효다.
     if z:isRemoteZombie() then return end
+    local down
+    if kdForced ~= nil then
+        down = kdForced
+    else
+        down = ZombRand(100) < (kdChance or 50)
+    end
     local ok, err = pcall(function()
-        if ZombRand(100) < (kdChance or 50) then
+        if down then
             z:knockDown(false)
         else
             z:setBumpDone(true)
@@ -1124,8 +1134,9 @@ local function handleDroneFire(args)
         end
     else
         -- 사살 실패: 히트리액션만 반드시 재생(스펙). grazeZombie가 사운드/혈흔/
-        -- 소유 클라 판정까지 전부 처리한다.
-        grazeZombie(z, id, tonumber(args.kd) or 50)
+        -- 소유 클라 판정까지 전부 처리한다. 넉다운 여부는 서버가 굴려서
+        -- kdHit(1/0)로 내려준다 -- 클라 굴림이 아니라 결과 적용만 한다.
+        grazeZombie(z, id, nil, tonumber(args.kdHit) == 1)
     end
 end
 

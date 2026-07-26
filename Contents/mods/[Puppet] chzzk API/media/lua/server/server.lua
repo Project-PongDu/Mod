@@ -1,3 +1,29 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+--  서버 전용 OnTick 등록 헬퍼
+--
+--  모드의 media/lua/server/ 는 MP 클라이언트에서도 로드된다 (41.78.19 확인 --
+--  MP 클라 console.txt 에 "Loading: .../media/lua/server/server.lua" 가 찍힌다).
+--  바닐라 media/lua 와 달리 모드는 client/server/shared 분리가 강제되지 않는다.
+--
+--  이 파일의 OnTick 핸들러는 전부 서버 전용 job/레지스트리 테이블을 다루는데,
+--  클라에서는 OnClientCommand 가 발생하지 않아 그 테이블들이 영구히 비어 있다.
+--  그래서 클라에서 돌면 오작동한다. 실제로 관측된 사고:
+--    orphanSweepTick -> 클라의 빈 _droneJobs/_heliJobs 때문에 isTrackedVehicle()
+--    이 항상 false -> 살아있는 화력지원 차량을 10초마다 permanentlyRemove().
+--    클라에서 이건 removeFromWorld()+removeFromSquare() 라 로컬에서 실제로
+--    사라지고, 파일럿이 "vehicle not streamed yet" 만 계속 뱉었다.
+--    (로그 근거: [PongDu][Orphan] removed vid=255 직후 12ms 뒤 pilot tick 실패,
+--     10초 주기로 반복)
+--  staleSweep 도 좀비 ModData 를 지우므로 클라에서 돌면 특좀 표식이 날아간다.
+--
+--  SP 는 isClient()/isServer() 둘 다 false 이므로 not isClient() 로 걸러야
+--  서버 + SP 에서만 돌고 MP 클라에서만 빠진다.
+-- ═══════════════════════════════════════════════════════════════════════════
+local function addServerTick(fn)
+    if isClient() then return end
+    Events.OnTick.Add(fn)
+end
+
 -- ── 특수좀비 영속 레지스트리 (부활 유지의 핵심) ──────────────────────────────
 -- persistentOutfitID는 좀비 외형을 사망->시체(reanimated.bin)->부활 내내
 -- 유지시키는 영속 ID다. 단, 원시값은 모자 상태가 16번 비트로 박혀 있어
@@ -498,7 +524,7 @@ local function processSniperJobs()
         end
     end
 end
-Events.OnTick.Add(processSniperJobs)
+addServerTick(processSniperJobs)
 
 -- ── 화력 지원 / 헬기 ─────────────────────────────────────────────────────────
 -- 가상의 헬기가 랜덤 지점 A에서 B로 duration 동안 이동하며 지나간다. 클라가
@@ -849,7 +875,7 @@ local function processHeliJobs()
         end
     end
 end
-Events.OnTick.Add(processHeliJobs)
+addServerTick(processHeliJobs)
 
 DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
     local cx = player:getX()
@@ -1265,7 +1291,7 @@ local function staleSweep()
         print("[PongDu][StaleSweep] re-stamped " .. restamped .. " reanimated mutants")
     end
 end
-Events.OnTick.Add(staleSweep)
+addServerTick(staleSweep)
 
 -- ② 시체 로드 시 부활 예약 무효화. 플레이어 시체(감염 사망 -> 좀비화)는
 --    바닐라의 정상 부활 경로이므로 건드리지 않는다. 좀비 시체는 바닐라에서
@@ -1345,8 +1371,8 @@ Events.OnClientCommand.Add(onDonationStats)
 --  드론 화력지원 — server.lua 삽입 블록
 --
 --  배치: _sniperJobs 블록(355~501) 과 헬기 블록(535~) 사이, 또는 헬기 블록
---        바로 아래. Events.OnTick.Add(processDroneJobs) 는 파일 끝쪽
---        Events.OnTick.Add(processSniperJobs) 옆에 두면 된다.
+--        바로 아래. addServerTick(processDroneJobs) 는 파일 끝쪽
+--        addServerTick(processSniperJobs) 옆에 두면 된다.
 --
 --  헬기와의 구조 차이 (그대로 베끼면 안 되는 지점):
 --   ① 헬기는 A→B 직선 1개짜리 단일 상태였지만 드론은 접근/공전/이탈 3단계다.
@@ -1499,6 +1525,13 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         endAt   = now + DRONE_APPROACH_MS + dur * 1000 + DRONE_DEPART_MS,
         sender  = sender,
         vehicle = nil,
+        -- zid -> 억제 만료(ms). 동기화 공백 동안 재타겟을 막는다.
+        suppress = {},
+        -- 튜닝용 집계. 정상 동작이면 nSwitch 가 (nKill + nKd) 에 근접한다 --
+        -- 넘기거나 죽인 직후 다음 대상으로 옮겨갔다는 뜻이다. nSwitch 가
+        -- 그보다 훨씬 작으면 같은 놈을 계속 두들기고 있는 것.
+        nShot = 0, nKill = 0, nKd = 0, nSwitch = 0,
+        lastId = nil,
     }
 
     local v = droneSpawnVehicle(sx, sy, oz)
@@ -1536,10 +1569,67 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         math.floor(sx), math.floor(sy), tostring(job.vid), tostring(sender)))
 end
 
+-- ── 후순위 판정: 이미 이 발/이전 발로 처리된 좀비 ──────────────────────────
+--
+-- [왜 isOnFloor() 를 못 쓰는가]
+--   getBooleanVariables() 는 onFloor 를 bit 256 에 실어 보내지만, 받는 쪽
+--   setBooleanVariables() 가 isReanimatedPlayer() 일 때만 setOnFloor() 를
+--   적용한다 (NetworkZombieVariables.java:94). 서버의 수신 경로
+--   NetworkZombiePacker.applyZombie() 도 이 함수를 타므로, 일반 좀비의
+--   서버측 isOnFloor() 는 영구히 false 다. 서버는 knockDown() 을 직접 부르지도
+--   않아 자체 상태머신으로 true 가 될 경로도 없다. bKnockedDown 은 애초에
+--   패킷에 없다. 즉 구 isOnFloor() 기반 후순위 분기는 전체가 dead code 였고,
+--   드론은 넉다운시킨 좀비를 계속 최근접으로 다시 골라 두들겼다.
+--
+-- [대신 realState]
+--   NetworkZombieAI.set() 이 getAdvancedAnimator():getCurrentStateName() 을
+--   packet.realState 에 싣고(:188~189), 서버가 applyZombie() 에서 그대로
+--   반영한다(NetworkZombiePacker.java:251). Lua 에서는 IsoZombie:getRealState()
+--   로 문자열을 읽는다. 값은 actiongroups/zombie/ 하위 디렉토리명과 1:1.
+--   전파 지연도 짧다 -- ActionContext.postUpdate() 가 anim 상태 전환마다
+--   networkAI.extraUpdate() 를 불러 소유 클라가 200~3800ms 타이머를 기다리지
+--   않고 즉시 패킷을 보낸다.
+--
+--   크롤러/fakeDead 는 여기 없다 -- 구 코드와 동일하게 "정상 사격 대상"으로
+--   둔다(활동 중인 위협이므로). 크롤러가 피격 반응 중이면 zombie-crawler
+--   액션그룹도 같은 이름의 상태를 쓰므로 자연히 후순위로 빠진다.
+local DRONE_REACTING_STATES = {
+    ["hitreaction"]       = true,
+    ["hitreaction-hit"]   = true,
+    ["hitwhilestaggered"] = true,
+    ["staggerback"]       = true,
+    ["falldown"]          = true,
+    ["onground"]          = true,
+    ["getup"]             = true,
+    ["bumped"]            = true,
+}
+
+-- realState 는 "클라가 반응을 시작한 뒤"에야 서버에 도착한다. 그 사이
+-- (서버 발사 -> 클라 수신 -> knockDown -> anim 전환 -> 클라->서버 패킷)
+-- 최소 1왕복이 비어 있고, iv 가 50ms(디폴트)면 그 구간에 같은 좀비에게
+-- 여러 발이 더 나간다. 그래서 서버가 자기가 방금 처리한 zid 를 짧게
+-- 기억해 후순위로 내린다 -- 이 창은 "동기화 공백을 메우는 용도"이며
+-- 실제 기상 시간까지 커버하는 건 위 realState 체크 쪽이다.
+-- 킬도 같은 이유로 억제한다: becomeCorpse 는 소유 클라에서 일어나고
+-- 서버의 isDead() 는 시체 sync 이후에나 true 가 된다.
+local DRONE_SUPPRESS_MS = 1000
+
+-- 만료 항목 정리 + 신규 등록. pairs 순회 중 t[k]=nil 의 안전성이 Kahlua
+-- 에서 보장되지 않으므로 새 테이블로 재구성한다. 억제창이 1초라 항목 수는
+-- 항상 수십개 이하고, 호출은 킬/넉다운 시에만 발생한다.
+local function droneSuppress(job, zid, now)
+    local fresh = {}
+    for k, v in pairs(job.suppress) do
+        if v > now then fresh[k] = v end
+    end
+    fresh[zid] = now + DRONE_SUPPRESS_MS
+    job.suppress = fresh
+end
+
 -- 필터는 드론 기준, 정렬은 플레이어 기준. pickSniperTarget(플레이어 최근접)
 -- 과도 pickHeliTarget(플레이어 반경 내 랜덤)과도 다른 제3의 규칙이다.
 -- table.sort 는 Kahlua TableLib 미등록이므로 단일 패스 최소값 탐색으로 처리.
-local function pickDroneTarget(job, dx, dy)
+local function pickDroneTarget(job, dx, dy, now)
     local ok, cx, cy, cell = pcall(function()
         return job.player:getX(), job.player:getY(), job.player:getCell()
     end)
@@ -1547,12 +1637,14 @@ local function pickDroneTarget(job, dx, dy)
     local zl = cell and cell:getZombieList()
     if not zl then return nil end
 
-    -- 넉다운(넘어진) 좀비는 이미 시간을 벌어준 상태라 후순위다. 서 있는 놈을
-    -- 우선 전부 처리하고, 서 있는 대상이 하나도 없을 때만 넘어진 놈을 쏜다.
+    -- 이미 처리된(반응 중이거나 방금 넘긴/죽인) 좀비는 후순위다. 서 있는 놈을
+    -- 우선 전부 처리하고, 그런 대상이 하나도 없을 때만 후순위군을 쏜다
+    -- (후순위군을 아예 제외하면 반경 내에 한 마리만 있을 때 사격이 멈춘다).
     -- 두 후보군을 한 번의 순회로 같이 모아 두 번 도는 비용을 없앤다.
     local dr2 = job.dr * job.dr
-    local best,  bestPD2  = nil, nil     -- 서 있는 좀비
-    local bestD, bestDPD2 = nil, nil     -- 넘어진 좀비
+    local sup = job.suppress
+    local best,  bestPD2  = nil, nil     -- 정상 사격 대상
+    local bestD, bestDPD2 = nil, nil     -- 후순위 대상
     for i = 0, zl:size() - 1 do
         local z = zl:get(i)
         if z and not z:isDead() then
@@ -1561,18 +1653,17 @@ local function pickDroneTarget(job, dx, dy)
             if (ddx * ddx + ddy * ddy) <= dr2 then          -- 드론 기준 인식
                 local pdx, pdy = zx - cx, zy - cy
                 local pd2 = pdx * pdx + pdy * pdy
-                -- bKnockedDown 은 IsoGameCharacter 의 로컬 필드로 ZombiePacket /
-                -- NetworkZombieVariables.getBooleanVariables() 에 실리지 않아 서버에서
-                -- 항상 false 다(클라가 knockDown() 을 불러도 마찬가지). sync 되는
-                -- 플래그 중 넉다운을 반영하는 건 isOnFloor() 뿐이다 -- 기본값 false 고
-                -- Walk/Attack/Lunge 진입 시 해제, FallDown/OnGround 진입 시 설정된다.
-                -- 크롤러와 fakeDead 도 onFloor 라 별도 배제한다(둘 다 sync 대상).
-                local downed = false
-                local okf, res = pcall(function()
-                    return z:isOnFloor() and not z:isCrawling() and not z:isFakeDead()
-                end)
-                if okf and res then downed = true end
-                if downed then
+
+                local low = false
+                local okf, st = pcall(function() return z:getRealState() end)
+                if okf and DRONE_REACTING_STATES[st] then
+                    low = true
+                else
+                    local exp = sup[z:getOnlineID()]
+                    if exp and now < exp then low = true end
+                end
+
+                if low then
                     if (not bestDPD2) or pd2 < bestDPD2 then
                         bestD, bestDPD2 = z, pd2
                     end
@@ -1595,7 +1686,9 @@ local function droneFinish(job, reason)
     for k = 0, players:size() - 1 do
         sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", {})
     end
-    print("[PongDu][Drone] job finished (" .. tostring(reason) .. ")")
+    print(string.format(
+        "[PongDu][Drone] job finished (%s) shots=%d kills=%d knockdowns=%d switches=%d",
+        tostring(reason), job.nShot or 0, job.nKill or 0, job.nKd or 0, job.nSwitch or 0))
 end
 
 local function processDroneJobs()
@@ -1620,7 +1713,7 @@ local function processDroneJobs()
             -- 사격은 ORBIT 단계에서만. 접근/이탈 중엔 쏘지 않는다.
             if phase == "ORBIT" and now >= job.nextAt then
                 job.nextAt = now + job.iv
-                local z = pickDroneTarget(job, dx, dy)
+                local z = pickDroneTarget(job, dx, dy, now)
                 -- 교전 상태 전환. 헬기와 달리 히스테리시스를 두지 않는다 --
                 -- 드론은 락온을 매 발 재선정하므로 대상 유무만 보면 된다.
                 local players0 = getOnlinePlayers()
@@ -1643,10 +1736,28 @@ local function processDroneJobs()
                     payload.tz = z:getZ()
                     -- 사살 굴림은 반드시 서버에서. 클라마다 굴리면 같은 탄인데
                     -- 클라별로 죽는 놈이 갈린다(저격과 동일한 이유).
+                    --
+                    -- 넉다운 굴림도 같이 서버로 올렸다. 클라측 굴림이면 (a) 클라별로
+                    -- 넘어진 놈이 갈리고 (b) 서버가 자기가 넘긴 대상을 몰라서
+                    -- 억제창을 걸 수 없다. 결과는 kdHit 로 내려보낸다.
+                    -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
+                    local zid = payload.id
+                    job.nShot = job.nShot + 1
                     if ZombRand(100) < job.kc then
                         payload.kill = true
+                        job.nKill = job.nKill + 1
+                        droneSuppress(job, zid, now)
                     else
-                        payload.kd = job.kd    -- 빗나감 → 히트리액션만(스펙 5번)
+                        local kdHit = ZombRand(100) < job.kd
+                        payload.kdHit = kdHit and 1 or 0    -- 빗나감 → 리액션만(스펙 5번)
+                        if kdHit then
+                            job.nKd = job.nKd + 1
+                            droneSuppress(job, zid, now)
+                        end
+                    end
+                    if job.lastId ~= zid then
+                        if job.lastId then job.nSwitch = job.nSwitch + 1 end
+                        job.lastId = zid
                     end
                 end
                 local players = getOnlinePlayers()
@@ -1658,7 +1769,7 @@ local function processDroneJobs()
     end
 end
 
-Events.OnTick.Add(processDroneJobs)
+addServerTick(processDroneJobs)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화력지원 실차량 고아(orphan) 정리
@@ -1722,4 +1833,4 @@ local function orphanSweepTick()
     sweepOrphanFireSupportVehicles()
 end
 
-Events.OnTick.Add(orphanSweepTick)
+addServerTick(orphanSweepTick)
