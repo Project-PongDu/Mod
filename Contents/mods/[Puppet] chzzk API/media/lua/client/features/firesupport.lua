@@ -773,14 +773,18 @@ local DRONE_TWO_PI      = 6.2831853
 -- 거리 기반 볼륨 램프. 헬기와 같은 원리(emitter:setVolume 실시간 조절)지만
 -- 거리 프로파일이 다르다: 접근(58->4타일) 페이드인 -> 공전(4타일 고정) 최대
 -- -> 이탈(4->64타일) 페이드아웃. 공전 중엔 거의 최대 볼륨으로 붙어 있는다.
-local DRONE_VOL_NEAR    = 0.95
-local DRONE_VOL_FAR     = 0.10
+local DRONE_VOL_NEAR    = 0.3167   -- 기존 0.95 의 1/3
+local DRONE_VOL_FAR     = 0.0333   -- 기존 0.10 의 1/3
+-- 사격음(SMG). 헬기 LMG 와 동일하게 발당 트리거가 아니라 교전 구간 루프.
+local DRONE_SMG_VOL_NEAR = 0.85
+local DRONE_SMG_VOL_FAR  = 0.15
 
 local _drone          = nil   -- { sx, sy, oz, th0, orbitR, orbitMs, periodMs, t0 }
 local _droneVid       = nil
 local _droneAmPilot   = false
 local _droneTarget    = nil   -- 공전 중심이 될 플레이어 username
 local _droneSound     = nil   -- 모터음 emitter 핸들
+local _droneSmgSound  = nil   -- 사격음 emitter 핸들 (교전 중에만)
 local _droneStopAt    = nil   -- 서버 DroneStop 유실 대비 자체 데드라인
 local _droneWarned    = false
 local _droneBladeInit = false
@@ -943,10 +947,42 @@ local function droneUpdateVolume(dx, dy)
     local k = 1 - d / dmax
     if k < 0 then k = 0 elseif k > 1 then k = 1 end
 
+    local emitter = pl:getEmitter()
     pcall(function()
-        pl:getEmitter():setVolume(_droneSound,
+        emitter:setVolume(_droneSound,
             DRONE_VOL_FAR + (DRONE_VOL_NEAR - DRONE_VOL_FAR) * k)
     end)
+    if _droneSmgSound then
+        pcall(function()
+            emitter:setVolume(_droneSmgSound,
+                DRONE_SMG_VOL_FAR + (DRONE_SMG_VOL_NEAR - DRONE_SMG_VOL_FAR) * k)
+        end)
+    end
+end
+
+-- 사격음 루프 시작/정지 (engage/clear 전환 전용, 헬기 heliLmgStart 와 동형)
+local function droneSmgStart()
+    if _droneSmgSound then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    local ok, handle = pcall(function()
+        return pl:getEmitter():playSound("pongdu_drone_smg")
+    end)
+    if ok and handle and handle ~= 0 then
+        _droneSmgSound = handle
+        pcall(function() pl:getEmitter():setVolume(handle, DRONE_SMG_VOL_FAR) end)
+        print("[PongDu] fire_support/drone: SMG loop ENGAGE")
+    else
+        print("[PongDu] fire_support/drone: SMG loop start FAILED")
+    end
+end
+
+local function droneSmgStop(reason)
+    if not _droneSmgSound then return end
+    local pl = getSpecificPlayer(0)
+    if pl then pcall(function() pl:getEmitter():stopSound(_droneSmgSound) end) end
+    _droneSmgSound = nil
+    print("[PongDu] fire_support/drone: SMG loop stopped (" .. tostring(reason) .. ")")
 end
 
 -- ── 남은시간 패널 (헬기 h-210과 겹치지 않게 h-240) ────────────────────────
@@ -994,6 +1030,7 @@ local function droneTimerShow(orbitMs)
 end
 
 local function droneStop(reason)
+    droneSmgStop(reason)
     local pl = getSpecificPlayer(0)
     if _droneSound then
         if pl then pcall(function() pl:getEmitter():stopSound(_droneSound) end) end
@@ -1289,6 +1326,12 @@ Events.OnServerCommand.Add(function(module, command, args)
         return
     elseif command == "DroneStop" then
         droneStop("server stop")
+        return
+    elseif command == "DroneEngage" then
+        droneSmgStart()
+        return
+    elseif command == "DroneClear" then
+        droneSmgStop("area clear")
         return
     elseif command == "DroneFire" then
         handleDroneFire(args)

@@ -61,4 +61,17 @@ module Base
         }
     }
 
+    /* 화력지원-드론 사격음. 헬기 LMG(pongdu_heli_lmg)와 같은 이유로
+       발당 트리거가 아니라 교전~정리 구간 내내 루프한다 -- iv(0.1초)가
+       원본 sfx 길이보다 짧아 발당 재생 시 emitter 스틸로 씹힌다. */
+    sound pongdu_drone_smg
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/drone_smg.wav,
+        }
+    }
+
 }

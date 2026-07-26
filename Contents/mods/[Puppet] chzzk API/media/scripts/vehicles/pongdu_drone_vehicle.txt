@@ -23,22 +23,29 @@ module Base
 	   블레이드 좌표는 원본 지오메트리 공간 절대 위치를 그대로 유지했으므로
 	   part model offset이 전부 0이다 (헬기는 0 9 1.5 같은 실측값 필요).
 
-	   ─── 스케일 산출 ───
-	   VehicleScript.Loaded()가 extents / physicsChassisShape /
-	   shadowExtents / shadowOffset / centerOfMassOffset 전부에
-	   getModelScale()(= 아래 vehicle 블록의 model{scale})을 곱한다.
-	   따라서 스케일을 vehicle 블록에 몰아두고 model 스크립트는 1.0으로
-	   두면 이 값들을 메시 단위 그대로 적을 수 있다.
+	   ─── 스케일: 메시에 구워넣음 (체인 미사용) ───
+	   BaseVehicle.updateTransform() 기준으로
+	     본체 최종배율 = vehicle>model{scale} x 본체ModelScript.scale
+	     파트 최종배율 = vehicle>model{scale} x part model{scale} x 블레이드ModelScript.scale
+	   즉 본체와 블레이드의 ModelScript scale 이 "같은 값"이어야 정렬된다
+	   (헬기가 양쪽 다 0.05 인 이유). 이 체인을 잘못 맞추면 로터만 따로 놀며,
+	   실제로 1.0/1.0 과 1.0/0.265 두 조합 모두 인게임에서 어긋났다.
 
-	     프로펠러 포함 최대 span = 8.28 메시 유닛 (blade3 프레임 기준)
-	     목표 월드 span         = 약 2.2 유닛 (바닐라 승용차 전장 5.2 대비)
-	     model scale            = 2.2 / 8.28 = 0.265
+	   그래서 배율 0.265 를 FBX 정점에 직접 구워넣고 체인의 모든 scale 을
+	   1.0 으로 고정했다. 이제 본체/블레이드가 배율 계산 경로와 무관하게
+	   항상 동일 스케일로 렌더된다.
 
-	   ※ 이 스케일과 shadowExtents는 인게임 1회 확인이 필요한 시작값이다.
-	     너무 크면 model{scale}만 줄이면 extents/그림자가 같이 따라간다.
+	     구운 뒤 실측(assimp): 본체 폭 1.43, 로터 최대 스윕 반경 1.09
+	     전체 span 약 2.19 유닛 (바닐라 승용차 전장 5.2 대비)
+
+	   extents / shadowExtents / physicsChassisShape 는 model{scale}=1.0 이므로
+	   Loaded() 에서 곱해지는 값이 1 이다 -> 월드 유닛 절대값을 그대로 적는다.
+
+	   ※ 크기를 다시 조정하려면 scale 숫자를 건드리지 말고 메시를 다시 구울 것.
+	     (_tools/bake_scale.py). 체인으로 되돌리면 같은 버그가 재발한다.
 
 	   ─── 헬기에서 그대로 가져온 설계 ───
-	   - extents를 0.3으로 축소: PolygonalMap2.VehiclePoly.init의 이동 차단
+	   - extents를 0.0795로 축소: PolygonalMap2.VehiclePoly.init의 이동 차단
 	     폴리곤은 extents 기반 2D 지면 폴리곤이라 비행 고도를 무시한다.
 	     실제 크기를 넣으면 하늘에 떠 있어도 바닥에 투명 벽이 생긴다.
 	     렌더/그림자는 model scale과 shadowExtents가 담당하므로 무관.
@@ -122,7 +129,7 @@ module Base
 		model
 		{
 			file = PongDuDroneBody,
-			scale = 0.2650,
+			scale = 1.0,
 			offset = 0.0000 0.0000 0.0000,
 		}
 
@@ -141,17 +148,17 @@ module Base
 			engineStart = PongDuDroneSilence,
 		}
 
-		/* 아래 5개 값은 로드 시 model{scale}=0.265가 곱해진다.
-		   extents            0.3    -> 0.0795 (충돌 폴리곤 무력화)
-		   shadowExtents      4.14   -> 1.0971 (월드 span 2.194, 정사각)
-		   shadowOffset       0      -> 0      (본체 중심이 원점: x 0.006 z 0.004)
-		   centerOfMassOffset 0      -> 0                                        */
-		extents = 0.3000 0.3000 0.3000,
+		/* model{scale}=1.0 이라 Loaded() 의 곱셈이 항등이다. 전부 월드 유닛 절대값.
+		   extents            0.0795  충돌 폴리곤 무력화용 (렌더와 무관)
+		   shadowExtents      1.0971  월드 span 2.194 의 절반, 정사각
+		   shadowOffset       0       본체 중심이 원점 (x 0.006 z 0.004)
+		   centerOfMassOffset 0                                                  */
+		extents = 0.0795 0.0795 0.0795,
 		mass = 120,
 		centerOfMassOffset = 0.0000 0.0000 0.0000,
-		shadowExtents = 4.1400 4.1400,
+		shadowExtents = 1.0971 1.0971,
 		shadowOffset = 0.0000 0.0000,
-		physicsChassisShape = 0.3000 0.3000 0.3000,
+		physicsChassisShape = 0.0795 0.0795 0.0795,
 		engineForce = 15500,
 		maxSpeed = 70f,
 		engineLoudness = 0,

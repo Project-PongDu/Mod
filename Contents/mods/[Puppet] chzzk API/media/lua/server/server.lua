@@ -1434,11 +1434,11 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
 
     -- 스폰점은 저격과 동일 로직(발동 시점 1회 고정, 화면 밖 랜덤 방위).
     -- 저격의 odist 는 server.lua:369 의 `r + 00` 을 그대로 따르지 말고
-    -- 드론은 명시적으로 detR + 50 을 쓴다 — 접근 연출이 스펙이라
+    -- 드론은 명시적으로 detR + 30 을 쓴다 — 접근 연출이 스펙이라
     -- 스폰점이 가까우면 APPROACH 단계가 사실상 사라진다.
     local cx, cy = player:getX(), player:getY()
     local ang    = ZombRand(628) / 100.0
-    local odist  = detR + 50
+    local odist  = detR + 30
     local sx     = cx + math.cos(ang) * odist
     local sy     = cy + math.sin(ang) * odist
     local oz     = player:getZ()
@@ -1562,6 +1562,20 @@ local function processDroneJobs()
             if phase == "ORBIT" and now >= job.nextAt then
                 job.nextAt = now + job.iv
                 local z = pickDroneTarget(job, dx, dy)
+                -- 교전 상태 전환. 헬기와 달리 히스테리시스를 두지 않는다 --
+                -- 드론은 락온을 매 발 재선정하므로 대상 유무만 보면 된다.
+                local players0 = getOnlinePlayers()
+                if z and not job.engaged then
+                    job.engaged = true
+                    for k = 0, players0:size() - 1 do
+                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneEngage", {})
+                    end
+                elseif (not z) and job.engaged then
+                    job.engaged = false
+                    for k = 0, players0:size() - 1 do
+                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneClear", {})
+                    end
+                end
                 local payload = { ox = dx, oy = dy, oz = job.oz, sender = job.sender }
                 if z then
                     payload.id = z:getOnlineID()
