@@ -1654,3 +1654,67 @@ local function processDroneJobs()
 end
 
 Events.OnTick.Add(processDroneJobs)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  화력지원 실차량 고아(orphan) 정리
+--
+--  헬기/드론 job은 _heliJobs/_droneJobs 메모리 테이블로만 추적된다. 서버가
+--  강제종료(또는 정상종료 포함 -- OnServerFinished 훅이 없어 둘 다 동일)로
+--  꺼지면 이 테이블은 그냥 사라지지만, addVehicleDebug로 스폰한 실차량은
+--  VehiclesDB에 남아 재시작 후에도 그 자리에 굳어있다. job이 없어 아무도
+--  조종/제거하지 않으므로 영구 잔존한다.
+--
+--  해결: 주기적으로 로드된 셀의 차량을 훑어 스크립트가 PongDu 헬기/드론인데
+--  현재 _heliJobs/_droneJobs 어디에도 vid가 없는(=추적 안 되는) 차량을
+--  permanentlyRemove() 한다. 서버 시작 직후 첫 틱부터 즉시 1회 실행되므로
+--  (아래 now-0 >= interval 조건 참고) 재시작 전 잔존물도 곧바로 정리된다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local ORPHAN_SWEEP_INTERVAL_MS = 10000
+local _lastOrphanSweep = 0
+
+local function isTrackedVehicle(vid)
+    if not vid then return false end
+    for i = 1, #_heliJobs do
+        if _heliJobs[i].vid == vid then return true end
+    end
+    for i = 1, #_droneJobs do
+        if _droneJobs[i].vid == vid then return true end
+    end
+    return false
+end
+
+local function sweepOrphanFireSupportVehicles()
+    local ok, cell = pcall(getCell)
+    if not ok or not cell then return end
+    local vehicles = cell:getVehicles()
+    if not vehicles then return end
+
+    for i = vehicles:size() - 1, 0, -1 do
+        local v = vehicles:get(i)
+        if v then
+            local okS, scriptName = pcall(function() return v:getScriptName() end)
+            if okS and (scriptName == "Base.PongDuHeli" or scriptName == "Base.PongDuDrone") then
+                if not isTrackedVehicle(v:getId()) then
+                    local okR, err = pcall(function() v:permanentlyRemove() end)
+                    if okR then
+                        print("[PongDu][Orphan] removed untracked vehicle vid=" .. tostring(v:getId())
+                            .. " script=" .. tostring(scriptName))
+                    else
+                        print("[PongDu][Orphan] remove FAILED vid=" .. tostring(v:getId())
+                            .. " err=" .. tostring(err))
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function orphanSweepTick()
+    local now = getTimestampMs()
+    if now - _lastOrphanSweep < ORPHAN_SWEEP_INTERVAL_MS then return end
+    _lastOrphanSweep = now
+    sweepOrphanFireSupportVehicles()
+end
+
+Events.OnTick.Add(orphanSweepTick)
