@@ -367,7 +367,7 @@ DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
     -- r+50 타일 거리면 통상 줌에서 화면 밖이다. 
     local cx, cy = player:getX(), player:getY()
     local ang    = ZombRand(628) / 100.0
-    local odist  = r + 00
+    local odist  = r + 50
     local ox     = cx + math.cos(ang) * odist
     local oy     = cy + math.sin(ang) * odist
     local oz     = player:getZ()
