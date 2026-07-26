@@ -1561,11 +1561,16 @@ local function pickDroneTarget(job, dx, dy)
             if (ddx * ddx + ddy * ddy) <= dr2 then          -- 드론 기준 인식
                 local pdx, pdy = zx - cx, zy - cy
                 local pd2 = pdx * pdx + pdy * pdy
-                -- grazeZombie 의 z:knockDown(false) 가 setKnockedDown(true) 를
-                -- 세우므로 그 플래그로 판정한다. isOnFloor() 는 IsoMovingObject 의
-                -- "바닥 타일 위인가"라 의미가 달라(거의 항상 참) 쓰면 안 된다.
+                -- bKnockedDown 은 IsoGameCharacter 의 로컬 필드로 ZombiePacket /
+                -- NetworkZombieVariables.getBooleanVariables() 에 실리지 않아 서버에서
+                -- 항상 false 다(클라가 knockDown() 을 불러도 마찬가지). sync 되는
+                -- 플래그 중 넉다운을 반영하는 건 isOnFloor() 뿐이다 -- 기본값 false 고
+                -- Walk/Attack/Lunge 진입 시 해제, FallDown/OnGround 진입 시 설정된다.
+                -- 크롤러와 fakeDead 도 onFloor 라 별도 배제한다(둘 다 sync 대상).
                 local downed = false
-                local okf, res = pcall(function() return z:isKnockedDown() end)
+                local okf, res = pcall(function()
+                    return z:isOnFloor() and not z:isCrawling() and not z:isFakeDead()
+                end)
                 if okf and res then downed = true end
                 if downed then
                     if (not bestDPD2) or pd2 < bestDPD2 then
