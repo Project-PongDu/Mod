@@ -1444,6 +1444,45 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
     local oz     = player:getZ()
 
     local now = getTimestampMs()
+
+    -- 중첩: 같은 플레이어의 job 이 이미 있으면 새 드론을 띄우지 않고 공전
+    -- 시간만 연장한다(헬기와 동일 정책). 예전에는 그냥 새 job 을 밀어 넣어서
+    -- 먼저 뜬 드론이 갱신을 못 받고 그 자리에 굳어버렸다.
+    for i = 1, #_droneJobs do
+        local ex = _droneJobs[i]
+        if ex.player == player then
+            -- 파라미터는 최신 후원 기준으로 갱신하되 위상(theta0/t0)은 유지해
+            -- 궤도가 튀지 않게 한다.
+            ex.dr, ex.iv, ex.kc, ex.kd = detR, iv, kc, kd
+            ex.orbitR   = orbitR
+            ex.periodMs = period * 1000
+            ex.sender   = sender
+            ex.orbitMs  = ex.orbitMs + dur * 1000
+            ex.endAt    = ex.endAt + dur * 1000
+
+            -- 실차량이 최초 스폰에 실패했었다면 이번 기회에 재시도.
+            if not ex.vid then
+                local v2 = droneSpawnVehicle(sx, sy, oz)
+                if v2 then
+                    ex.vid = v2:getId()
+                    pcall(function()
+                        v2:authorizationServerCollide(player:getOnlineID(), true)
+                    end)
+                end
+            end
+
+            local pl2 = getOnlinePlayers()
+            for k = 0, pl2:size() - 1 do
+                sendServerCommand(pl2:get(k), "PongDuFireSupport", "DroneExtend",
+                    { addMs = dur * 1000 })
+            end
+            print(string.format(
+                "[PongDu][Drone] job EXTENDED +%ds (orbit total %ds) sender=%s",
+                dur, math.floor(ex.orbitMs / 1000), tostring(sender)))
+            return
+        end
+    end
+
     local job = {
         player  = player,
         sx = sx, sy = sy, oz = oz,
@@ -1508,8 +1547,12 @@ local function pickDroneTarget(job, dx, dy)
     local zl = cell and cell:getZombieList()
     if not zl then return nil end
 
+    -- 넉다운(넘어진) 좀비는 이미 시간을 벌어준 상태라 후순위다. 서 있는 놈을
+    -- 우선 전부 처리하고, 서 있는 대상이 하나도 없을 때만 넘어진 놈을 쏜다.
+    -- 두 후보군을 한 번의 순회로 같이 모아 두 번 도는 비용을 없앤다.
     local dr2 = job.dr * job.dr
-    local best, bestPD2 = nil, nil
+    local best,  bestPD2  = nil, nil     -- 서 있는 좀비
+    local bestD, bestDPD2 = nil, nil     -- 넘어진 좀비
     for i = 0, zl:size() - 1 do
         local z = zl:get(i)
         if z and not z:isDead() then
@@ -1518,13 +1561,24 @@ local function pickDroneTarget(job, dx, dy)
             if (ddx * ddx + ddy * ddy) <= dr2 then          -- 드론 기준 인식
                 local pdx, pdy = zx - cx, zy - cy
                 local pd2 = pdx * pdx + pdy * pdy
-                if (not bestPD2) or pd2 < bestPD2 then      -- 플레이어 기준 최근접
+                -- grazeZombie 의 z:knockDown(false) 가 setKnockedDown(true) 를
+                -- 세우므로 그 플래그로 판정한다. isOnFloor() 는 IsoMovingObject 의
+                -- "바닥 타일 위인가"라 의미가 달라(거의 항상 참) 쓰면 안 된다.
+                local downed = false
+                local okf, res = pcall(function() return z:isKnockedDown() end)
+                if okf and res then downed = true end
+                if downed then
+                    if (not bestDPD2) or pd2 < bestDPD2 then
+                        bestD, bestDPD2 = z, pd2
+                    end
+                elseif (not bestPD2) or pd2 < bestPD2 then  -- 플레이어 기준 최근접
                     best, bestPD2 = z, pd2
                 end
             end
         end
     end
-    return best
+    if best then return best end
+    return bestD
 end
 
 local function droneFinish(job, reason)

@@ -214,15 +214,18 @@ local TRACER_STEP = 0.16      -- 프레임당 진행률 (1/0.16 = 약 7프레임
 local TRACER_SEG  = 0.20      -- 그려지는 선분 길이 (진행률 단위)
 local ORIGIN_ALT  = 95        -- 원점 고도(px). PZ엔 3D가 없어 스크린 Y로 위조한다
 local TARGET_ALT  = 70        -- 목표 고도(px). 좀비 상반신 높이
+local TRACER_ALPHA      = 0.90   -- 기본(저격/헬기): 진한 흰색
+local TRACER_ALPHA_FAINT = 0.14  -- 히트맨 예광탄과 동일한 옅은 알파(드론용)
 
 local _tracers = {}
 
--- oalt: 원점 고도(px). 생략 시 저격수 고도(ORIGIN_ALT). 헬기는 더 높은 값을 준다.
-local function addTracer(ox, oy, oz, tx, ty, tz, oalt)
+-- oalt : 원점 고도(px). 생략 시 저격수 고도(ORIGIN_ALT). 헬기는 더 높은 값을 준다.
+-- alpha: 선 알파. 생략 시 TRACER_ALPHA(0.90, 진한 흰색). 드론만 옅게 쏜다.
+local function addTracer(ox, oy, oz, tx, ty, tz, oalt, alpha)
     _tracers[#_tracers + 1] = {
         ox = ox, oy = oy, oz = oz,
         tx = tx, ty = ty, tz = tz,
-        t = 0, hit = 0, oalt = oalt,
+        t = 0, hit = 0, oalt = oalt, alpha = alpha,
     }
 end
 
@@ -251,16 +254,19 @@ local function drawTracers()
             local y1 = math.floor(sy + (ey - sy) * a1)
             local x2 = math.floor(sx + (ex - sx) * a2)
             local y2 = math.floor(sy + (ey - sy) * a2)
-            -- 두께: 히트맨 예광탄과 동일하게 단선 1줄로 되돌림(±1px 오프셋
-            -- 외곽 2줄 제거). 알파(0.90)/색만 그대로 유지 -- 히트맨의 0.14보다
-            -- 훨씬 밝게 보이는 건 의도한 그대로다.
-            renderer:renderline(TRACER_TEX, x1, y1, x2, y2, 1, 1, 0.90, 0.90)
-            -- 총구 화염: 처음 두 프레임만 원점에 짧고 밝게
+            -- 두께는 히트맨 예광탄과 동일하게 단선 1줄. 알파는 발사원별로
+            -- 다르다(저격/헬기 0.90 진한 흰색, 드론 0.14). 색은 공통.
+            renderer:renderline(TRACER_TEX, x1, y1, x2, y2,
+                1, 1, 0.90, tr.alpha or TRACER_ALPHA)
+            -- 총구 화염: 처음 두 프레임만 원점에 짧고 밝게.
+            -- 예광탄 알파와 같은 비율로 낮춰 둘의 밝기 관계를 유지한다
+            -- (기본 0.95, 드론은 0.95 * 0.14/0.90 = 약 0.148).
             if tr.t < TRACER_STEP * 2 then
                 local fx = math.floor(sx + (ex - sx) * 0.03)
                 local fy = math.floor(sy + (ey - sy) * 0.03)
+                local fa = 0.95 * ((tr.alpha or TRACER_ALPHA) / TRACER_ALPHA)
                 renderer:renderline(TRACER_TEX, math.floor(sx), math.floor(sy), fx, fy,
-                    1, 0.92, 0.55, 0.95)
+                    1, 0.92, 0.55, fa)
             end
             tr.t = tr.t + TRACER_STEP
         else
@@ -450,7 +456,9 @@ local function heliUpdateVolume(hx, hy)
     if not pl then return end
 
     -- 경로 기하 기준 거리 범위: 머리 위 통과 경로라 최근접 ~0, 최원 = D(r+25)
-    local dmin, dmax = 0, svInt("Heli_Radius", 30) + 25
+    -- svInt 라는 헬퍼가 이 모드 어디에도 정의돼 있지 않아 nil 호출로
+    -- 즉사했다(heliUpdateVolume). 다른 곳과 동일하게 SandboxVars 직접 참조.
+    local dmin, dmax = 0, SandboxVars.PongDu.Heli_Radius + 25
     local dx, dy = hx - pl:getX(), hy - pl:getY()
     local d = math.sqrt(dx * dx + dy * dy)
 
@@ -763,8 +771,11 @@ end
 local DRONE_FLY_ALT     = 3.0     -- 물리 y 고도. iso 층 환산 = y/2.46 -> 약 1.2층.
                                   -- 헬기(8.0)보다 낮아야 "근접 호위" 느낌이 산다.
 local DRONE_YAW_OFF     = 0       -- fbx 전방축 보정(도)
-local DRONE_ALT_PX      = 100     -- 예광탄 원점 고도(px). 헬기가 쓴 비율
-                                  -- (≒86.7px/unit)을 3.0에 적용한 값.
+-- 예광탄 원점 고도(px). 헬기와 같은 환산비(HELI_ALT_PX_PER_UNIT = 86.7)를
+-- DRONE_FLY_ALT 에 적용해 실제 기체가 뜬 높이와 일치시킨다. 기존 100 은
+-- 임의값이라 탄이 기체보다 한참 아래에서 나갔다. FLY_ALT 를 바꾸면 여기도
+-- 자동으로 따라온다.
+local DRONE_ALT_PX      = DRONE_FLY_ALT * 86.7
 local DRONE_APPROACH_MS = 1000
 local DRONE_DEPART_MS   = 1000
 local DRONE_DEPART_DIST = 60      -- 이탈 비행 거리(타일). 1초에 이만큼 = 화면 밖
@@ -776,8 +787,8 @@ local DRONE_TWO_PI      = 6.2831853
 local DRONE_VOL_NEAR    = 0.3167   -- 기존 0.95 의 1/3
 local DRONE_VOL_FAR     = 0.0333   -- 기존 0.10 의 1/3
 -- 사격음(SMG). 헬기 LMG 와 동일하게 발당 트리거가 아니라 교전 구간 루프.
-local DRONE_SMG_VOL_NEAR = 0.85
-local DRONE_SMG_VOL_FAR  = 0.15
+local DRONE_SMG_VOL_NEAR = 0.425   -- 기존 0.85 의 1/2
+local DRONE_SMG_VOL_FAR  = 0.075   -- 기존 0.15 의 1/2
 
 local _drone          = nil   -- { sx, sy, oz, th0, orbitR, orbitMs, periodMs, t0 }
 local _droneVid       = nil
@@ -931,6 +942,13 @@ local function droneBladeTick()
     if prev < 1 then prev = 8 end
     part:setModelVisible("blade" .. prev, false)
     part:setModelVisible("blade" .. _droneBladeStep, true)
+    -- 헬기 heliBladeTick 과 동일하게 update() 로 모델 상태 반영을 강제한다.
+    -- 이게 없으면 BaseVehicle.updateTransform() 이 안 돌아 파트의
+    -- renderTransform 이 직전 프레임 변환에 고정된다. 본체는 매 틱
+    -- setWorldTransform 으로 따라가는데 파트만 뒤처지므로, 공전처럼 회전이
+    -- 빠를수록 블레이드가 크게 어긋났다가 한 바퀴 돌아 자세가 비슷해지면
+    -- 다시 맞아 보인다.
+    pcall(function() v:update() end)
 end
 
 -- 모터음 거리 볼륨. 헬기와 달리 dmax를 detR+50(스폰 거리)로 잡는다 --
@@ -1087,7 +1105,7 @@ local function handleDroneFire(args)
     -- 좌표로 조준한다(저격과 동일).
     local tx, ty, tz = tonumber(args.tx) or 0, tonumber(args.ty) or 0, tonumber(args.tz) or 0
     if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
-    addTracer(ox, oy, oz, tx, ty, tz, DRONE_ALT_PX)
+    addTracer(ox, oy, oz, tx, ty, tz, DRONE_ALT_PX, TRACER_ALPHA_FAINT)
 
     if not z or z:isDead() then return end
 
@@ -1326,6 +1344,16 @@ Events.OnServerCommand.Add(function(module, command, args)
         return
     elseif command == "DroneStop" then
         droneStop("server stop")
+        return
+    elseif command == "DroneExtend" then
+        -- 중첩 후원: 드론을 새로 띄우지 않고 궤도 시간만 늘린다.
+        local addMs = tonumber(args.addMs) or 0
+        if _drone then
+            _drone.orbitMs = _drone.orbitMs + addMs
+        end
+        if _droneEndAt then _droneEndAt = _droneEndAt + addMs end
+        if _droneStopAt then _droneStopAt = _droneStopAt + addMs end
+        print("[PongDu] fire_support/drone: extended +" .. tostring(addMs) .. "ms")
         return
     elseif command == "DroneEngage" then
         droneSmgStart()
