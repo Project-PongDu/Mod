@@ -1626,10 +1626,13 @@ local function droneSuppress(job, zid, now)
     job.suppress = fresh
 end
 
--- 필터는 드론 기준, 정렬은 플레이어 기준. pickSniperTarget(플레이어 최근접)
--- 과도 pickHeliTarget(플레이어 반경 내 랜덤)과도 다른 제3의 규칙이다.
+-- 인식 반경 기준: 예전엔 드론(공전 좌표) 기준이었으나, 저격/헬기와 통일해
+-- 플레이어 기준으로 바꿨다. 드론 파라미터명이 "인식 반경"인데 실제로는
+-- 드론이 계속 움직이는 공전 좌표에서 잰 거라 체감 반경이 매 프레임 바뀌는
+-- 것처럼 느껴졌던 문제도 겸사겸사 해결됨 -- 이제 플레이어 위치 고정 기준.
+-- 필터/정렬 둘 다 플레이어 기준이라 pickSniperTarget과 동일한 규칙이 됐다.
 -- table.sort 는 Kahlua TableLib 미등록이므로 단일 패스 최소값 탐색으로 처리.
-local function pickDroneTarget(job, dx, dy, now)
+local function pickDroneTarget(job, now)
     local ok, cx, cy, cell = pcall(function()
         return job.player:getX(), job.player:getY(), job.player:getCell()
     end)
@@ -1649,11 +1652,9 @@ local function pickDroneTarget(job, dx, dy, now)
         local z = zl:get(i)
         if z and not z:isDead() then
             local zx, zy = z:getX(), z:getY()
-            local ddx, ddy = zx - dx, zy - dy
-            if (ddx * ddx + ddy * ddy) <= dr2 then          -- 드론 기준 인식
-                local pdx, pdy = zx - cx, zy - cy
-                local pd2 = pdx * pdx + pdy * pdy
-
+            local pdx, pdy = zx - cx, zy - cy
+            local pd2 = pdx * pdx + pdy * pdy
+            if pd2 <= dr2 then                              -- 플레이어 기준 인식
                 local low = false
                 local okf, st = pcall(function() return z:getRealState() end)
                 if okf and DRONE_REACTING_STATES[st] then
@@ -1713,7 +1714,7 @@ local function processDroneJobs()
             -- 사격은 ORBIT 단계에서만. 접근/이탈 중엔 쏘지 않는다.
             if phase == "ORBIT" and now >= job.nextAt then
                 job.nextAt = now + job.iv
-                local z = pickDroneTarget(job, dx, dy, now)
+                local z = pickDroneTarget(job, now)
                 -- 교전 상태 전환. 헬기와 달리 히스테리시스를 두지 않는다 --
                 -- 드론은 락온을 매 발 재선정하므로 대상 유무만 보면 된다.
                 local players0 = getOnlinePlayers()
