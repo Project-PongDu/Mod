@@ -1601,7 +1601,6 @@ local DRONE_REACTING_STATES = {
     ["falldown"]          = true,
     ["onground"]          = true,
     ["getup"]             = true,
-    ["bumped"]            = true,
 }
 
 -- realState 는 "클라가 반응을 시작한 뒤"에야 서버에 도착한다. 그 사이
