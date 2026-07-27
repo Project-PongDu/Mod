@@ -499,15 +499,15 @@ end
 --  BH 모드와 동일한 리플렉션 텔레포트(setWorldTransform)로 경로를 비행시킨다.
 --
 --  MP 동기화 구조 (PZ-Library Java 검증 완료):
---   ① 서버: addVehicleDebug 스폰 -> authorizationServerCollide(pid, true)로
---      대상 클라에 LocalCollide 권한 강제 부여. serverUpdate가 연결별 상태
+--   ① 서버: addVehicleDebug 스폰 -> authorizationChanged(player)로
+--      대상 클라에 Local 권한 부여. serverUpdate가 연결별 상태
 --      비교로 감지해 VehicleAuthorizationPacket을 자동 브로드캐스트한다.
 --   ② 파일럿 클라: hasAuthorization=true -> 매 틱 이 파일이 경로 보간 좌표로
 --      텔레포트 -> 엔진이 150ms 간격 sendPhysic(패킷9) 스트림 -> 서버 릴레이.
 --   ③ 타 클라: VehicleInterpolation 버퍼로 보간 수신 (MP에서 달리는 모든
 --      차량이 쓰는 검증된 경로 -- 별도 코드 불필요).
---   ④ LocalCollide 자동 회수는 "transform이 1초간 불변"일 때만 발동
---      (WorldSimulation.java:140) -- 비행 중엔 매 틱 변하므로 안 뺏긴다.
+--   ④ 1초 무변동 자동 회수(WorldSimulation.java:140)는 LocalCollide 전용이라
+--      Local 권한은 애초에 대상이 아니고, 비행 중엔 어차피 매 틱 변한다.
 --   ⑤ 종료: 서버 permanentlyRemove() -> 제거 패킷(8) 브로드캐스트.
 --
 --  경로/타이밍은 기존 그대로 HeliStart의 (ax,ay)->(bx,by) + elapsed/total을
@@ -540,10 +540,16 @@ local function heliPathPos()
     return x, y, _heliPath.oz
 end
 
+-- VehicleID 는 서버에서 재활용된다(VehicleIDMap.remove -> freeID 스택 ->
+-- allocateID 가 LIFO 로 pop). 텔포 등으로 헬기 청크가 언로드되면 그 ID 가
+-- 곧바로 다른 바닐라 차량에 넘어가고, _heliVid 로 그 차가 잡히면 파일럿
+-- 틱이 남의 차를 비행경로로 끌고 간다. 스크립트명으로 반드시 걸러낸다.
 local function findHeliVehicle()
     if not _heliVid then return nil end
     local ok, v = pcall(function() return getVehicleById(_heliVid) end)
-    if ok and v then return v end
+    if not ok or not v then return nil end
+    local okS, sn = pcall(function() return v:getScriptName() end)
+    if okS and sn == "Base.PongDuHeli" then return v end
     return nil
 end
 
@@ -760,7 +766,7 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 --  드론 실체 (Base.PongDuDrone 차량)
 --
---  헬기와 공유하는 것: 서버 addVehicleDebug 스폰 + authorizationServerCollide
+--  헬기와 공유하는 것: 서버 addVehicleDebug 스폰 + authorizationChanged
 --  물리 권한 위임 + 파일럿 클라의 리플렉션 텔레포트(setWorldTransform).
 --  MP 동기화 구조는 헬기 섹션 주석과 완전히 동일하므로 반복하지 않는다.
 --
@@ -863,10 +869,15 @@ local function droneComputePos()
            ey + math.cos(thE) * DRONE_DEPART_DIST * t, _drone.oz, "DEPART", thE
 end
 
+-- 헬기 findHeliVehicle 과 동일한 ID 재활용 가드. 실측으로 vid=255 가
+-- Base.PongDuDrone -> Base.Van 으로 25초 만에 넘어가 그 밴이 공전 궤도에
+-- 실려 떠다니는 사고가 확인됐다.
 local function findDroneVehicle()
     if not _droneVid then return nil end
     local ok, v = pcall(function() return getVehicleById(_droneVid) end)
-    if ok and v then return v end
+    if not ok or not v then return nil end
+    local okS, sn = pcall(function() return v:getScriptName() end)
+    if okS and sn == "Base.PongDuDrone" then return v end
     return nil
 end
 

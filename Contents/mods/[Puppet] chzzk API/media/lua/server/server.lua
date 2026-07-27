@@ -566,7 +566,7 @@ local HELI_MISS_THRESHOLD = 3
 
 -- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
 -- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
--- 클라에 LocalCollide 물리 권한을 강제 부여(authorizationServerCollide) --
+-- 클라에 Local 물리 권한을 부여(authorizationChanged) --
 -- serverUpdate가 연결별 상태 비교로 감지해 VehicleAuthorizationPacket을 자동
 -- 브로드캐스트하므로 별도 전송 코드가 필요 없다. 이후 이동은 파일럿 클라의
 -- firesupport.lua가 텔레포트로 수행하고 엔진 물리 스트림이 전 클라에 보간
@@ -629,6 +629,37 @@ local function heliRemoveVehicle(job, reason)
         print("[PongDu][Heli] vehicle remove FAILED err=" .. tostring(err))
     end
     job.vehicle, job.vid, job.pilot = nil, nil, nil
+end
+
+-- ── 소유 플레이어 텔포 감지 (헬기/드론 공용) ──────────────────────────────
+--
+-- [왜 필요한가]
+--   실차량은 서버가 스폰만 하고 이동은 파일럿 클라의 setWorldTransform 이
+--   전담한다. 플레이어가 텔포하면 실차량은 텔포 전 위치에 남고, 그 청크가
+--   언로드되는 순간 VehicleManager.unregisterVehicle -> VehicleIDMap.remove 로
+--   VehicleID 가 freeID 스택에 반납된다. 스택은 LIFO 라 도착지에서 스트리밍
+--   되는 바닐라 차량이 방금 반납된 그 ID 를 그대로 물려받고, 클라의
+--   _heliVid/_droneVid 는 안 바뀌므로 getVehicleById() 가 그 차를 반환한다
+--   -- 파일럿 틱이 남의 차를 상공으로 텔레포트시키는 사고가 난다.
+--   (실측: vid=255 가 Base.PongDuDrone -> Base.Van 으로 25초 만에 넘어감)
+--
+--   클라 쪽 getScriptName() 가드가 최종 방어선이지만, 애초에 소유자가 텔포
+--   하면 job 을 유지할 이유가 없으므로 여기서 끊는다.
+--
+-- [왜 좌표 델타인가]
+--   텔포는 teleport.lua / randomteleport.lua 양쪽에 호출점이 5개나 흩어져
+--   있고 전부 클라 로컬 setX 다. 훅을 거는 대신 서버에서 좌표 불연속만
+--   보면 admin 텔포나 타 모드 텔포까지 전부 잡힌다.
+local FS_TELEPORT_DIST = 30   -- 1틱 이동량이 이 값(타일)을 넘으면 순간이동.
+                              -- 걷기/달리기/차량 최고속 어느 쪽도 1틱에 못 넘는다.
+
+local function isOwnerTeleported(job, px, py)
+    if not px then return false end
+    local lx, ly = job.lastPx, job.lastPy
+    job.lastPx, job.lastPy = px, py
+    if not lx then return false end   -- 첫 틱은 기준점만 잡고 통과
+    local dx, dy = px - lx, py - ly
+    return (dx * dx + dy * dy) > (FS_TELEPORT_DIST * FS_TELEPORT_DIST)
 end
 
 -- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
@@ -765,7 +796,18 @@ local function processHeliJobs()
     local now = getTimestampMs()
     for i = #_heliJobs, 1, -1 do
         local job = _heliJobs[i]
-        if now >= job.endAt then
+        local okP, px, py = pcall(function()
+            return job.player:getX(), job.player:getY()
+        end)
+        if okP and isOwnerTeleported(job, px, py) then
+            heliRemoveVehicle(job, "owner teleported")
+            table.remove(_heliJobs, i)
+            local playersT = getOnlinePlayers()
+            for k = 0, playersT:size() - 1 do
+                sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { t = 1 })
+            end
+            print("[PongDu][Heli] job aborted (owner teleported)")
+        elseif now >= job.endAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
             local players = getOnlinePlayers()
@@ -1492,7 +1534,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
                 if v2 then
                     ex.vid = v2:getId()
                     pcall(function()
-                        v2:authorizationServerCollide(player:getOnlineID(), true)
+                        v2:authorizationChanged(player)
                     end)
                 end
             end
@@ -1538,12 +1580,13 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
     if v then
         job.vehicle = v
         local vid = v:getId()
-        -- 헬기와 동일: 대상 클라에 LocalCollide 물리 권한을 강제 부여해
-        -- 그 클라가 텔레포트로 비행시킨다.
-        local pid = player:getOnlineID()
-        local ok, err = pcall(function() v:authorizationServerCollide(pid, true) end)
+        -- 헬기와 동일: 대상 클라에 Local 물리 권한을 부여해 그 클라가
+        -- 텔레포트로 비행시킨다. authorizationServerCollide(short,boolean)는
+        -- Kahlua 가 primitive short 인자를 변환 못해 항상 RuntimeException 이
+        -- 난다(server.lua:605 헬기 쪽 주석 참조) -- authorizationChanged 사용.
+        local ok, err = pcall(function() v:authorizationChanged(player) end)
         if not ok then
-            print("[PongDu][Drone] authorizationServerCollide FAILED err=" .. tostring(err))
+            print("[PongDu][Drone] authorization grant FAILED err=" .. tostring(err))
         end
         job.vid = vid
     end
@@ -1680,7 +1723,17 @@ end
 local function droneFinish(job, reason)
     if job.vid then
         local ok, v = pcall(function() return getVehicleById(job.vid) end)
-        if ok and v then pcall(function() v:permanentlyRemove() end) end
+        if ok and v then
+            -- VehicleID 재활용 대비(isOwnerTeleported 주석 참조). 검증 없이
+            -- 지우면 같은 ID 를 물려받은 남의 바닐라 차량을 영구 삭제한다.
+            local okS, sn = pcall(function() return v:getScriptName() end)
+            if okS and sn == "Base.PongDuDrone" then
+                pcall(function() v:permanentlyRemove() end)
+            else
+                print("[PongDu][Drone] finish: vid " .. tostring(job.vid)
+                    .. " now resolves to " .. tostring(sn) .. " -- remove skipped")
+            end
+        end
     end
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
@@ -1703,6 +1756,9 @@ local function processDroneJobs()
         end)
         if not alive then
             droneFinish(job, "player gone")
+            table.remove(_droneJobs, i)
+        elseif isOwnerTeleported(job, cx, cy) then
+            droneFinish(job, "owner teleported")
             table.remove(_droneJobs, i)
         elseif now >= job.endAt then
             droneFinish(job, "duration elapsed")
