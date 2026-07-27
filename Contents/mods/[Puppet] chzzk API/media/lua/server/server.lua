@@ -662,16 +662,79 @@ local function isOwnerTeleported(job, px, py)
     return (dx * dx + dy * dy) > (FS_TELEPORT_DIST * FS_TELEPORT_DIST)
 end
 
--- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만든다. elapsed/total로
--- 진행률을 넘기면 클라는 자기 로컬 시계 기준으로 이어서 보간할 수 있다.
+-- ── leg(경로 구간)와 expiry(체류 시간) 분리 ────────────────────────────────
+--
+-- job.startAt/endAt = 현재 leg 하나의 A->B 보간 구간. 길이는 항상 job.legDur라
+--   중첩 도네가 몇 번 쌓여도 헬기 비행 속도가 변하지 않는다.
+-- job.expireAt      = 헬기가 실제로 떠나는 시각. 중첩 도네는 여기에만 누적된다.
+--
+-- 예전에는 startAt/endAt이 만료 시각과 경로 보간 파라미터를 겸했다. 그래서
+-- 시간을 누적하면 같은 거리를 더 긴 시간에 걸쳐 날아 헬기가 그만큼 느려졌고,
+-- 그걸 피하려고 중첩 시 시간을 누적하지 않고 리셋해버렸다(스택해도 30초 고정).
+-- 두 역할을 분리하면서 누적/속도 유지 양쪽을 다 만족시킨다.
+
+-- 새 leg 생성. (fx,fy)에서 출발해, 플레이어 기준 그 지점의 방위각에서 turn만큼
+-- 돌린 방향의 반경 D 원 위 지점을 향한다. 실패(플레이어 무효) 시 false 반환.
+--
+-- turn 값에 따라 성격이 완전히 달라진다:
+--   HELI_TURN_ROLLOVER(180도 ±30도) -- 원의 반대편으로 건너가므로 경로가 플레이어
+--     머리 위/근처를 통과한다. 자연 순회용. 최초 경로와 같은 기하다.
+--   HELI_TURN_REROUTE(90~150도)      -- 원 위의 현(chord)이라 플레이어와 최근접이
+--     0.26D~0.71D로 벌어진다. 대신 꺾이는 게 확실히 보인다. 도네 중첩 급선회용.
+-- 롤오버에 REROUTE 각을 쓰면 첫 leg 이후 헬기가 머리 위를 영영 안 지나가고
+-- 외곽만 돌게 되므로 반드시 구분해서 쓸 것.
+local function heliRandTurnRollover()
+    return 3.1416 + (ZombRand(105) - 52) / 100.0       -- 180도 ±30도
+end
+local function heliRandTurnReroute()
+    local turn = 1.57 + ZombRand(105) / 100.0          -- 90~150도
+    if ZombRand(2) == 0 then turn = -turn end
+    return turn
+end
+
+local function heliNewLeg(job, fx, fy, turn)
+    local okP, pcx, pcy, pz = pcall(function()
+        return job.player:getX(), job.player:getY(), job.player:getZ()
+    end)
+    if not okP or not pcx then return false end
+
+    local D      = job.r + 50
+    local curAng = math.atan2(fy - pcy, fx - pcx)
+    local newAng = curAng + turn
+
+    local now = getTimestampMs()
+    job.ax, job.ay = fx, fy
+    job.bx, job.by = pcx + math.cos(newAng) * D, pcy + math.sin(newAng) * D
+    job.oz         = pz
+    job.startAt    = now
+    job.endAt      = now + job.legDur
+    return true
+end
+
+-- 현재 leg 위의 헬기 위치(A->B 선형 보간).
+local function heliCurrentPos(job)
+    local t = (getTimestampMs() - job.startAt) / math.max(job.endAt - job.startAt, 1)
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    return job.ax + (job.bx - job.ax) * t, job.ay + (job.by - job.ay) * t
+end
+
+-- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만들어 전 클라에 보낸다.
+-- elapsed/total은 "현재 leg" 기준이라 클라가 자기 로컬 시계로 이어서 보간할 수
+-- 있고, remain은 "전체 체류 시간" 기준이라 leg가 갈릴 때마다 남은시간 UI와
+-- 사운드 자체 데드라인이 리셋되지 않는다.
 -- vid/pilot: 파일럿 클라가 어느 차량을 몰지 식별하는 키.
-local function heliStartPayload(job, remainMs)
-    return {
-        remain = remainMs,
+local function heliBroadcastStart(job)
+    local now = getTimestampMs()
+    local payload = {
+        remain = job.expireAt - now,
         ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
-        elapsed = getTimestampMs() - job.startAt, total = job.endAt - job.startAt,
+        elapsed = now - job.startAt, total = job.endAt - job.startAt,
         vid = job.vid, pilot = job.pilot,
     }
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
+    end
 end
 
 DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
@@ -682,34 +745,24 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
     local sender = data["sender"] or ""
     local D = r + 50
 
-    -- 중첩: 기존 job이 있으면 현재 위치 A'에서 새 랜덤 B'로 즉시 급선회.
+    -- 중첩: 기존 job이 있으면 체류 시간(expireAt)에 dur을 누적하고, 현재 위치
+    -- A'에서 새 랜덤 B'로 즉시 급선회(leg 교체)한다. 시간은 expireAt에만 쌓이고
+    -- leg 길이는 legDur 그대로라 몇 번을 겹쳐도 비행 속도는 변하지 않는다.
     for i = 1, #_heliJobs do
         local job = _heliJobs[i]
         if job.player == player then
             local now2 = getTimestampMs()
 
-            -- 기존 경로 보간으로 "현재 위치"를 구해 새 시작점 A'로 삼는다.
-            local ot = (now2 - job.startAt) / math.max(job.endAt - job.startAt, 1)
-            if ot < 0 then ot = 0 elseif ot > 1 then ot = 1 end
-            local curX = job.ax + (job.bx - job.ax) * ot
-            local curY = job.ay + (job.by - job.ay) * ot
-
-            -- 새 B'는 플레이어 기준 반경 D 원 위 랜덤 각도(현재 위치의 플레이어
-            -- 기준 각도와 최소 ~90도 이상 벌어지게 해서 급선회가 눈에 띄게 함).
-            local pcx, pcy = player:getX(), player:getY()
-            local curAng   = math.atan2(curY - pcy, curX - pcx)
-            local turn     = 1.57 + ZombRand(105) / 100.0        -- 90~150도
-            if ZombRand(2) == 0 then turn = -turn end
-            local newAng   = curAng + turn
-            local nbx, nby = pcx + math.cos(newAng) * D, pcy + math.sin(newAng) * D
+            -- 기존 leg 보간으로 "현재 위치"를 구해 새 leg의 시작점 A'로 삼는다.
+            local curX, curY = heliCurrentPos(job)
 
             job.r, job.iv, job.kc, job.sender = r, iv, kc, sender
             job.missStreak = 0
-            job.ax, job.ay = curX, curY
-            job.bx, job.by = nbx, nby
-            job.oz         = player:getZ()
-            job.startAt    = now2
-            job.endAt      = now2 + dur
+            job.legDur     = dur
+            -- 이미 만료 시각을 지난 job(같은 틱에 정리 예정)이면 now2 기준으로
+            -- 눕혀서 과거 시각에 누적되는 걸 막는다.
+            job.expireAt   = math.max(job.expireAt, now2) + dur
+            heliNewLeg(job, curX, curY, heliRandTurnReroute())
 
             -- 실차량: 최초 스폰이 실패했었다면 이번 발동에서 재시도.
             -- 있으면 권한만 재부여(회수됐을 가능성 대비 -- 부여는 멱등이다).
@@ -721,15 +774,11 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
                 end)
             end
 
-            local payload  = heliStartPayload(job, dur)
-            local players  = getOnlinePlayers()
-            for k = 0, players:size() - 1 do
-                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
-            end
+            heliBroadcastStart(job)
             print(string.format(
-                "[PongDu][Heli] job REROUTED dur=%dms A'=%d,%d B'=%d,%d sender=%s",
-                dur, math.floor(curX), math.floor(curY),
-                math.floor(nbx), math.floor(nby), tostring(sender)))
+                "[PongDu][Heli] job REROUTED +%dms remain=%dms A'=%d,%d B'=%d,%d sender=%s",
+                dur, job.expireAt - now2, math.floor(curX), math.floor(curY),
+                math.floor(job.bx), math.floor(job.by), tostring(sender)))
             return
         end
     end
@@ -749,17 +798,14 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         player = player, r = r, iv = iv, kc = kc, sender = sender,
         ax = ax, ay = ay, bx = bx, by = by, oz = player:getZ(),
         startAt = now, endAt = now + dur, nextAt = now,
+        legDur = dur, expireAt = now + dur,
         missStreak = 0,
     }
     _heliJobs[#_heliJobs + 1] = job
 
     heliSpawnVehicle(job)
 
-    local payload = heliStartPayload(job, dur)
-    local players = getOnlinePlayers()
-    for k = 0, players:size() - 1 do
-        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStart", payload)
-    end
+    heliBroadcastStart(job)
     print(string.format(
         "[PongDu][Heli] job queued dur=%dms r=%d iv=%d kc=%d%% A=%d,%d B=%d,%d sender=%s",
         dur, r, iv, kc, math.floor(ax), math.floor(ay),
@@ -799,7 +845,25 @@ local function processHeliJobs()
         local okP, px, py = pcall(function()
             return job.player:getX(), job.player:getY()
         end)
-        if okP and isOwnerTeleported(job, px, py) then
+        -- isOwnerTeleported는 lastPx/lastPy를 갱신하는 부수효과가 있어 매 틱
+        -- 반드시 호출돼야 한다. 분기보다 먼저 평가해두는 이유다.
+        local teleported = okP and isOwnerTeleported(job, px, py)
+
+        -- leg 롤오버: 헬기가 B에 도달했는데(now >= endAt) 아직 체류 시간이
+        -- 남았으면, A = 기존 B로 이어서 새 leg를 만든다. 시작점이 직전 도착점과
+        -- 같으므로 위치는 연속이고 방향만 꺾인다 -- 순간이동이 아니다.
+        if not teleported and now < job.expireAt and now >= job.endAt then
+            if heliNewLeg(job, job.bx, job.by, heliRandTurnRollover()) then
+                heliBroadcastStart(job)
+                print(string.format(
+                    "[PongDu][Heli] leg ROLLOVER A=%d,%d B=%d,%d remain=%dms",
+                    math.floor(job.ax), math.floor(job.ay),
+                    math.floor(job.bx), math.floor(job.by),
+                    job.expireAt - now))
+            end
+        end
+
+        if teleported then
             heliRemoveVehicle(job, "owner teleported")
             table.remove(_heliJobs, i)
             local playersT = getOnlinePlayers()
@@ -807,7 +871,7 @@ local function processHeliJobs()
                 sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { t = 1 })
             end
             print("[PongDu][Heli] job aborted (owner teleported)")
-        elseif now >= job.endAt then
+        elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
             local players = getOnlinePlayers()
@@ -816,12 +880,9 @@ local function processHeliJobs()
             end
             print("[PongDu][Heli] job finished")
         elseif now >= job.nextAt then
-            -- 헬기 현재 위치: A -> B 선형 보간 (연장돼도 endAt 기준이라 왕복 없이
-            -- 남은 시간 동안 더 천천히 B에 도달하는 정도의 차이만 생긴다)
-            local t  = (now - job.startAt) / (job.endAt - job.startAt)
-            if t > 1 then t = 1 end
-            local hx = job.ax + (job.bx - job.ax) * t
-            local hy = job.ay + (job.by - job.ay) * t
+            -- 헬기 현재 위치: 현재 leg의 A -> B 선형 보간. leg 롤오버가 위에서
+            -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
+            local hx, hy = heliCurrentPos(job)
 
             local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender }
 
