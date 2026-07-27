@@ -1612,7 +1612,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         math.floor(sx), math.floor(sy), tostring(job.vid), tostring(sender)))
 end
 
--- ── 후순위 판정: 이미 이 발/이전 발로 처리된 좀비 ──────────────────────────
+-- ── 위협도 우선순위 판정 (realState 기반) ──────────────────────────────────
 --
 -- [왜 isOnFloor() 를 못 쓰는가]
 --   getBooleanVariables() 는 onFloor 를 bit 256 에 실어 보내지만, 받는 쪽
@@ -1633,6 +1633,15 @@ end
 --   networkAI.extraUpdate() 를 불러 소유 클라가 200~3800ms 타이머를 기다리지
 --   않고 즉시 패킷을 보낸다.
 --
+-- [우선순위를 나누는 이유]
+--   realState 를 후순위(반응/제압 중) 판정에만 쓰다가, 위협도가 반대 방향인
+--   상태 -- 물기 판정 중(attack) / 곧 물 것(lunge) -- 도 같은 값으로 구분
+--   가능하다는 걸 이용해 최우선군을 추가했다. attack/lunge 는
+--   walktoward -> lunge -> face-target -> attack 순으로 진행하는 좀비 AI의
+--   정규 경로이며(actiongroups/zombie/lunge/transitions.xml 의 bAttack &&
+--   isFacingTarget 조건), 이 상태로 관측됐다는 건 지금 위협이 실재한다는
+--   뜻이라 방금 쐈다는 이유의 억제(suppress)보다 우선한다.
+--
 --   크롤러/fakeDead 는 여기 없다 -- 구 코드와 동일하게 "정상 사격 대상"으로
 --   둔다(활동 중인 위협이므로). 크롤러가 피격 반응 중이면 zombie-crawler
 --   액션그룹도 같은 이름의 상태를 쓰므로 자연히 후순위로 빠진다.
@@ -1646,6 +1655,23 @@ local DRONE_REACTING_STATES = {
     ["getup"]             = true,
 }
 
+-- 위협도 최우선군: 실제로 무는 모션(공격 판정) 중인 좀비. bAttack &&
+-- isFacingTarget 조건으로 lunge 에서 진입하며(actiongroups/zombie/lunge/
+-- transitions.xml), bDead/bOnFloor/bStaggerBack 외엔 못 빠져나간다 --
+-- 이 상태로 관측됐다는 건 지금 이 순간 공격 판정이 살아있다는 뜻이다.
+local DRONE_ATTACKING_STATES = {
+    ["attack"]         = true,
+    ["attack-network"] = true,
+}
+
+-- 위협도 차순위군: 대상에게 근접해 팔을 뻗은 채 다가가는 중(bLunge).
+-- walktoward/idle/pathfind 세 상태 전부 이 트리거 하나로 lunge 에 들어오며,
+-- 다음 틱 얼굴이 맞으면 곧장 attack 으로 넘어간다 -- "곧 물 것"의 신호.
+local DRONE_LUNGING_STATES = {
+    ["lunge"]         = true,
+    ["lunge-network"] = true,
+}
+
 -- realState 는 "클라가 반응을 시작한 뒤"에야 서버에 도착한다. 그 사이
 -- (서버 발사 -> 클라 수신 -> knockDown -> anim 전환 -> 클라->서버 패킷)
 -- 최소 1왕복이 비어 있고, iv 가 50ms(디폴트)면 그 구간에 같은 좀비에게
@@ -1654,6 +1680,10 @@ local DRONE_REACTING_STATES = {
 -- 실제 기상 시간까지 커버하는 건 위 realState 체크 쪽이다.
 -- 킬도 같은 이유로 억제한다: becomeCorpse 는 소유 클라에서 일어나고
 -- 서버의 isDead() 는 시체 sync 이후에나 true 가 된다.
+--
+-- 주의: 이 억제는 "아직 못 받은 상태"에 대한 추측일 뿐이라, realState 로
+-- attack/lunge 가 실제로 확인된 좀비에는 적용하지 않는다 -- 방금 쐈다는
+-- 이유로 지금 물고 있는 놈의 우선순위를 낮추면 안 된다.
 local DRONE_SUPPRESS_MS = 1000
 
 -- 만료 항목 정리 + 신규 등록. pairs 순회 중 t[k]=nil 의 안전성이 Kahlua
@@ -1674,6 +1704,12 @@ end
 -- 것처럼 느껴졌던 문제도 겸사겸사 해결됨 -- 이제 플레이어 위치 고정 기준.
 -- 필터/정렬 둘 다 플레이어 기준이라 pickSniperTarget과 동일한 규칙이 됐다.
 -- table.sort 는 Kahlua TableLib 미등록이므로 단일 패스 최소값 탐색으로 처리.
+--
+-- 4단계 위협도 우선순위(각 군 내에서는 플레이어 최근접):
+--   1) bestA 공격 판정 중(attack/attack-network)      -- 지금 물고 있음
+--   2) bestL 돌진 접근 중(lunge/lunge-network)          -- 곧 물 것
+--   3) best  그 외 정상 상태(걷기/추적 등)
+--   4) bestD 반응/제압 중이거나 방금 처리한 대상(억제창) -- 지금 쏴봤자 낭비
 local function pickDroneTarget(job, now)
     local ok, cx, cy, cell = pcall(function()
         return job.player:getX(), job.player:getY(), job.player:getCell()
@@ -1682,12 +1718,10 @@ local function pickDroneTarget(job, now)
     local zl = cell and cell:getZombieList()
     if not zl then return nil end
 
-    -- 이미 처리된(반응 중이거나 방금 넘긴/죽인) 좀비는 후순위다. 서 있는 놈을
-    -- 우선 전부 처리하고, 그런 대상이 하나도 없을 때만 후순위군을 쏜다
-    -- (후순위군을 아예 제외하면 반경 내에 한 마리만 있을 때 사격이 멈춘다).
-    -- 두 후보군을 한 번의 순회로 같이 모아 두 번 도는 비용을 없앤다.
     local dr2 = job.dr * job.dr
     local sup = job.suppress
+    local bestA, bestAPD2 = nil, nil     -- 공격 판정 중
+    local bestL, bestLPD2 = nil, nil     -- 돌진 접근 중
     local best,  bestPD2  = nil, nil     -- 정상 사격 대상
     local bestD, bestDPD2 = nil, nil     -- 후순위 대상
     for i = 0, zl:size() - 1 do
@@ -1697,26 +1731,40 @@ local function pickDroneTarget(job, now)
             local pdx, pdy = zx - cx, zy - cy
             local pd2 = pdx * pdx + pdy * pdy
             if pd2 <= dr2 then                              -- 플레이어 기준 인식
-                local low = false
                 local okf, st = pcall(function() return z:getRealState() end)
-                if okf and DRONE_REACTING_STATES[st] then
-                    low = true
-                else
-                    local exp = sup[z:getOnlineID()]
-                    if exp and now < exp then low = true end
-                end
+                st = okf and st or nil
 
-                if low then
-                    if (not bestDPD2) or pd2 < bestDPD2 then
-                        bestD, bestDPD2 = z, pd2
+                if st and DRONE_ATTACKING_STATES[st] then
+                    if (not bestAPD2) or pd2 < bestAPD2 then
+                        bestA, bestAPD2 = z, pd2
                     end
-                elseif (not bestPD2) or pd2 < bestPD2 then  -- 플레이어 기준 최근접
-                    best, bestPD2 = z, pd2
+                elseif st and DRONE_LUNGING_STATES[st] then
+                    if (not bestLPD2) or pd2 < bestLPD2 then
+                        bestL, bestLPD2 = z, pd2
+                    end
+                else
+                    local low = false
+                    if st and DRONE_REACTING_STATES[st] then
+                        low = true
+                    else
+                        local exp = sup[z:getOnlineID()]
+                        if exp and now < exp then low = true end
+                    end
+
+                    if low then
+                        if (not bestDPD2) or pd2 < bestDPD2 then
+                            bestD, bestDPD2 = z, pd2
+                        end
+                    elseif (not bestPD2) or pd2 < bestPD2 then  -- 플레이어 기준 최근접
+                        best, bestPD2 = z, pd2
+                    end
                 end
             end
         end
     end
-    if best then return best end
+    if bestA then return bestA end
+    if bestL then return bestL end
+    if best  then return best  end
     return bestD
 end
 
