@@ -1,6 +1,19 @@
 module Base
 {
 
+    /* Syringe_* 4종(전투자극제/광범위 항생제/모르핀/응급 재생) 주사 시 공통 재생.
+       23a2cddc59fe561bba91dd21a3759f1ee96207c0 에서 에셋만 추가되고 등록은 안 돼 있던 것.
+       syringe.lua PongDuSyringeAction:start()에서 재생. */
+    sound pongdu_syringe_inject
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/SFX_Inject.wav,
+        }
+    }
+
     sound serum_inject
     {
         category = Object,
