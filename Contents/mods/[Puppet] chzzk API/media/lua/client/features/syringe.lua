@@ -1,39 +1,39 @@
 -- syringe.lua : 전투자극제 / 광범위 항생제 / 모르핀 / 응급 재생 주사기
 --
--- AdrenalineSyringe(전투자극제) / DoxycyclineSyringe(광범위 항생제)는
+-- Syringe_Adrenaline(전투자극제) / Syringe_Doxycycline(광범위 항생제)는
 -- FirstAidOverhaul 모드(BB_FAO_ISTimedAction / BB_FAO_ISFillInventoryContextMenu)에서
 -- 이식. 원본은 EmptySyringe -> 각종 소재 조합으로 제작하는 레시피 체인이 있었으나,
 -- 퐁듀는 후원으로 완성품을 바로 지급하는 구조라 레시피 전체를 제외했다. 그에 따라
 -- "사용 후 빈 주사기 반환" 로직도 함께 제외한다(레시피가 없으면 빈 주사기가 아무
 -- 데도 못 쓰이는 죽은 아이템이 되므로).
 --
--- AdrenalineSyringe(전투자극제) : 피로/지구력 즉시 회복, 배고픔/갈증/패닉 증가.
---                                 빈사(HP<1) 시 소량 회복.
--- DoxycyclineSyringe(광범위 항생제) : 일반 질병(Sickness) + 식중독 + 상처 세균감염 치료.
---                                     좀비 감염(Knox Infection, bitten/IsInfected 계열)은
---                                     건드리지 않는다.
+-- Syringe_Adrenaline(전투자극제) : 피로/지구력 즉시 회복, 배고픔/갈증/패닉 증가.
+--                                  빈사(HP<1) 시 소량 회복.
+-- Syringe_Doxycycline(광범위 항생제) : 일반 질병(Sickness) + 식중독 + 상처 세균감염 치료.
+--                                      좀비 감염(Knox Infection, bitten/IsInfected 계열)은
+--                                      건드리지 않는다.
 --
--- MorphineSyringe(모르핀) / EmergencyRegenSyringe(응급 재생)은 신규 추가. 둘 다
+-- Syringe_Morphine(모르핀) / Syringe_Emergency(응급 재생)은 신규 추가. 둘 다
 -- "지속시간" 개념이 있는데, 바닐라 PainEffect/PainReduction(BodyDamage.java)은
 -- 프레임 단위로 게임속도 배율에 맞춰 감쇠하는 구조라 "정확히 인게임 N시간"을
 -- 보장하려면 상수를 역산해야 하고 게임 패치로 조용히 틀어질 위험이 있다.
 -- 대신 만료 시각(인게임 ms)을 player modData에 직접 저장하고 Events.EveryOneMinute로
--- 매 틱 강제 재적용하는 방식을 쓴다. 바닐라 내부 상수에
--- 의존하지 않아 인게임 시간 계산이 항상 정확하다.
+-- 매 틱 강제 재적용하는 방식을 쓴다. 바닐라 내부 상수에 의존하지 않아 인게임 시간
+-- 계산이 항상 정확하다.
 --
--- MorphineSyringe : 즉시 통증 0 + 2인게임시간 동안 통증 억제.
---                   같은 시간 동안 "팔 부상으로 인한 근접 공격속도 감소"도 무시한다.
---                   (바닐라 진통제와 차별화되는 지점)
--- EmergencyRegenSyringe : 즉시 회복은 없다. 주사 시점의 체력을 바닥값(floor)으로
---                         잡고, 지속시간 동안 "상처 드레인"으로 인한 체력 감소만
---                         되돌린다. 자연회복은 그대로 반영되고(바닥값도 같이 상승),
---                         새로 입는 급성 피해도 그대로 들어간다(바닥값도 같이 하락).
+-- Syringe_Morphine  : 즉시 통증 0 + 2인게임시간 동안 통증 억제.
+--                     같은 시간 동안 "팔 부상으로 인한 근접 공격속도 감소"도 무시한다.
+-- Syringe_Emergency : 즉시 회복은 없다. 주사 시점의 "부위별" 체력을 바닥값으로 잡고,
+--                     지속시간 동안 상처 드레인으로 인한 감소만 되돌린다.
+--                     자연회복은 그대로 반영(바닥값 동반 상승), 급성 피해도 그대로
+--                     들어간다(바닥값 동반 하락). 녹스 감염/저체온 상한은 예외로
+--                     두어 그쪽으로는 정상적으로 죽는다.
 
 local SYRINGE_TYPES = {
-    ["t3chzzkDonation.Syringe_Adrenaline"]       = true,
-    ["t3chzzkDonation.Syringe_Doxycycline"]      = true,
-    ["t3chzzkDonation.Syringe_Morphine"]         = true,
-    ["t3chzzkDonation.Syringe_Emergency"]        = true,
+    ["t3chzzkDonation.Syringe_Adrenaline"]  = true,
+    ["t3chzzkDonation.Syringe_Doxycycline"] = true,
+    ["t3chzzkDonation.Syringe_Morphine"]    = true,
+    ["t3chzzkDonation.Syringe_Emergency"]   = true,
 }
 
 local MORPHINE_DURATION_HOURS = 2
@@ -42,30 +42,49 @@ local REGEN_DURATION_HOURS    = 0.5    -- 테스트값. 원래 설계는 1
 -- 바닐라 진통제(IsoGameCharacter.PainMeds)가 쓰는 값과 동일.
 -- painEffect는 "남은 틱 수" 카운터라 인게임 시간과 직결되지 않으므로 지속시간
 -- 판정에는 쓰지 않는다. 우리 만료 시각(인게임 ms)이 남아있는 동안 주기적으로
--- 다시 채워 넣기만 한다. 5400틱이면 인게임 30분 이상 버티므로 인게임 1분마다
--- 갱신하면 끊길 일이 없다.
+-- 다시 채워 넣기만 한다.
 local MORPHINE_PAIN_EFFECT_TICKS = 5400
 
-local MORPHINE_EXPIRE_KEY   = "PongDu_MorphineExpireMS"
-local MORPHINE_LOGGED_KEY   = "PongDu_MorphineSpeedLogged"
-local REGEN_EXPIRE_KEY      = "PongDu_RegenExpireMS"
-local REGEN_FLOOR_KEY       = "PongDu_RegenFloorHP"
-local REGEN_FLOOR_REBASE_KEY = "PongDu_RegenFloorRebase"
+local MORPHINE_EXPIRE_KEY = "PongDu_MorphineExpireMS"
+local MORPHINE_LOGGED_KEY = "PongDu_MorphineSpeedLogged"
+local REGEN_EXPIRE_KEY    = "PongDu_RegenExpireMS"
 
 -- 급성 피해 판정 임계값 (부위 체력 0~100 스케일, 1프레임 기준).
 --
--- BodyPart.DamageUpdate()의 상처 드레인은 부위당 최대치를 다 합쳐도
--- (WoundDamage 3.125 + BiteDamage 2.1875 + BurnDamage 3.75 + BulletDamage 3.125
---  + FractureDamage 3.125) * DamageScaler 0.0057143 * multiplier 1.6 ≒ 0.14 /프레임이다.
--- 반면 좀비 타격 한 방은 BodyDamage.DamageFromZombie()에서
--- Rand.Next(1000)/1000 * (Rand.Next(10)+10) 이라 0~20, 실측 대부분 5 이상이다.
--- 즉 1.0은 양쪽에서 5~10배 여유가 있는 값이다.
--- 드레인은 GameTime multiplier에 선형 비례하므로 임계값도 같이 스케일한다.
+-- 아래 enforceHealthFloor는 매 프레임 부위 체력을 바닥값으로 되돌리므로, 관측되는
+-- 하락폭은 항상 "정확히 한 프레임분"이다.
+--   상처 드레인 최대치: (WoundDamage 3.125 + BiteDamage 2.1875 + BurnDamage 3.75
+--     + BulletDamage 3.125 + FractureDamage 3.125) * DamageScaler 0.0057143
+--     * multiplier 1.6 = 약 0.14 /프레임
+--   좀비 타격 한 방: BodyDamage.DamageFromZombie()에서
+--     Rand.Next(1000)/1000 * (Rand.Next(10)+10) = 0~20, 실측 대부분 5 이상
+-- 1.0이면 양쪽에서 5~10배 여유가 있다. 드레인은 GameTime multiplier에 선형
+-- 비례하므로 임계값도 같이 스케일한다.
 local REGEN_HIT_MIN_DROP = 1.0
 
--- 부위별 체력 스냅샷. modData에 넣으면 매 프레임 세이브 대상이 커지므로
--- 런타임 로컬 캐시로만 둔다. 재접속하면 비지만 첫 프레임에 다시 채워진다.
-local partHPSnapshot = {}
+-- BodyPartType.getDamageModifyer(index) 이식 (41.78.19).
+-- BodyDamage.calculateOverallHealth()가
+--   overall = 100 - sum((100 - part.Health) * modifier[i])
+-- 로 전체 체력을 만들기 때문에, 부위 바닥값 -> 전체 체력 환산에 필요하다.
+-- 진단 로그와 엔진 상한 비교에만 쓰고, 복원 자체는 부위 단위로 하므로
+-- 이 값이 틀려도 체력 복원 정확도에는 영향이 없다.
+local DAMAGE_MOD = {
+    [0]  = 0.1,  [1]  = 0.1,  [2]  = 0.2,  [3]  = 0.2,
+    [4]  = 0.3,  [5]  = 0.3,  [6]  = 0.35, [7]  = 0.4,
+    [8]  = 0.6,  [9]  = 0.7,  [10] = 0.4,  [11] = 0.3,
+    [12] = 0.3,  [13] = 0.2,  [14] = 0.2,  [15] = 0.2,
+    [16] = 0.2,
+}
+
+-- 부위별 바닥값 + 진단 카운터. modData에 넣으면 매 프레임 세이브 대상이 커지므로
+-- 런타임 로컬 캐시로만 둔다. 재접속하면 비지만 첫 프레임에 현재 체력으로 다시 잡힌다.
+-- regenState[playerNum] = {
+--     floor    = { [0..16] = 부위 바닥값 },
+--     restored = 지난 진단 로그 이후 되돌린 총량(부위 체력 합산),
+--     hits     = 지난 진단 로그 이후 급성 피해 감지 횟수,
+--     capped   = 엔진 상한(감염/저체온)에 걸려 복원을 포기한 프레임 수,
+-- }
+local regenState = {}
 
 local function nowMS()
     return getGameTime():getCalender():getTimeInMillis()
@@ -171,7 +190,7 @@ local function onWeaponSwing(playerObj, weapon)
 
     local mod = getArmsInjurySpeedModifier(bodyDamage)
     if mod >= 1.0 then return end          -- 부상 페널티 없음. 손댈 이유가 없다
-    if mod < 0.05 then mod = 0.05 end      -- 0/음수 방어 (총알+골절+통증이 겹치면 음수가 될 수 있다)
+    if mod < 0.05 then mod = 0.05 end      -- 0/음수 방어 (총알+골절+통증이 겹치면 음수 가능)
 
     local current = playerObj:getVariableFloat("CombatSpeed", 1.0)
     local fixed = current / mod
@@ -185,53 +204,98 @@ local function onWeaponSwing(playerObj, weapon)
     end
 end
 
--- ── 응급 재생: HP 바닥값 강제 ─────────────────────────────────────────────────
+-- ── 응급 재생: 부위별 HP 바닥값 강제 ─────────────────────────────────────────
 --
--- 상처는 일절 건드리지 않는다 -- 물림/화상/골절/총알/찢어진 상처/출혈 전부
--- 그대로 남고, 치료는 플레이어가 직접 해야 한다. 막는 건 오직 "상처 드레인"
+-- 상처는 일절 건드리지 않는다 -- 물림/화상/골절/총알/찢어진 상처/출혈 전부 그대로
+-- 남고, 치료는 플레이어가 직접 해야 한다. 막는 건 오직 "상처 드레인"
 -- (BodyPart.DamageUpdate()의 프레임당 지속 감소)뿐이다.
 --
--- 왜 상처 타이머를 지우지 않는가: 드레인은 전부 타이머 필드(deepWoundTime /
--- bleedingTime / biteTime / burnTime / fractureTime / haveBullet)로 굴러가는데,
--- 이걸 0으로 만드는 건 곧 "상처를 치료해버리는 것"과 같다. 상처를 남기면서
--- 드레인만 끄는 엔진 플래그는 없다(BodyPart.DamageScaler가 그 역할이지만
--- private에 setter가 없어 Lua에서 접근 불가. isGodMod은 RestoreToFullHealth()로
--- 상처를 지우고, isInvincible은 체력을 100으로 못박아 둘 다 부적합).
+-- [왜 전체 체력(OverallBodyHealth) 바닥값을 버리고 부위별로 바꿨는가]
 --
--- 바닥값은 아래 세 가지로 움직인다:
---   (1) 자연회복 등으로 체력이 바닥값 위로 올라가면 바닥값도 같이 올린다.
---   (2) 급성 피해(좀비 타격/화재/낙상/차량)로 체력이 떨어지면 그만큼 바닥값을 내린다.
+-- 이전 구현은 전체 체력 하나를 바닥값으로 잡고 부족분을
+-- BodyDamage.AddGeneralHealth()로 밀어넣었는데, 두 가지 이유로 바닥값이 뚫렸다.
+--
+--  1) 복원 게인이 1보다 작다. ReduceGeneralHealth()는 부위별로
+--     (Val/17) / damageModifyer 만큼 깎아서 전체 체력이 정확히 Val 감소하지만,
+--     AddGeneralHealth()는 modifier로 나누지 않고 손상 부위 n개에 Val/n씩 그냥
+--     더한다. 그래서 실제 전체 체력 회복량은 Val * (sum(mod)/n) 이고, 전 부위
+--     손상 시 약 0.30배, 손 하나만 다친 상태면 0.10배까지 떨어진다.
+--  2) 호출 순서가 불리하다. 이 훅은 OnPlayerUpdate(IsoPlayer.update 1730행)에서
+--     도는데, 드레인(BodyDamage.Update -> DamageUpdate, 2286행)과 전체 체력
+--     재계산(2289행)은 그보다 뒤다. 즉 "복원하고 나서 한 프레임분 드레인을 다시
+--     맞는" 구조다.
+--
+--  1 + 2 => 게인 g, 프레임당 드레인 D 인 비례제어기가 되어 바닥값이 아니라
+--  gap = D/g 에서 평형을 잡는다. 붕대를 감으면 D가 0이나 절반이라 gap이 거의
+--  없어 붙어 보이지만, 붕대를 풀면 D가 튀면서 그만큼 아래로 주저앉는다.
+--  (실제 제보 증상: 살균붕대 감았다 풀었더니 바닥값이 뚫림)
+--
+-- 지금 구현은 부위별 바닥값을 들고 BodyPart:SetHealth()로 직접 되돌린다.
+-- 희석이 없어 게인이 정확히 1이고, calculateOverallHealth()는 부위 체력의 순수
+-- 함수이므로 전체 체력도 자동으로 맞는다.
+--
+-- 바닥값은 부위 단위로 이렇게 움직인다:
+--   (1) 자연회복 등으로 부위 체력이 바닥값 위로 오르면 바닥값도 같이 올린다.
+--   (2) 한 프레임에 임계값 이상 급락하면 급성 피해로 보고 바닥값을 내린다.
 --   (3) 그 외 하락(= 상처 드레인)은 되돌린다.
 --
--- (2)의 판정이 까다롭다. 좀비의 물기/할큄/베임은 BodyDamage.DamageFromZombie()가
--- BodyPart.AddDamage()를 직접 부르고 끝이라 Lua 이벤트가 아예 발생하지 않는다
--- (OnPlayerGetDamage는 WEAPONHIT/FIRE/FALLDOWN/CAR*/BLEEDING 등에만 붙어 있고,
---  LuaEventManager에 등록만 돼 있는 OnBeingHitByZombie는 어디서도 트리거되지 않는다).
--- 그래서 이벤트에만 의존하지 않고, 부위별 체력의 "프레임당 급락"으로 직접 감지한다.
--- 급성 피해는 계단식이고 드레인은 연속적이라 크기 차이가 한 자릿수 이상 난다.
+-- (2)의 감지를 이벤트가 아니라 체력 급락으로 하는 이유: 좀비의 물기/할큄/베임은
+-- BodyDamage.DamageFromZombie()가 BodyPart.AddDamage()를 직접 부르고 끝이라 Lua
+-- 이벤트가 아예 발생하지 않는다. OnPlayerGetDamage는 WEAPONHIT/FIRE/FALLDOWN/
+-- CAR*/BLEEDING 등에만 붙어 있고, LuaEventManager에 등록만 돼 있는
+-- OnBeingHitByZombie는 어디서도 트리거되지 않는 죽은 이벤트다.
 
-local function detectDiscreteDamage(playerObj, bodyDamage)
-    local num = playerObj:getPlayerNum()
-    local snap = partHPSnapshot[num]
-    if not snap then
-        snap = {}
-        partHPSnapshot[num] = snap
+-- 엔진이 전체 체력에 거는 상한을 계산한다. 상한이 걸린 동안은 복원을 포기하고
+-- 바닥값을 현재 체력에 맞춰 내린다 -- 안 그러면 매 프레임 서로 밀고 당기면서
+-- 녹스 감염으로 죽지 않는 사실상 무적 상태가 된다.
+--
+--  - 녹스 감염 (BodyDamage.Update 2276행)
+--        float7 = (1 - p^4) * 100,  p = InfectionLevel/100
+--        if overall > float7 and float7 <= 99 then ReduceGeneralHealth(overall - float7)
+--    p == 1 이면 ReduceGeneralHealth(110)으로 즉사시킨다.
+--  - 저체온 (BodyDamage.UpdateTemperatureState 2393행)
+--        float1 = 100 - ColdDamageStage * 100
+--        if overall > float1 then ReduceGeneralHealth(overall - float1)
+--
+-- 둘 다 이 훅보다 뒤에 돌기 때문에 우리가 복원해도 같은 프레임에 다시 깎인다.
+local function getEngineHealthCap(bodyDamage)
+    local cap = 100.0
+
+    if bodyDamage:isInfected() then
+        local p = bodyDamage:getInfectionLevel() / 100.0
+        local p4 = p * p
+        p4 = p4 * p4
+        local c = (1.0 - p4) * 100.0
+        if c <= 99.0 and c < cap then cap = c end
     end
 
-    local threshold = REGEN_HIT_MIN_DROP * (getGameTime():getMultiplier() / 1.6)
+    local cold = bodyDamage:getColdDamageStage()
+    if cold > 0.0 then
+        local c = 100.0 - cold * 100.0
+        if c < cap then cap = c end
+    end
+
+    return cap
+end
+
+-- 부위 바닥값 -> 전체 체력 환산 (calculateOverallHealth 이식). 진단 로그와
+-- 엔진 상한 비교에만 쓴다.
+local function floorToOverall(floor)
+    local deficit = 0.0
+    for i = 0, 16 do
+        deficit = deficit + (100.0 - floor[i]) * DAMAGE_MOD[i]
+    end
+    if deficit > 100.0 then deficit = 100.0 end
+    return 100.0 - deficit
+end
+
+local function seedFloor(bodyDamage)
     local parts = bodyDamage:getBodyParts()
-    local hit = false
-
-    for i = 0, BodyPartType.MAX:index() - 1 do
-        local h = parts:get(i):getHealth()
-        local prev = snap[i]
-        if prev and (prev - h) > threshold then
-            hit = true
-        end
-        snap[i] = h
+    local floor = {}
+    for i = 0, 16 do
+        floor[i] = parts:get(i):getHealth()
     end
-
-    return hit
+    return floor
 end
 
 local function enforceHealthFloor(playerObj)
@@ -241,47 +305,57 @@ local function enforceHealthFloor(playerObj)
     local bodyDamage = playerObj:getBodyDamage()
     if not bodyDamage then return end
 
-    -- 스냅샷 갱신은 매 프레임 무조건 돌아야 한다(건너뛰면 다음 비교가 두 프레임
-    -- 치 하락을 한 번에 보고 오탐한다).
-    local hit = detectDiscreteDamage(playerObj, bodyDamage)
-    local current = bodyDamage:getOverallBodyHealth()
-
-    local floorHP = md[REGEN_FLOOR_KEY]
-    if not floorHP then
-        md[REGEN_FLOOR_KEY] = current
+    local num = playerObj:getPlayerNum()
+    local st = regenState[num]
+    if not st then
+        st = { floor = seedFloor(bodyDamage), restored = 0.0, hits = 0, capped = 0 }
+        regenState[num] = st
+        print("[PongDu] syringe: regen floor seeded (no state), player=" .. tostring(num)
+            .. ", overall=" .. tostring(floorToOverall(st.floor)))
         return
     end
 
-    -- (1) 자연회복 등으로 올라간 만큼 바닥값도 올린다.
-    if current >= floorHP then
-        if current > floorHP then
-            md[REGEN_FLOOR_KEY] = current
+    local floor = st.floor
+    local parts = bodyDamage:getBodyParts()
+
+    -- 엔진 상한이 우리 목표보다 낮으면 복원을 포기한다.
+    local cap = getEngineHealthCap(bodyDamage)
+    local target = floorToOverall(floor)
+    if cap < target then
+        for i = 0, 16 do
+            floor[i] = parts:get(i):getHealth()
         end
-        md[REGEN_FLOOR_REBASE_KEY] = nil
+        st.capped = st.capped + 1
         return
     end
 
-    -- (2) 급성 피해면 되돌리지 않고 바닥값을 현재 체력으로 내린다.
-    --
-    -- 이벤트 플래그(REGEN_FLOOR_REBASE_KEY)는 "체력 하락이 실제로 관측된 시점"에서만
-    -- 소비한다. OnPlayerGetDamage는 한 프레임 안에서 BodyDamage.Update()보다 먼저
-    -- 오는 경우가 있어, 도착 즉시 소비하면 아직 반영 안 된 피해를 다음 프레임에
-    -- 복원해버려 사실상 무적이 된다.
-    if hit or md[REGEN_FLOOR_REBASE_KEY] then
-        md[REGEN_FLOOR_REBASE_KEY] = nil
-        md[REGEN_FLOOR_KEY] = current
-        print("[PongDu] syringe: regen floor lowered by new damage, floor=" .. tostring(current))
-        return
-    end
+    local threshold = REGEN_HIT_MIN_DROP * (getGameTime():getMultiplier() / 1.6)
 
-    -- (3) 나머지 하락 = 상처 드레인. 되돌린다.
-    --
-    -- AddGeneralHealth(V)는 전체 체력을 V만큼 올려주지 않는다. 손상 부위 n개에
-    -- V/n씩 나눠주는데 각 부위의 전체 체력 기여도가 damage modifier(0.1~0.7)라
-    -- 평균 0.3배 수준으로 희석되고, 99.9짜리 부위도 몫을 받아 100에서 잘려 버려진다.
-    -- 그래서 "정확히 N 회복"을 한 번에 달성하려 하지 않고, 매 프레임 부족분을
-    -- 계속 밀어넣어 수렴시킨다. 오버슈트가 없어(모든 modifier < 1) 단조 수렴한다.
-    bodyDamage:AddGeneralHealth(floorHP - current)
+    for i = 0, 16 do
+        local bp = parts:get(i)
+        local h = bp:getHealth()
+        local f = floor[i]
+
+        if h > f then
+            -- (1) 자연회복. 바닥값 동반 상승
+            floor[i] = h
+        elseif h < f then
+            local drop = f - h
+            if drop > threshold then
+                -- (2) 급성 피해. 바닥값을 내리고 되돌리지 않는다
+                floor[i] = h
+                st.hits = st.hits + 1
+                print("[PongDu] syringe: regen floor lowered by damage, part="
+                    .. BodyPartType.ToString(BodyPartType.FromIndex(i))
+                    .. ", drop=" .. tostring(drop)
+                    .. ", floor=" .. tostring(h))
+            else
+                -- (3) 상처 드레인. 되돌린다
+                bp:SetHealth(f)
+                st.restored = st.restored + drop
+            end
+        end
+    end
 end
 
 -- ── 인벤토리 우클릭 메뉴: "주사하기" ──────────────────────────────────────────
@@ -348,7 +422,7 @@ local function applyAdrenaline(playerObj, stats)
         playerObj:setHealth(playerObj:getHealth() + 0.2)
     end
 
-    print("[PongDu] syringe: AdrenalineSyringe applied")
+    print("[PongDu] syringe: Syringe_Adrenaline applied")
 end
 
 local function applyDoxycycline(playerObj, stats, bodyDamage)
@@ -365,14 +439,14 @@ local function applyDoxycycline(playerObj, stats, bodyDamage)
         end
     end
 
-    print("[PongDu] syringe: DoxycyclineSyringe applied")
+    print("[PongDu] syringe: Syringe_Doxycycline applied")
 end
 
 -- 모르핀: 통증 억제는 바닐라 진통제와 같은 painEffect 메커니즘을 쓴다.
 --
--- BodyDamage.Update()는 painEffect > 0 이면 통증을 매 틱 자동으로 깎고,
--- 부위별 통증에서 다시 계산하는 경로 자체를 건너뛴다. 즉 통증 억제를 자바가
--- 대신 굴려주므로 Lua는 매 틱 아무것도 안 해도 된다.
+-- BodyDamage.Update()는 painEffect > 0 이면 통증을 매 틱 자동으로 깎고, 부위별
+-- 통증에서 다시 계산하는 경로 자체를 건너뛴다. 즉 통증 억제를 자바가 대신
+-- 굴려주므로 Lua는 매 틱 아무것도 안 해도 된다.
 --
 -- 다만 painEffect는 인게임 시간이 아니라 "남은 틱 수"라서 지속시간을 이걸로
 -- 재면 게임 속도/프레임에 휘둘린다. 그래서 지속시간은 우리 만료 시각(인게임 ms)이
@@ -390,21 +464,25 @@ local function applyMorphine(playerObj, stats)
     md[MORPHINE_EXPIRE_KEY] = expireAt
     md[MORPHINE_LOGGED_KEY] = nil
 
-    print("[PongDu] syringe: MorphineSyringe applied, expire=" .. tostring(expireAt))
+    print("[PongDu] syringe: Syringe_Morphine applied, expire=" .. tostring(expireAt))
 end
 
--- 응급 재생: 즉시 회복도, 지속 회복도 없다. 지금 체력을 그대로 바닥값으로 잡는다.
+-- 응급 재생: 즉시 회복도, 지속 회복도 없다. 지금 부위별 체력을 그대로 바닥값으로 잡는다.
 local function applyEmergencyRegen(playerObj)
     local md = playerObj:getModData()
     local bodyDamage = playerObj:getBodyDamage()
+    local num = playerObj:getPlayerNum()
 
     local expireAt = nowMS() + hoursToMS(REGEN_DURATION_HOURS)
-    md[REGEN_EXPIRE_KEY]       = expireAt
-    md[REGEN_FLOOR_KEY]        = bodyDamage:getOverallBodyHealth()
-    md[REGEN_FLOOR_REBASE_KEY] = nil
-    partHPSnapshot[playerObj:getPlayerNum()] = nil
+    md[REGEN_EXPIRE_KEY] = expireAt
 
-    print("[PongDu] syringe: EmergencyRegenSyringe applied, floor=" .. tostring(md[REGEN_FLOOR_KEY])
+    local floor = seedFloor(bodyDamage)
+    regenState[num] = { floor = floor, restored = 0.0, hits = 0, capped = 0 }
+
+    print("[PongDu] syringe: Syringe_Emergency applied, player=" .. tostring(num)
+        .. ", overall=" .. tostring(bodyDamage:getOverallBodyHealth())
+        .. ", floorOverall=" .. tostring(floorToOverall(floor))
+        .. ", cap=" .. tostring(getEngineHealthCap(bodyDamage))
         .. ", expire=" .. tostring(expireAt))
 end
 
@@ -439,8 +517,7 @@ function PongDuSyringeAction:perform()
 end
 
 -- ── 지속 효과 틱 핸들러 (인게임 1분) ──────────────────────────────────────────
--- 여기서 하는 일은 만료 판정과 painEffect 갱신뿐이다. 실제 억제/복원은
--- 각각 바닐라(painEffect)와 프레임 훅(enforceHealthFloor)이 담당한다.
+-- 만료 판정, painEffect 갱신, 그리고 응급 재생 진단 로그.
 
 local function tickMorphine(playerObj)
     local md = playerObj:getModData()
@@ -458,18 +535,64 @@ local function tickMorphine(playerObj)
     end
 end
 
--- 응급 재생은 지속 회복이 없다. 만료 정리만 한다.
+-- 진단 로그. 바닥값이 또 뚫리면 이 로그만 보고 원인을 좁힐 수 있어야 한다.
+--   overall  : 실제 전체 체력
+--   target   : 부위 바닥값에서 환산한 목표 전체 체력 (overall과 벌어지면 복원 실패)
+--   cap      : 엔진 상한. target보다 낮으면 그 프레임은 복원을 포기한 상태
+--   restored : 지난 1분간 되돌린 부위 체력 총합 (드레인 강도)
+--   hits     : 지난 1분간 급성 피해로 바닥값을 내린 횟수
+--   capped   : 지난 1분간 엔진 상한 때문에 복원을 포기한 프레임 수
+--   inf/cold : 상한을 만든 원인값
+--   held     : 바닥값이 100 미만인 부위 수 (복원 대상 부위 수)
+local function logRegenDiag(playerObj, bodyDamage, st)
+    local floor = st.floor
+    local held = 0
+    for i = 0, 16 do
+        if floor[i] < 100.0 then held = held + 1 end
+    end
+
+    print("[PongDu] syringe: regen diag player=" .. tostring(playerObj:getPlayerNum())
+        .. " overall=" .. tostring(bodyDamage:getOverallBodyHealth())
+        .. " target=" .. tostring(floorToOverall(floor))
+        .. " cap=" .. tostring(getEngineHealthCap(bodyDamage))
+        .. " restored=" .. tostring(st.restored)
+        .. " hits=" .. tostring(st.hits)
+        .. " capped=" .. tostring(st.capped)
+        .. " inf=" .. tostring(bodyDamage:getInfectionLevel())
+        .. " cold=" .. tostring(bodyDamage:getColdDamageStage())
+        .. " held=" .. tostring(held))
+
+    st.restored = 0.0
+    st.hits = 0
+    st.capped = 0
+end
+
 local function tickRegen(playerObj)
     local md = playerObj:getModData()
     local expireAt = md[REGEN_EXPIRE_KEY]
     if not expireAt then return end
 
-    if nowMS() >= expireAt then
-        md[REGEN_EXPIRE_KEY]       = nil
-        md[REGEN_FLOOR_KEY]        = nil
-        md[REGEN_FLOOR_REBASE_KEY] = nil
-        partHPSnapshot[playerObj:getPlayerNum()] = nil
-        print("[PongDu] syringe: EmergencyRegen effect ended")
+    local num = playerObj:getPlayerNum()
+    local bodyDamage = playerObj:getBodyDamage()
+
+    if nowMS() < expireAt then
+        local st = regenState[num]
+        if st and bodyDamage then
+            logRegenDiag(playerObj, bodyDamage, st)
+        end
+    else
+        local st = regenState[num]
+        if st and bodyDamage then
+            print("[PongDu] syringe: EmergencyRegen effect ended, overall="
+                .. tostring(bodyDamage:getOverallBodyHealth())
+                .. ", target=" .. tostring(floorToOverall(st.floor))
+                .. ", hits=" .. tostring(st.hits)
+                .. ", capped=" .. tostring(st.capped))
+        else
+            print("[PongDu] syringe: EmergencyRegen effect ended (no state)")
+        end
+        md[REGEN_EXPIRE_KEY] = nil
+        regenState[num] = nil
     end
 end
 
@@ -480,7 +603,7 @@ local function onEveryOneMinute()
     end)
 end
 
--- 바닥값 강제만 프레임 단위로 돌린다. 분 단위로는 그 사이 드레인이 눈에 보이게
+-- 바닥값 강제는 프레임 단위로 돌린다. 분 단위로는 그 사이 드레인이 눈에 보이게
 -- 깎였다가 되돌아오는 톱니가 생긴다. 조기 return이 대부분이라 비용은 무시할 수준
 -- (효과가 없으면 modData 조회 한 번에서 끝난다).
 local function onPlayerUpdate(playerObj)
@@ -490,17 +613,18 @@ end
 
 -- 급성 피해 보조 신호.
 --
--- 부위 체력 급락 감지가 주 판정이고, 이 이벤트는 그걸 놓쳤을 때를 위한 보조다
--- (예: 여러 부위에 얕게 퍼진 피해). 피격 데미지값(damageSplit)은 무기 데미지
--- 단위라 체력 델타로 환산할 수 없으므로, 값을 쓰지 않고 리베이스만 예약한다.
+-- 주 판정은 부위 체력 급락이다. 이 이벤트는 그게 놓칠 수 있는 경우(여러 부위에
+-- 임계값 미만으로 얕게 퍼진 피해)를 위한 보조로, 해당 프레임의 임계값을 0으로
+-- 낮춰 어떤 하락이든 급성 피해로 처리하게 만든다.
+-- 피격 데미지값은 무기 데미지 단위라 부위 체력 델타로 환산할 수 없으므로 쓰지 않는다.
 -- BLEEDING/POISON/HUNGRY/SICK/THIRST/HEAVYLOAD/INFECTION 계열은 지속 드레인이라
 -- 일부러 제외했다.
 local REBASELINE_DAMAGE_TYPES = {
-    WEAPONHIT       = true,
-    FIRE            = true,
-    FALLDOWN        = true,
-    CARHITDAMAGE    = true,
-    CARCRASHDAMAGE  = true,
+    WEAPONHIT      = true,
+    FIRE           = true,
+    FALLDOWN       = true,
+    CARHITDAMAGE   = true,
+    CARCRASHDAMAGE = true,
 }
 
 local function onPlayerGetDamage(character, damageType, amount)
@@ -509,11 +633,25 @@ local function onPlayerGetDamage(character, damageType, amount)
     -- IsoGameCharacter.Hit()은 *맞은 대상*으로 이벤트를 쏜다. 플레이어가 좀비를
     -- 때리면 좀비로 들어오므로 걸러낸다.
     if not instanceof(character, "IsoPlayer") then return end
+    if not character:isLocalPlayer() then return end
 
-    local md = character:getModData()
-    if md[REGEN_FLOOR_KEY] then
-        md[REGEN_FLOOR_REBASE_KEY] = true
+    local st = regenState[character:getPlayerNum()]
+    if not st then return end
+
+    -- 이 이벤트는 한 프레임 안에서 BodyDamage.Update()보다 먼저 도착할 수 있어
+    -- 즉시 바닥값을 내리면 아직 반영 안 된 피해까지 같이 잘라먹는다. 대신
+    -- 부위 바닥값을 현재 체력으로 동기화해두면, 다음 프레임에 들어오는 피해분이
+    -- 그대로 남는다.
+    local bodyDamage = character:getBodyDamage()
+    if not bodyDamage then return end
+    local parts = bodyDamage:getBodyParts()
+    for i = 0, 16 do
+        local h = parts:get(i):getHealth()
+        if h < st.floor[i] then st.floor[i] = h end
     end
+
+    print("[PongDu] syringe: regen floor synced by event, type=" .. tostring(damageType)
+        .. ", amount=" .. tostring(amount))
 end
 
 Events.EveryOneMinute.Add(onEveryOneMinute)
