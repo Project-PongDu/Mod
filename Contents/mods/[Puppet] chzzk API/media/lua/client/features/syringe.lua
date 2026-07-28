@@ -177,6 +177,20 @@ local function getArmsInjurySpeedModifier(bodyDamage)
     return mod
 end
 
+-- GameTime.getAnimSpeedFix()는 상수 0.8. calculateCombatSpeed()는
+--     return float0 * (boolean0 ? GameTime.getAnimSpeedFix() : 1.0F);
+-- 로 끝나는데, boolean0은 "Axeman 특성 + 도끼 카테고리 무기로 나무를 베는 중"일
+-- 때만 false가 되고 그 외 모든 전투(사실상 전부)에서는 이 0.8이 최종값에
+-- 곱해진다. 즉 엔진의 [0.8, 1.6] 클램프는 실제로 관측되는 CombatSpeed 값에서
+-- [0.64, 1.28] 구간으로 나타난다(하한이 0.8이 아니라 0.8*0.8=0.64).
+-- 이 배율을 몰랐을 땐 클램프 감지 임계값이 어긋나 있었다.
+local function getAnimSpeedFixMultiplier(playerObj, weapon)
+    if weapon and playerObj:getTraits():contains("Axeman") and weapon:getCategories():contains("Axe") then
+        return 1.0
+    end
+    return 0.8
+end
+
 local function onWeaponSwing(playerObj, weapon)
     if not playerObj then return end
     if not instanceof(playerObj, "IsoPlayer") then return end
@@ -193,34 +207,47 @@ local function onWeaponSwing(playerObj, weapon)
     if mod < 0.05 then mod = 0.05 end      -- 0/음수 방어 (총알+골절+통증이 겹치면 음수 가능)
 
     local current = playerObj:getVariableFloat("CombatSpeed", 1.0)
+    local animFix = getAnimSpeedFixMultiplier(playerObj, weapon)
 
     -- IsoGameCharacter.calculateCombatSpeed()는 mod를 곱한 직후 [0.8, 1.6]으로
-    -- 클램프한다. 부상이 심해 float0이 0.8 밑으로 떨어지면 엔진이 0.8로 깎아버리고,
-    -- 그 사실이 CombatSpeed 변수에는 남지 않는다. 즉 "current"가 실제로 얼마나
-    -- 깎였는지는 하한에 클램프된 순간 정보가 사라진다.
+    -- 클램프하고, 그 결과에 animFix(위 참고)를 곱해 반환한다. animFix는 순수
+    -- 무기/특성만으로 결정되는 값이라(랜덤 요소 없음) 여기서 그대로 나눠 없애면
+    -- "엔진이 클램프한 원래 값"을 정확히 복원할 수 있다.
     --
-    -- 이 상태에서 current(=이미 0.8로 깎인 값)를 mod로 그대로 나누면 실제보다
-    -- 훨씬 큰 값이 나온다 (예: current=0.8, mod=0.3 -> 2.67 -> 1.6으로 재클램프,
-    -- 즉 미부상 정상 속도보다 더 빠른 "부스트"가 발생). 나눗셈으로 정확히 복원 가능한
-    -- 경우는 클램프가 걸리지 않았을 때뿐이다.
+    -- 부상이 심해 float0이 0.8 밑으로 떨어지면 엔진이 0.8로 깎아버리고, 그
+    -- 사실이 CombatSpeed 변수에는 남지 않는다. 이 상태에서 current를 그대로
+    -- mod로 나누면 실제보다 훨씬 큰 값이 나온다(예: 관측 0.64, mod=0.3이면
+    -- 2.67 -> 1.6으로 재클램프. 즉 미부상 정상 속도보다 더 빠른 "부스트" 발생.
+    -- 실제로 이 버그가 제보됐다). 나눗셈으로 정확히 복원 가능한 경우는 엔진
+    -- 클램프가 걸리지 않았을 때뿐이다.
     --
-    -- 클램프 여부를 직접 알 방법은 없지만(비-injury 요소들을 전부 재현해야 함),
-    -- current가 하한 근처(<=0.81)면 클램프됐을 가능성이 매우 높다고 보고 역산을
-    -- 포기하고 정상 기준값(1.0)으로 리셋한다. 그 외의 경우(클램프 미발생)엔 나눗셈이
-    -- 수학적으로 정확하므로 그대로 쓴다.
+    -- animFix를 나눠 없앤 clampedPart는 [0.8, 1.6] 구간의 엔진 클램프 결과와
+    -- 정확히 대응하므로, 그 값이 하한/상한 근처인지로 클램프 여부를 정확히
+    -- 판정할 수 있다(이전처럼 animFix를 무시한 채 관측값에 임의 임계값을
+    -- 대는 방식보다 정확함).
+    local clampedPart = current / animFix
     local fixed
-    local clamped = current <= 0.81
+    local clamped = clampedPart <= 0.81 or clampedPart >= 1.59
     if clamped then
-        fixed = 1.0
+        -- 클램프가 걸린 프레임은 엔진이 얼마나 깎았는지(혹은 올렸는지) 정보가
+        -- 사라져서 정확한 역산이 불가능하다. mod로 나누는 대신 정상 기준값
+        -- (미부상 시 흔한 대역인 1.0)을 animFix와 같은 단위로 맞춰 되돌린다.
+        fixed = 1.0 * animFix
     else
-        fixed = current / mod
-        if fixed > 1.6 then fixed = 1.6 end
+        -- 클램프가 안 걸렸다면 clampedPart == base * mod 이므로 나눗셈이
+        -- 수학적으로 정확하다. base 자체가 [0.8, 1.6]을 벗어나지 않게만
+        -- 다시 클램프해서 animFix를 곱한다.
+        local base = clampedPart / mod
+        if base > 1.6 then base = 1.6 end
+        if base < 0.8 then base = 0.8 end
+        fixed = base * animFix
     end
     playerObj:setVariable("CombatSpeed", fixed)
 
     if not md[MORPHINE_LOGGED_KEY] then
         md[MORPHINE_LOGGED_KEY] = true
         print("[PongDu] syringe: morphine combat speed override, injuryMod=" .. tostring(mod)
+            .. ", animFix=" .. tostring(animFix)
             .. ", clamped=" .. tostring(clamped)
             .. ", " .. tostring(current) .. " -> " .. tostring(fixed))
     end
