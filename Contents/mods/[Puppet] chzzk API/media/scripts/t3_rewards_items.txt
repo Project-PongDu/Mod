@@ -326,4 +326,31 @@ item DoxycyclineSyringe
     WorldStaticModel    = PongDuSyringe_model,
 }
 
+/* 신규 2종. 아이콘은 전용 아트가 없어 FAO 미사용 텍스처를 임시로 재활용함
+   (MorphineSyringe = FAO Syringe2, EmergencyRegenSyringe = FAO EmptySyringe).
+   전용 아이콘 뽑으면 Icon 값과 textures/*.png만 교체하면 됨. */
+item MorphineSyringe
+{
+    DisplayCategory     = FirstAid,
+    Count               = 1,
+    Weight              = 0.1,
+    Type                = Normal,
+    DisplayName         = Morphine Syringe,
+    Icon                = MorphineSyringe,
+    Tooltip             = Tooltip_MorphineSyringe,
+    WorldStaticModel    = PongDuSyringe_model,
+}
+
+item EmergencyRegenSyringe
+{
+    DisplayCategory     = FirstAid,
+    Count               = 1,
+    Weight              = 0.1,
+    Type                = Normal,
+    DisplayName         = Emergency Regen Syringe,
+    Icon                = EmergencyRegenSyringe,
+    Tooltip             = Tooltip_EmergencyRegenSyringe,
+    WorldStaticModel    = PongDuSyringe_model,
+}
+
 }

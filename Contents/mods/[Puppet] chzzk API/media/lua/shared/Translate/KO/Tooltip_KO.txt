@@ -8,4 +8,6 @@ Tooltip_KO = {
 
 	Tooltip_AdrenalineSyringe = "지침과 피로를 즉시 회복시키지만, 배고픔과 갈증, 불안이 증가합니다.",
 	Tooltip_DoxycyclineSyringe = "감기, 식중독과 오염된 상처를 치료한다. 좀비 감염은 치료할 수 없습니다.",
+	Tooltip_MorphineSyringe = "통증을 즉시 없앱니다. 효과가 6시간 동안 지속됩니다.",
+	Tooltip_EmergencyRegenSyringe = "즉시 출혈을 멈추고 체력을 40 회복합니다. 1시간 동안 체력이 점점 회복됩니다.",
 }
