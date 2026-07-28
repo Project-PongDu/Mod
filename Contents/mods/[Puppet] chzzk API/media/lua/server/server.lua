@@ -718,6 +718,45 @@ local function heliCurrentPos(job)
     return job.ax + (job.bx - job.ax) * t, job.ay + (job.by - job.ay) * t
 end
 
+-- ── 사격 패킷 거리 컷 ──────────────────────────────────────────────────────
+-- 화력지원 사격(HeliFire/DroneFire)은 예광탄 + 총성 "연출"이라 화면 밖
+-- 플레이어에게까지 보낼 이유가 없다. 기존엔 매 발 getOnlinePlayers() 전원에게
+-- 뿌렸는데, 드론 기본 iv 25ms(초당 40발) x job N개 x 접속자 N명이라 패킷이
+-- N^2 로 뛰었다. 8인 서버 전원 동시 발동이면 초당 2,560 패킷.
+-- (PongDuDonation/PlayAlert 는 이미 같은 방식으로 컷하고 있다 -- 여기만
+--  빠져 있었던 것이고 설계 판단이 아니었다.)
+--
+-- 원점과 목표 중 하나라도 반경 안이면 보낸다:
+--   원점(ox,oy) 기준 -- 예광탄이 화면에 걸릴 수 있는 플레이어
+--   목표(tx,ty | x,y) 기준 -- 좀비 소유 클라. 킬 지시가 반드시 도달해야 하며,
+--                             서버에서 죽이면 소유 클라 sync 에 덮인다(제약 1).
+-- 55 타일은 드론 인식반경(기본 20) / 헬기 반경(기본 30) 보다 충분히 커서
+-- 소유 클라가 잘려나갈 여지가 없다. 페이로드 키가 헬기는 x/y, 드론은 tx/ty 로
+-- 다르므로 양쪽을 모두 본다.
+local FS_FIRE_SEND_RADIUS = 55
+
+local function fsBroadcastFire(command, payload)
+    local r2 = FS_FIRE_SEND_RADIUS * FS_FIRE_SEND_RADIUS
+    local ox, oy = payload.ox, payload.oy
+    local tx, ty = payload.tx or payload.x, payload.ty or payload.y
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        local p = players:get(k)
+        local okP, px, py = pcall(function() return p:getX(), p:getY() end)
+        if okP and px then
+            local dxo, dyo = px - ox, py - oy
+            local near = (dxo * dxo + dyo * dyo) <= r2
+            if not near and tx then
+                local dxt, dyt = px - tx, py - ty
+                near = (dxt * dxt + dyt * dyt) <= r2
+            end
+            if near then
+                sendServerCommand(p, "PongDuFireSupport", command, payload)
+            end
+        end
+    end
+end
+
 -- 클라 실차량/타이머 보간용 HeliStart 페이로드를 만들어 전 클라에 보낸다.
 -- elapsed/total은 "현재 leg" 기준이라 클라가 자기 로컬 시계로 이어서 보간할 수
 -- 있고, remain은 "전체 체류 시간" 기준이라 leg가 갈릴 때마다 남은시간 UI와
@@ -729,7 +768,7 @@ local function heliBroadcastStart(job)
         remain = job.expireAt - now,
         ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
         elapsed = now - job.startAt, total = job.endAt - job.startAt,
-        vid = job.vid, pilot = job.pilot,
+        vid = job.vid, pilot = job.pilot, own = job.own,
     }
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
@@ -795,7 +834,8 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
 
     local now = getTimestampMs()
     local job = {
-        player = player, r = r, iv = iv, kc = kc, sender = sender,
+        player = player, own = player:getOnlineID(),
+        r = r, iv = iv, kc = kc, sender = sender,
         ax = ax, ay = ay, bx = bx, by = by, oz = player:getZ(),
         startAt = now, endAt = now + dur, nextAt = now,
         legDur = dur, expireAt = now + dur,
@@ -868,7 +908,7 @@ local function processHeliJobs()
             table.remove(_heliJobs, i)
             local playersT = getOnlinePlayers()
             for k = 0, playersT:size() - 1 do
-                sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { t = 1 })
+                sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
             print("[PongDu][Heli] job aborted (owner teleported)")
         elseif now >= job.expireAt then
@@ -876,7 +916,7 @@ local function processHeliJobs()
             table.remove(_heliJobs, i)
             local players = getOnlinePlayers()
             for k = 0, players:size() - 1 do
-                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { t = 1 })
+                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
             print("[PongDu][Heli] job finished")
         elseif now >= job.nextAt then
@@ -884,7 +924,8 @@ local function processHeliJobs()
             -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
             local hx, hy = heliCurrentPos(job)
 
-            local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender }
+            local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender,
+                              own = job.own }
 
             -- 락온 유지 검사: 죽었거나 반경을 벗어났으면 락 해제 후 재선정.
             -- (킬은 소유 클라가 수행하므로 kill 전송 후에도 서버에서 isDead()가
@@ -934,7 +975,7 @@ local function processHeliJobs()
                     job.engaged = true
                     local players = getOnlinePlayers()
                     for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliEngage", { t = 1 })
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliEngage", { own = job.own })
                     end
                     print("[PongDu][Heli] ENGAGE")
                 end
@@ -950,7 +991,7 @@ local function processHeliJobs()
                     job.engaged = false
                     local players = getOnlinePlayers()
                     for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { t = 1 })
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { own = job.own })
                     end
                     print("[PongDu][Heli] CLEAR (targets depleted)")
                 elseif job.engaged == nil and now - job.startAt >= 3000
@@ -958,7 +999,7 @@ local function processHeliJobs()
                     job.engaged = false
                     local players = getOnlinePlayers()
                     for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { t = 1 })
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { own = job.own })
                     end
                     print("[PongDu][Heli] CLEAR (initial sweep, no targets)")
                 end
@@ -969,11 +1010,8 @@ local function processHeliJobs()
             if not payload.id then
                 -- 대상이 없으면 아무것도 보내지 않는다
             else
-            local players = getOnlinePlayers()
-            for k = 0, players:size() - 1 do
-                sendServerCommand(players:get(k), "PongDuFireSupport", "HeliFire", payload)
-            end
-            job.nextAt = now + job.iv
+                fsBroadcastFire("HeliFire", payload)
+                job.nextAt = now + job.iv
             end
         end
     end
@@ -1603,7 +1641,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
             local pl2 = getOnlinePlayers()
             for k = 0, pl2:size() - 1 do
                 sendServerCommand(pl2:get(k), "PongDuFireSupport", "DroneExtend",
-                    { addMs = dur * 1000 })
+                    { addMs = dur * 1000, own = ex.own })
             end
             print(string.format(
                 "[PongDu][Drone] job EXTENDED +%ds (orbit total %ds) sender=%s",
@@ -1614,6 +1652,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
 
     local job = {
         player  = player,
+        own     = player:getOnlineID(),
         sx = sx, sy = sy, oz = oz,
         -- 궤도 진입 각도 = 접근해온 방향. 이래야 APPROACH → ORBIT 전환에서
         -- 위치가 튀지 않는다.
@@ -1657,7 +1696,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
     -- 전 클라에 시작 통보. 경로 좌표는 보내지 않는다 — 공전 중심이
     -- 플레이어라 각 클라가 매 틱 직접 읽어야 하기 때문(헬기와 다른 지점).
     local payload = {
-        vid = job.vid, pilot = player:getOnlineID(),
+        vid = job.vid, pilot = player:getOnlineID(), own = job.own,
         sx = sx, sy = sy, oz = oz, th0 = job.theta0,
         orbitR = orbitR, orbitMs = job.orbitMs, periodMs = job.periodMs,
         target = player:getUsername(), sender = sender,
@@ -1846,7 +1885,7 @@ local function droneFinish(job, reason)
     end
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
-        sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", {})
+        sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", { own = job.own })
     end
     print(string.format(
         "[PongDu][Drone] job finished (%s) shots=%d kills=%d knockdowns=%d switches=%d",
@@ -1885,15 +1924,16 @@ local function processDroneJobs()
                 if z and not job.engaged then
                     job.engaged = true
                     for k = 0, players0:size() - 1 do
-                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneEngage", {})
+                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneEngage", { own = job.own })
                     end
                 elseif (not z) and job.engaged then
                     job.engaged = false
                     for k = 0, players0:size() - 1 do
-                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneClear", {})
+                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneClear", { own = job.own })
                     end
                 end
-                local payload = { ox = dx, oy = dy, oz = job.oz, sender = job.sender }
+                local payload = { ox = dx, oy = dy, oz = job.oz, sender = job.sender,
+                                  own = job.own }
                 if z then
                     payload.id = z:getOnlineID()
                     payload.tx = z:getX()
@@ -1925,9 +1965,11 @@ local function processDroneJobs()
                         job.lastId = zid
                     end
                 end
-                local players = getOnlinePlayers()
-                for k = 0, players:size() - 1 do
-                    sendServerCommand(players:get(k), "PongDuFireSupport", "DroneFire", payload)
+                -- 대상 없는 발은 아예 보내지 않는다. 클라 handleDroneFire 가
+                -- id 없는 패킷을 즉시 return 으로 버리므로 100% 낭비였다
+                -- (iv 25ms 기준 무교전 구간 내내 초당 40패킷 x 접속자 수).
+                if payload.id then
+                    fsBroadcastFire("DroneFire", payload)
                 end
             end
         end
