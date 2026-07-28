@@ -35,7 +35,7 @@ local SYRINGE_TYPES = {
 
 local MORPHINE_DURATION_HOURS = 6
 local REGEN_DURATION_HOURS    = 1
-local REGEN_PERCENT_PER_TICK  = 0.10   -- EveryTenMinutes 1회당 체력 회복량
+local REGEN_HEAL_PER_TICK     = 10     -- EveryTenMinutes 1회당 체력 회복량 (0~100 스케일)
 
 local MORPHINE_EXPIRE_KEY = "PongDu_MorphineExpireMS"
 local REGEN_EXPIRE_KEY    = "PongDu_RegenExpireMS"
@@ -106,18 +106,24 @@ function PongDuSyringeAction:stop()
     ISBaseTimedAction.stop(self)
 end
 
-local function applyAdrenaline(playerObj, stats)
+local ADRENALINE_HEAL = 20             -- 부상 중일 때만 적용되는 소량 회복 (0~100 스케일)
+
+local function applyAdrenaline(playerObj, stats, bodyDamage)
     stats:setFatigue(stats:getFatigue() - 0.7)
     stats:setEndurance(stats:getEndurance() + 0.85)
     stats:setHunger(stats:getHunger() + 0.3)
     stats:setThirst(stats:getThirst() + 0.5)
     stats:setPanic(stats:getPanic() + 15)
 
-    if playerObj:getHealth() < 1 then
-        playerObj:setHealth(playerObj:getHealth() + 0.2)
+    -- 원본 FAO는 playerObj:getHealth() < 1 을 봤지만, 그건 IsoGameCharacter의
+    -- 레거시 Health 필드(0~1)라 플레이어 체력바와 무관하고 항상 1이라 죽은 코드였다.
+    -- 실제 체력바는 BodyDamage.OverallBodyHealth(0~100)이며 매 틱 부위별 체력에서
+    -- 재계산되므로, 회복은 AddGeneralHealth로 부위 체력을 올려야 반영된다.
+    if bodyDamage:getOverallBodyHealth() < 100 then
+        bodyDamage:AddGeneralHealth(ADRENALINE_HEAL)
     end
 
-    print("[PongDu] syringe: AdrenalineSyringe applied")
+    print("[PongDu] syringe: AdrenalineSyringe applied, health=" .. tostring(bodyDamage:getOverallBodyHealth()))
 end
 
 local function applyDoxycycline(playerObj, stats, bodyDamage)
@@ -145,18 +151,17 @@ local function applyMorphine(playerObj, stats)
     print("[PongDu] syringe: MorphineSyringe applied, expire=" .. tostring(expireAt))
 end
 
-local REGEN_IMMEDIATE_HEAL = 0.40      -- 즉시 회복량 (표시 기준 40)
+local REGEN_IMMEDIATE_HEAL = 40        -- 즉시 회복량 (0~100 스케일)
 
 local function applyEmergencyRegen(playerObj, bodyDamage)
     stopAllBleeding(bodyDamage)
 
-    local newHealth = math.min(1, playerObj:getHealth() + REGEN_IMMEDIATE_HEAL)
-    playerObj:setHealth(newHealth)
+    bodyDamage:AddGeneralHealth(REGEN_IMMEDIATE_HEAL)
 
     local expireAt = nowMS() + hoursToMS(REGEN_DURATION_HOURS)
     playerObj:getModData()[REGEN_EXPIRE_KEY] = expireAt
 
-    print("[PongDu] syringe: EmergencyRegenSyringe applied, health=" .. tostring(newHealth) .. ", expire=" .. tostring(expireAt))
+    print("[PongDu] syringe: EmergencyRegenSyringe applied, health=" .. tostring(bodyDamage:getOverallBodyHealth()) .. ", expire=" .. tostring(expireAt))
 end
 
 function PongDuSyringeAction:perform()
@@ -173,7 +178,7 @@ function PongDuSyringeAction:perform()
     local fullType = self.syringeItem:getFullType()
 
     if fullType == "t3chzzkDonation.AdrenalineSyringe" then
-        applyAdrenaline(playerObj, stats)
+        applyAdrenaline(playerObj, stats, bodyDamage)
     elseif fullType == "t3chzzkDonation.DoxycyclineSyringe" then
         applyDoxycycline(playerObj, stats, bodyDamage)
     elseif fullType == "t3chzzkDonation.MorphineSyringe" then
@@ -218,9 +223,8 @@ local function onEveryTenMinutes()
         local bodyDamage = playerObj:getBodyDamage()
         if bodyDamage then
             stopAllBleeding(bodyDamage)
-            local newHealth = math.min(1, playerObj:getHealth() + REGEN_PERCENT_PER_TICK)
-            playerObj:setHealth(newHealth)
-            print("[PongDu] syringe: regen tick, health=" .. tostring(newHealth))
+            bodyDamage:AddGeneralHealth(REGEN_HEAL_PER_TICK)
+            print("[PongDu] syringe: regen tick, health=" .. tostring(bodyDamage:getOverallBodyHealth()))
         end
     else
         playerObj:getModData()[REGEN_EXPIRE_KEY] = nil
