@@ -15,5 +15,8 @@ ItemName_KO = {
     ItemName_t3chzzkDonation.weapon_box_ranged = "보급상자",
     ItemName_t3chzzkDonation.vehicle_drop_kit = "차량 드랍 키트",
     ItemName_t3chzzkDonation.t3DeployedParachute = "펼쳐진 낙하산",
+
+    ItemName_t3chzzkDonation.AdrenalineSyringe = "아드레날린 주사기",
+    ItemName_t3chzzkDonation.DoxycyclineSyringe = "독시사이클린 주사기",
 	
 }

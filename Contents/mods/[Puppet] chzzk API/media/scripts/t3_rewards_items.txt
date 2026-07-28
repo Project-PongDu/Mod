@@ -293,4 +293,37 @@ item inv_save_ticket
     Tooltip             = Tooltip_inv_save_ticket,
 }
 
+/* FirstAidOverhaul 모드에서 이식. 제작 레시피 없이 아이템만 지급되는 형태로
+   단순화 (features/syringe.lua가 인벤토리 우클릭 메뉴에서 "주사하기"로 처리). */
+model PongDuSyringe_model
+{
+    mesh    = items/Item_Syringe|Syringe,
+    texture = WorldItems/MetalSheet,
+    scale   = 1,
+}
+
+item AdrenalineSyringe
+{
+    DisplayCategory     = FirstAid,
+    Count               = 1,
+    Weight              = 0.1,
+    Type                = Normal,
+    DisplayName         = Adrenaline Syringe,
+    Icon                = SyringeAdrenline,
+    Tooltip             = Tooltip_AdrenalineSyringe,
+    WorldStaticModel    = PongDuSyringe_model,
+}
+
+item DoxycyclineSyringe
+{
+    DisplayCategory     = FirstAid,
+    Count               = 1,
+    Weight              = 0.1,
+    Type                = Normal,
+    DisplayName         = Doxycycline Syringe,
+    Icon                = DoxycyclineSyringe,
+    Tooltip             = Tooltip_DoxycyclineSyringe,
+    WorldStaticModel    = PongDuSyringe_model,
+}
+
 }
