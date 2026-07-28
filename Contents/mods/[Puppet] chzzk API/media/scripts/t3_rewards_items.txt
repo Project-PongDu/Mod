@@ -353,4 +353,23 @@ item EmergencyRegenSyringe
     WorldStaticModel    = PongDuSyringe_model,
 }
 
+/* zRe Vaccin("They Knew") 모드의 TheyKnew.Zomboxivir 이식. vaccine 후원(rewardManager.lua)이
+   원래 그 모드가 로드돼 있어야만 지급 가능했던 걸, 퐁듀 전용 아이템으로 빼서 외부
+   모드 의존성을 제거함. WorldStaticModel은 바닐라 Tweezers 재사용(원본도 동일). */
+item Zomboxivir
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.01,
+    Type                = Food,
+    HungerChange        = 1,
+    DisplayName         = Zomboxivir Ampule,
+    Icon                = Zomboxivir,
+    Tooltip             = Tooltip_Zomboxivir,
+    Medical             = TRUE,
+    EatType             = popcan,
+    OnEat               = OnEat_Zomboxivir,
+    CustomEatSound      = BreakAmpule,
+    WorldStaticModel    = Tweezers,
+}
+
 }

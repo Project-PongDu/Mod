@@ -17,8 +17,10 @@ ItemName_KO = {
     ItemName_t3chzzkDonation.t3DeployedParachute = "펼쳐진 낙하산",
 
     ItemName_t3chzzkDonation.AdrenalineSyringe = "전투자극제 주사기",
-    ItemName_t3chzzkDonation.DoxycyclineSyringe = "고급항생제 주사기",
-    ItemName_t3chzzkDonation.MorphineSyringe = "고급진통제 주사기",
-    ItemName_t3chzzkDonation.EmergencyRegenSyringe = "응급재생 주사기",
+    ItemName_t3chzzkDonation.DoxycyclineSyringe = "광범위 항생제 주사기",
+    ItemName_t3chzzkDonation.MorphineSyringe = "모르핀 주사기",
+    ItemName_t3chzzkDonation.EmergencyRegenSyringe = "응급 재생 주사기",
+
+    ItemName_t3chzzkDonation.Zomboxivir = "좀복시비르 앰퓰",
 	
 }

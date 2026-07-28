@@ -11,6 +11,18 @@ module Base
         }
     }
 
+    /* Zomboxivir 앰퓰 섭취(OnEat) 시 CustomEatSound. zRe Vaccin("They Knew") 모드에서
+       사운드 파일과 함께 이식. */
+    sound BreakAmpule
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/BreakAmpule.ogg,
+        }
+    }
+
     sound vehicle_call_signal
     {
         category = Object,

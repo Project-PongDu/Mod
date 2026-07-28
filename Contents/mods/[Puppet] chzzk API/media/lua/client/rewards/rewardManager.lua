@@ -100,7 +100,7 @@ local rewardHandlers = {
     ["vaccine"] = {
         immediate = true,
         fn = function(sender)
-            local item = global.player:getInventory():AddItem("TheyKnew.Zomboxivir")
+            local item = global.player:getInventory():AddItem("t3chzzkDonation.Zomboxivir")
             if item then item:setName(sender .. "'s Vaccine") end   -- Vaccine
             global.processingEvent = false
         end,

@@ -145,12 +145,18 @@ local function applyMorphine(playerObj, stats)
     print("[PongDu] syringe: MorphineSyringe applied, expire=" .. tostring(expireAt))
 end
 
+local REGEN_IMMEDIATE_HEAL = 0.40      -- 즉시 회복량 (표시 기준 40)
+
 local function applyEmergencyRegen(playerObj, bodyDamage)
     stopAllBleeding(bodyDamage)
+
+    local newHealth = math.min(1, playerObj:getHealth() + REGEN_IMMEDIATE_HEAL)
+    playerObj:setHealth(newHealth)
+
     local expireAt = nowMS() + hoursToMS(REGEN_DURATION_HOURS)
     playerObj:getModData()[REGEN_EXPIRE_KEY] = expireAt
 
-    print("[PongDu] syringe: EmergencyRegenSyringe applied, expire=" .. tostring(expireAt))
+    print("[PongDu] syringe: EmergencyRegenSyringe applied, health=" .. tostring(newHealth) .. ", expire=" .. tostring(expireAt))
 end
 
 function PongDuSyringeAction:perform()
