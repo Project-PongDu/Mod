@@ -6,8 +6,8 @@ Tooltip_KO = {
 	Tooltip_inv_save_ticket = "소지한 채 사망하면 자동으로 사용. 죽는 순간의 소지품 전부를 부활 후 그대로 돌려받을 수 있다.",
 	Tooltip_JohnWickPencil = "물론 당신은 존 윅이 아닙니다",
 
-	Tooltip_AdrenalineSyringe = "지침과 피로를 즉시 회복시키지만, 배고픔과 갈증, 불안이 증가합니다.",
-	Tooltip_DoxycyclineSyringe = "감기, 식중독과 오염된 상처를 치료한다. 좀비 감염은 치료할 수 없습니다.",
-	Tooltip_MorphineSyringe = "통증을 즉시 없앱니다. 효과가 6시간 동안 지속됩니다.",
-	Tooltip_EmergencyRegenSyringe = "즉시 출혈을 멈추고 체력을 40 회복합니다. 1시간 동안 체력이 점점 회복됩니다.",
+	Tooltip_Syringe_Adrenaline = "지침과 피로를 즉시 회복시키지만, 배고픔과 갈증, 불안이 증가합니다.",
+	Tooltip_Syringe_Doxycycline = "감기, 식중독과 오염된 상처를 치료한다. 좀비 감염은 치료할 수 없습니다.",
+	Tooltip_Syringe_Morphine = "통증을 즉시 없앱니다. 효과가 3시간 동안 지속됩니다.",
+	Tooltip_Syringe_Emergency = "체력 감소를 즉시 멈춥니다. 1시간 동안 체력이 점점 회복됩니다.",
 }

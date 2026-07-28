@@ -302,7 +302,7 @@ model PongDuSyringe_model
     scale   = 1,
 }
 
-item AdrenalineSyringe
+item Syringe_Adrenaline
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
@@ -310,11 +310,11 @@ item AdrenalineSyringe
     Type                = Normal,
     DisplayName         = Adrenaline Syringe,
     Icon                = SyringeAdrenline,
-    Tooltip             = Tooltip_AdrenalineSyringe,
+    Tooltip             = Tooltip_Syringe_Adrenaline,
     WorldStaticModel    = PongDuSyringe_model,
 }
 
-item DoxycyclineSyringe
+item Syringe_Doxycycline
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
@@ -322,14 +322,20 @@ item DoxycyclineSyringe
     Type                = Normal,
     DisplayName         = Doxycycline Syringe,
     Icon                = DoxycyclineSyringe,
-    Tooltip             = Tooltip_DoxycyclineSyringe,
+    Tooltip             = Tooltip_Syringe_Doxycycline,
     WorldStaticModel    = PongDuSyringe_model,
 }
 
 /* 신규 2종. 아이콘은 전용 아트가 없어 FAO 미사용 텍스처를 임시로 재활용함
-   (MorphineSyringe = FAO Syringe2, EmergencyRegenSyringe = FAO EmptySyringe).
-   전용 아이콘 뽑으면 Icon 값과 textures/*.png만 교체하면 됨. */
-item MorphineSyringe
+   (Syringe_Morphine = FAO Syringe2, Syringe_Emergency = FAO EmptySyringe).
+   전용 아이콘 뽑으면 Icon 값과 textures 폴더의 png 파일만 교체하면 됨.
+
+   주의: 이 파일의 주석 안에는 슬래시+별표 조합을 절대 넣지 말 것.
+   ScriptParser.stripComments()가 파일을 뒤에서부터 훑으면서 닫는 기호에
+   가장 가까운 여는 기호를 찾는 방식이라, 주석 본문에 그 조합이 있으면
+   거기서부터만 지워지고 원래 여는 기호가 남아 바로 다음 블록이 깨진다.
+   (실제로 이 주석 때문에 MorphineSyringe가 등록되지 않았다) */
+item Syringe_Morphine
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
@@ -337,11 +343,11 @@ item MorphineSyringe
     Type                = Normal,
     DisplayName         = Morphine Syringe,
     Icon                = MorphineSyringe,
-    Tooltip             = Tooltip_MorphineSyringe,
+    Tooltip             = Tooltip_Syringe_Morphine,
     WorldStaticModel    = PongDuSyringe_model,
 }
 
-item EmergencyRegenSyringe
+item Syringe_Emergency
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
@@ -349,7 +355,7 @@ item EmergencyRegenSyringe
     Type                = Normal,
     DisplayName         = Emergency Regen Syringe,
     Icon                = EmergencyRegenSyringe,
-    Tooltip             = Tooltip_EmergencyRegenSyringe,
+    Tooltip             = Tooltip_Syringe_Emergency,
     WorldStaticModel    = PongDuSyringe_model,
 }
 
