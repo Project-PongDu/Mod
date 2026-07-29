@@ -52,6 +52,43 @@ local function pickSerum()
     return skillPotionTable[#skillPotionTable].id   -- 안전망
 end
 
+-- giveSupply(itemId, sender, label) -> InventoryItem | nil
+-- 인벤토리에 아이템을 직접 꽂아주는 보급 계열 기능(백신/스킬혈청/무기상자/
+-- 차량키트/인벤세이브권)의 공통 처리. 지급 -> 후원자 각인 -> 보급음 순서다.
+--   * label 을 주면 표시명 대신 그 문자열을 쓴다(백신: 아이템명이 "Zomboxivir"라
+--     후원자 각인 시 "Vaccine"으로 바꿔 쓰던 기존 동작 유지).
+--   * pongdu_supply 는 getSoundManager():PlaySound() 로 재생하는 클라 로컬
+--     사운드다. 월드 사운드(addSound)가 아니므로 좀비 어그로가 붙지 않는다.
+--   * AddItem 이 nil 을 반환하는 경우(아이템 스크립트 오타/미등록 등)엔 사운드를
+--     재생하지 않는다 -- "소리는 났는데 아이템은 없다"가 제일 추적하기 어렵다.
+local function giveSupply(itemId, sender, label)
+    local player = global.player
+    if not player then
+        print("[PongDu] Supply aborted: player is nil (item=" .. tostring(itemId) .. ")")
+        return nil
+    end
+
+    local item = player:getInventory():AddItem("t3chzzkDonation." .. itemId)
+    if not item then
+        print("[PongDu] Supply FAILED: AddItem returned nil (item=" .. tostring(itemId)
+            .. ", sender=" .. tostring(sender) .. ")")
+        return nil
+    end
+
+    item:setName((sender or "") .. "'s " .. (label or item:getDisplayName()))
+    item:getModData().t3Donor = sender or ""
+    -- 주의: PlaySound(name, loop, maxGain)의 maxGain은 SoundManager.java 구현상
+    -- 완전히 무시된다(내부에서 baseSoundEmitter.playSound(name)만 호출하고 maxGain
+    -- 파라미터는 쓰지 않음). 볼륨을 실제로 적용하려면 반환된 Audio 핸들에
+    -- setVolume()을 직접 호출해야 한다.
+    local audio = getSoundManager():PlaySound("pongdu_supply", false, 1.0)
+    if audio then audio:setVolume(0.5) end
+
+    print("[PongDu] Supply delivered: item=" .. tostring(itemId)
+        .. ", sender=" .. tostring(sender))
+    return item
+end
+
 
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
@@ -100,8 +137,7 @@ local rewardHandlers = {
     ["vaccine"] = {
         immediate = true,
         fn = function(sender)
-            local item = global.player:getInventory():AddItem("t3chzzkDonation.Zomboxivir")
-            if item then item:setName(sender .. "'s Vaccine") end   -- Vaccine
+            giveSupply("Zomboxivir", sender, "Vaccine")    -- Vaccine
             global.processingEvent = false
         end,
     },
@@ -178,9 +214,7 @@ local rewardHandlers = {
     ["random_skill_potion"] = {
         immediate = true,
         fn = function(sender)
-            local itemId = pickSerum()
-            local item = global.player:getInventory():AddItem("t3chzzkDonation." .. itemId)
-            if item then item:setName((sender or "") .. "'s " .. item:getDisplayName()) end
+            giveSupply(pickSerum(), sender)
             global.processingEvent = false
         end,
     },
@@ -200,11 +234,7 @@ local rewardHandlers = {
         fn = function(sender)
             -- 50/50: 근접무기상자 / 원거리무기상자. 상자를 열면 t3RandomWeapon 확률표로 무기 1개.
             local boxId = (ZombRand(100) < 50) and "weapon_box_melee" or "weapon_box_ranged"
-            local item = global.player:getInventory():AddItem("t3chzzkDonation." .. boxId)
-            if item then
-                item:setName((sender or "") .. "'s " .. item:getDisplayName())
-                item:getModData().t3Donor = sender or ""
-            end
+            giveSupply(boxId, sender)
             global.processingEvent = false
         end,
     },
@@ -212,11 +242,7 @@ local rewardHandlers = {
         immediate = true,
         fn = function(sender)
             -- 개봉하면 t3VehicleDrop.OpenKit이 실행되어 근처 실외에 차량을 소환한다.
-            local item = global.player:getInventory():AddItem("t3chzzkDonation.vehicle_drop_kit")
-            if item then
-                item:setName((sender or "") .. "'s " .. item:getDisplayName())
-                item:getModData().t3Donor = sender or ""
-            end
+            giveSupply("vehicle_drop_kit", sender)
             global.processingEvent = false
         end,
     },
@@ -232,11 +258,7 @@ local rewardHandlers = {
         fn = function(sender)
             -- 인벤세이브권: 소지한 채 사망(좀비화 포함)하면 자동 발동/소모되어
             -- 사망 시점 인벤토리 전체를 리스폰 후 돌려받는다 (features/invsave.lua).
-            local item = global.player:getInventory():AddItem("t3chzzkDonation.inv_save_ticket")
-            if item then
-                item:setName((sender or "") .. "'s " .. item:getDisplayName())
-                item:getModData().t3Donor = sender or ""
-            end
+            giveSupply("inv_save_ticket", sender)
             global.processingEvent = false
         end,
     },

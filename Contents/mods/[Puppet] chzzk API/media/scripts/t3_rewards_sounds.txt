@@ -99,4 +99,21 @@ module Base
         }
     }
 
+
+    /* 인벤토리 직접 보급 계열(백신/스킬혈청/무기상자/차량키트/인벤세이브권) 공통
+       지급 효과음. rewardManager.lua의 giveSupply()에서 아이템이 실제로 인벤토리에
+       들어간 직후에만 재생한다. getSoundManager():PlaySound()로 클라 로컬 재생이라
+       월드 사운드가 아니고 좀비 어그로도 붙지 않는다.
+       ※ GameSound 스크립트는 게임 부팅 시에만 로드된다 -- 추가 후 반드시
+         게임을 완전히 재시작해야 인식된다. */
+    sound pongdu_supply
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/supply.wav,
+        }
+    }
+
 }
