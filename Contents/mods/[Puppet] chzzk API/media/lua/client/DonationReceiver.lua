@@ -142,6 +142,12 @@ local colorMap = {
     ["fire_support"]         = {0.22, 0.52, 0.18},
 }
 
+-- featureId -> 도네 큐박스 색상. 봄바드/좀비레인/화력지원/랜텔 등 타이머큐 UI가
+-- 큐박스와 같은 색을 쓰도록 외부에도 노출한다 (module 하단 return 참조).
+local function getQueueColor(featureId)
+    return colorMap[featureId] or {0.5, 0.5, 0.5}
+end
+
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
 -- render()가 기존 색상 틴트 + 약어 태그로 폴백함. 나중에 실제 아이콘 이미지를
 -- 준비하면 여기에 경로만 채우면 됨 (예: ["missile"] = "media/textures/donation/missile.png").
@@ -934,4 +940,4 @@ end)
 Events.OnGameStart.Add(loadUISettings)
 Events.OnGameStart.Add(loadPendingQueue)
 
-return { getTooltipTopY = getTooltipTopY }
+return { getTooltipTopY = getTooltipTopY, getColor = getQueueColor }

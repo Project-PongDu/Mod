@@ -1,6 +1,7 @@
 local _a = {}
 require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
+local donationReceiver = require("DonationReceiver")
 
 -- ── 좀비 레인 (zombie_rain) 클라이언트 ── [프로토타입: 런타임 스퀘어 생성] ─────
 -- 역할 4가지:
@@ -84,8 +85,9 @@ function RainTimerDisplay:render()
     local totalSec = math.floor(_rainTicks / 60)
     local m = math.floor(totalSec / 60)
     local s = totalSec % 60
+    local col = donationReceiver.getColor("zombie_rain")
     self:drawTextCentre(getText("IGUI_donation_zombie_rain") .. " " .. string.format("%02d:%02d", m, s),
-        self.width / 2, 0, 0.55, 0.75, 1, 1, UIFont.Medium)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
 function RainTimerDisplay:update()

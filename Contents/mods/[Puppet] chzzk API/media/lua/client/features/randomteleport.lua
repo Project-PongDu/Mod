@@ -1,6 +1,8 @@
 local randomteleport = {}
 local global = require("global")
 require("ISUI/ISPanel")
+local timerStack = require("utils/timerStack")
+local donationReceiver = require("DonationReceiver")
 
 -- ── 랜덤 텔레포트 (random_teleport) ──────────────────────────────────────────
 -- 발동 시점 위치를 원점으로, 반경 RT_MinDist~RT_MaxDist(기본 100~200)타일
@@ -113,9 +115,9 @@ local _retPanel = nil
 
 function RTReturnTimerDisplay:new(player)
     local w = getCore():getScreenWidth()
-    local h = getCore():getScreenHeight()
-    -- 폭격(h-150)/레인(h-180) 타이머와 동시 표시 대비 30px 위
-    local o = ISPanel:new(w / 2 - 80, h - 210, 160, 25)
+    -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
+    -- 다른 타이머(봄바드/레인/화력지원)와 동일 규격: 폭 240, 폰트 Medium.
+    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
     setmetatable(o, self)
     self.__index = self
     o.player = player
@@ -126,13 +128,15 @@ end
 function RTReturnTimerDisplay:render()
     local t = self.player:getModData().rtReturnTime or 0
     local sec = math.floor(t / 60)
+    local col = donationReceiver.getColor("random_teleport")
     self:drawTextCentre(getText("IGUI_donation_random_teleport") .. " "
         .. string.format("%02d:%02d", math.floor(sec / 60), sec % 60),
-        self.width / 2, 0, 0.55, 1.0, 0.55, 1, UIFont.Small)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
 function RTReturnTimerDisplay:update()
     if (self.player:getModData().rtReturnTime or 0) <= 0 then
+        timerStack.unregister(self)
         self:removeFromUIManager()
         _retPanel = nil
     end
@@ -185,6 +189,7 @@ local function rtStartTicker(p)
         _retPanel = RTReturnTimerDisplay:new(p)
         _retPanel:addToUIManager()
         _retPanel:setVisible(true)
+        timerStack.register(_retPanel)
     end
 end
 

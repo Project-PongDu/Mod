@@ -1,6 +1,7 @@
 local _a = _a or {}
 require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
+local donationReceiver = require("DonationReceiver")
 
 local BombardTimerDisplay = ISPanel:derive("BombardTimerDisplay")
 
@@ -49,9 +50,10 @@ function BombardTimerDisplay:render()
     local a = math.floor(self.currentTime / 60)
     local b = math.floor(a / 60)
     local c = a % 60
+    local col = donationReceiver.getColor("missile")
     self:drawTextCentre(getText("IGUI_donation_bombard_timer")
         .. " " .. string.format("%02d:%02d", b, c),
-        self.width / 2, 0, 1, 1, 1, 1, UIFont.Medium)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 function BombardTimerDisplay:update()
     local a = self.player:getModData()

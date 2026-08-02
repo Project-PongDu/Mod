@@ -2,6 +2,7 @@ local _a = {}
 
 local global = require("global")
 local timerStack = require("utils/timerStack")
+local donationReceiver = require("DonationReceiver")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화력 지원 (fire_support): 저격 / 드론 / 헬기 / 공수 중 1종 랜덤 발동. [스텁]
@@ -519,10 +520,11 @@ function SniperTimerDisplay:render()
     local ms = _sniperEndAt - getTimestampMs()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
+    local col = donationReceiver.getColor("fire_support")
     self:drawTextCentre(getText("IGUI_donation_fire_support_sniper_timer")
         .. " " .. string.format("%02d:%02d",
             math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
 function SniperTimerDisplay:update()
@@ -578,10 +580,11 @@ function HeliTimerDisplay:render()
     local ms = _heliEndAt - getTimestampMs()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
+    local col = donationReceiver.getColor("fire_support")
     self:drawTextCentre(getText("IGUI_donation_fire_support_heli_timer")
         .. " " .. string.format("%02d:%02d",
             math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
 function HeliTimerDisplay:update()
@@ -1005,10 +1008,11 @@ function DroneTimerDisplay:render()
     local ms = _droneEndAt - getTimestampMs()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
+    local col = donationReceiver.getColor("fire_support")
     self:drawTextCentre(getText("IGUI_donation_fire_support_drone_timer")
         .. " " .. string.format("%02d:%02d",
             math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
+        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
 function DroneTimerDisplay:update()
