@@ -381,6 +381,7 @@ item Zomboxivir
     Tooltip             = Tooltip_Zomboxivir,
     Medical             = TRUE,
     EatType             = popcan,
+    CustomContextMenu   = Break_Ampule,
     OnEat               = OnEat_Zomboxivir,
     CustomEatSound      = BreakAmpule,
     WorldStaticModel    = Tweezers,
