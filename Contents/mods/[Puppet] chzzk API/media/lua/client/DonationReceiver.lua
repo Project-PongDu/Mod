@@ -117,35 +117,13 @@ local labelKey = {
     ["fire_support"]         = "IGUI_donation_fire_support",
 }
 
-local colorMap = {
-    ["debuff_roulette"]      = {0.55, 0.05, 0.95},
-    ["buff_roulette"]        = {0.05, 0.45, 1.0},
-    ["zombie_roulette"]      = {0.05, 0.85, 0.05},
-    ["sprinter5"]            = {0.95, 0.85, 0.0},
-    ["bandit_melee"]         = {1.0, 0.25, 0.0},
-    ["vaccine"]              = {0.0, 0.85, 0.85},
-    ["bandit_ranged"]        = {0.95, 0.0, 0.0},
-    ["exile"]                = {0.95, 0.6, 0.0},
-    ["random_teleport"]      = {0.1, 0.55, 1.0},
-    ["backroom"]             = {0.95, 0.6, 0.0},
-    ["missile"]              = {1.0, 0.15, 0.0},
-    ["random_weapon"]        = {0.75, 0.75, 0.0},
-    ["random_skill_potion"]  = {0.15, 0.85, 0.15},
-    ["inv_save_ticket"]      = {0.95, 0.8, 0.0},
-    ["vehicle_drop"]         = {0.35, 0.35, 1.0},
-    ["revive_ticket"]        = {1.0, 0.35, 0.55},
-    ["mutant_spawn"]         = {0.8, 0.05, 0.05},
-    ["secret_passage_kit"]   = {0.65, 0.35, 0.05},
-    ["horde_night"]          = {0.95, 0.0, 0.0},
-    ["rise_up_dead_man"]     = {0.45, 0.0, 0.6},
-    ["zombie_rain"]          = {0.15, 0.4, 0.95},
-    ["fire_support"]         = {0.22, 0.52, 0.18},
-}
+local colorMap = require("utils/colorMap")
+local textOutline = require("utils/textOutline")
 
 -- featureId -> 도네 큐박스 색상. 봄바드/좀비레인/화력지원/랜텔 등 타이머큐 UI가
 -- 큐박스와 같은 색을 쓰도록 외부에도 노출한다 (module 하단 return 참조).
 local function getQueueColor(featureId)
-    return colorMap[featureId] or {0.5, 0.5, 0.5}
+    return colorMap.get(featureId)
 end
 
 -- 슬롯 아이콘 이미지 확장 지점. featureId -> 텍스처 경로. 지금은 비어있어서
@@ -203,18 +181,12 @@ local BORDER_COL = {1.0, 1.0, 1.0}
 
 -- PZ ISUIElement:drawText엔 아웃라인 인자가 없다. 스택 숫자 색(1, 0.95, 0.35)이
 -- BORDER_COL(흰색)과 밝기가 비슷해서 슬롯 테두리에 겹치면 가독성이 떨어지길래,
--- 8방향 1px(스케일 적용) 오프셋으로 검정 텍스트를 먼저 깔고 그 위에 원래
--- 텍스트를 그리는 방식으로 아웃라인을 흉내낸다.
+-- 8방향 오프셋으로 검정 텍스트를 먼저 깔고 그 위에 원래 텍스트를 그리는
+-- 방식으로 아웃라인을 흉내낸다. 실제 로직은 utils/textOutline(leaf 모듈)에
+-- 있고 여기선 얇게 위임만 한다 -- 화력지원/봄바드 등 타이머 표시들도 같은
+-- 모듈을 쓰므로 로직을 두 곳에 중복시키지 않기 위함.
 local function drawTextOutlined(uiElement, text, x, y, r, g, b, a, font)
-    local o = sc(2)
-    for dx = -o, o, o do
-        for dy = -o, o, o do
-            if dx ~= 0 or dy ~= 0 then
-                uiElement:drawText(text, x + dx, y + dy, 0, 0, 0, a, font)
-            end
-        end
-    end
-    uiElement:drawText(text, x, y, r, g, b, a, font)
+    textOutline.draw(uiElement, text, x, y, r, g, b, a, font)
 end
 
 local function getIconTexture(featureId)
@@ -302,7 +274,7 @@ function DonationEntryPanel:render()
     local dur   = e.duration_ms or PANEL_DURATION_MS
     if dur <= 0 then dur = 1 end
     local prog  = rem / dur              -- 1 = 방금 시작(쿨다운 꽉 참), 0 = 발동 직전
-    local col   = colorMap[e.featureId] or {0.5, 0.5, 0.5}
+    local col   = colorMap.get(e.featureId)
     local w, h  = self.width, self.height
     local tex   = getIconTexture(e.featureId)
     local fillMask, borderMask = getSlotMasks()

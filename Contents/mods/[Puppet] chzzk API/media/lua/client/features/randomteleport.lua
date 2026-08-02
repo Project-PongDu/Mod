@@ -2,7 +2,8 @@ local randomteleport = {}
 local global = require("global")
 require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
-local donationReceiver = require("DonationReceiver")
+local colorMap = require("utils/colorMap")
+local textOutline = require("utils/textOutline")
 
 -- ── 랜덤 텔레포트 (random_teleport) ──────────────────────────────────────────
 -- 발동 시점 위치를 원점으로, 반경 RT_MinDist~RT_MaxDist(기본 100~200)타일
@@ -130,8 +131,8 @@ end
 function RTReturnTimerDisplay:render()
     local t = self.player:getModData().rtReturnTime or 0
     local sec = math.floor(t / 60)
-    local col = donationReceiver.getColor("random_teleport")
-    self:drawTextCentre(getText("IGUI_donation_random_teleport") .. " "
+    local col = colorMap.get("random_teleport")
+    textOutline.drawCentre(self, getText("IGUI_donation_random_teleport") .. " "
         .. string.format("%02d:%02d", math.floor(sec / 60), sec % 60),
         self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
