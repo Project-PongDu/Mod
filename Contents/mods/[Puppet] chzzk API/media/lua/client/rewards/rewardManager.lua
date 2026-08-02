@@ -12,6 +12,7 @@ local mutantspawn = require("features/mutantspawn")
 local zombierain = require("features/zombierain")
 local randomteleport = require("features/randomteleport")
 local firesupport = require("features/firesupport")
+local serum      = require("features/skillpotion")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -26,30 +27,6 @@ local function handleZombieSpawn(amount, sprint, sender)
         zombie.a()
     end
     global.b(" handleZombieSpawn FUNCTION END")
-end
-
--- 랜덤 스킬 물약(random_skill_potion) 확률 테이블. weight 합계 = 10000 (0.01% 단위).
---   serum_supreme   : 1%   고정 (잭팟)
---   나머지 99% 는 Sprinting/Lightfoot/Nimble/Sneak 가 각 2유닛, Strength/Fitness 가 각 1유닛
---   비율로 분배 -> 10유닛 = 9.9%/유닛 -> Str/Fit 9.9%씩, 나머지 4개 19.8%씩.
-local skillPotionTable = {
-    { id = "serum_supreme",   weight = 100 },   -- 1.00%
-    { id = "serum_strength",  weight = 990 },   -- 9.90%
-    { id = "serum_fitness",   weight = 990 },   -- 9.90%
-    { id = "serum_sprinting", weight = 1980 },  -- 19.80%
-    { id = "serum_lightfoot", weight = 1980 },  -- 19.80%
-    { id = "serum_nimble",    weight = 1980 },  -- 19.80%
-    { id = "serum_sneak",     weight = 1980 },  -- 19.80%
-}
-
-local function pickSerum()
-    local roll = ZombRand(10000)
-    local acc = 0
-    for _, entry in ipairs(skillPotionTable) do
-        acc = acc + entry.weight
-        if roll < acc then return entry.id end
-    end
-    return skillPotionTable[#skillPotionTable].id   -- 안전망
 end
 
 -- giveSupply(itemId, sender, label) -> InventoryItem | nil
@@ -214,7 +191,16 @@ local rewardHandlers = {
     ["random_skill_potion"] = {
         immediate = true,
         fn = function(sender)
-            giveSupply(pickSerum(), sender)
+            -- 스킬 균등 추첨 -> 등급 가중 추첨. 확률/제외 판정은 전부
+            -- features/skillpotion.lua 가 샌드박스 옵션을 보고 처리한다.
+            local skill, grade = serum.roll()
+            if skill then
+                local item = giveSupply("serum_" .. grade.id, sender,
+                    serum.buildLabel(skill, grade))
+                if item then
+                    serum.stamp(item, skill, grade)
+                end
+            end
             global.processingEvent = false
         end,
     },

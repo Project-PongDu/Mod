@@ -70,8 +70,13 @@ IGUI_KO = {
 
 
 
-    IGUI_donation_random_skill_potion = "신체 강화 혈청",
-	IGUI_serum_supreme_say = "뭐지...!!?!",
+    IGUI_donation_random_skill_potion = "강화 혈청",
+	IGUI_serum_grade_common = "일반",
+	IGUI_serum_grade_rare = "희귀",
+	IGUI_serum_grade_epic = "특급",
+	IGUI_serum_cat_body = "신체능력 강화혈청",
+	IGUI_serum_cat_agility = "운동능력 강화혈청",
+	IGUI_serum_cat_combat = "전투능력 강화혈청",
 
 
 

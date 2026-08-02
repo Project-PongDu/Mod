@@ -42,6 +42,108 @@ option PongDu.Delay_random_skill_potion = {
     page = PongDu_Buff, translation = PongDu_Delay_random_skill_potion,
 }
 
+/* 스킬별 강화혈청 획득 등급 제한.
+   1=일반+희귀+특급 / 2=일반+희귀 / 3=일반만 / 4=획득 불가
+   valueTranslation 은 14개 옵션이 PongDu_SerumDrop 하나를 공유한다. */
+
+option PongDu.Serum_Fitness = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Fitness,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Strength = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Strength,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Sprinting = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Sprinting,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Lightfoot = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Lightfoot,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Nimble = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Nimble,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Sneak = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Sneak,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Axe = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Axe,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Blunt = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Blunt,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_SmallBlunt = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_SmallBlunt,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_LongBlade = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_LongBlade,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_SmallBlade = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_SmallBlade,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Spear = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Spear,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Maintenance = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Maintenance,
+    valueTranslation = PongDu_SerumDrop,
+}
+
+option PongDu.Serum_Aiming = {
+    type = enum, numValues = 4, default = 1,
+    page = PongDu_Buff,
+    translation = PongDu_Serum_Aiming,
+    valueTranslation = PongDu_SerumDrop,
+}
+
 option PongDu.Divider_RandomWeapon = {
     type = boolean, default = false,
     page = PongDu_Buff, translation = PongDu_Divider_RandomWeapon,

@@ -1,13 +1,8 @@
 ItemName_KO = {
     
-    ItemName_t3chzzkDonation.serum_supreme = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_used = "강화 혈청 (사용됨)",
-    ItemName_t3chzzkDonation.serum_strength = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_fitness = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_sprinting = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_lightfoot = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_nimble = "강화 혈청",
-    ItemName_t3chzzkDonation.serum_sneak = "강화 혈청",
+    ItemName_t3chzzkDonation.serum_common = "강화 혈청",
+    ItemName_t3chzzkDonation.serum_rare = "강화 혈청",
+    ItemName_t3chzzkDonation.serum_epic = "강화 혈청",
     
     ItemName_t3chzzkDonation.inv_save_ticket = "인벤토리 세이브 티켓",
     ItemName_t3chzzkDonation.weapon_box_melee = "보급상자",

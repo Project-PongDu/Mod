@@ -9,17 +9,24 @@ module t3chzzkDonation
    ModelScript.check> no such model "???.serum_supreme_model" 이 뜬다.
    (대소문자 구분이라 Model 은 안전하지만 헷갈리므로 아예 쓰지 않는다) */
 
-model PongDuSerumSupreme
+model PongDuSerumCommon
 {
     mesh    = WorldItems/Candle,
-    texture = WorldItems/serum_supreme_world,
+    texture = WorldItems/serum_common_world,
     scale   = 0.4,
 }
 
-model PongDuSerumUsed
+model PongDuSerumRare
 {
     mesh    = WorldItems/Candle,
-    texture = WorldItems/serum_used_world,
+    texture = WorldItems/serum_rare_world,
+    scale   = 0.4,
+}
+
+model PongDuSerumEpic
+{
+    mesh    = WorldItems/Candle,
+    texture = WorldItems/serum_epic_world,
     scale   = 0.4,
 }
 
@@ -32,133 +39,56 @@ model t3DeployedParachute
     scale   = 0.005,
 }
 
-item serum_supreme
+/* 강화혈청. 아이템 정의는 등급 3종뿐이고, "어떤 스킬을 올리는가"는 지급 시점에
+   modData(t3SerumPerk)로 심는다. 14스킬 x 3등급 = 42개 블록을 만들지 않기 위한
+   구조이며, 표시 이름과 툴팁은 features/skillpotion.lua 가 런타임에 붙인다.
+   그래서 여기에 Tooltip 항목이 없다 -- 정적으로 박으면 등급별 1종밖에 못 쓴다. */
+
+item serum_common
 {
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
     DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_supreme,
+    Icon                = serum_common,
     Medical             = TRUE,
     CustomContextMenu   = serum_useInjector,
     EatType             = popcan,
-    OnEat               = OnEat_serum_supreme,
+    OnEat               = OnEat_serum_common,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
+    WorldStaticModel    = PongDuSerumCommon,
     Tags                = CMP,
 }
 
-item serum_used
-{
-    DisplayCategory     = FirstAid,
-    Weight              = 0.2,
-    Type                = Normal,
-    DisplayName         = Enhancement Serum (used),
-    Icon                = serum_used,
-    Tooltip             = Tooltip_serum_supreme,
-    WorldStaticModel    = PongDuSerumUsed,
-}
-
-item serum_strength
+item serum_rare
 {
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
     DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
+    Icon                = serum_rare,
     Medical             = TRUE,
     CustomContextMenu   = serum_useInjector,
     EatType             = popcan,
-    OnEat               = OnEat_serum_strength,
+    OnEat               = OnEat_serum_rare,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
+    WorldStaticModel    = PongDuSerumRare,
     Tags                = CMP,
 }
 
-item serum_fitness
+item serum_epic
 {
     DisplayCategory     = FirstAid,
     Weight              = 0.2,
     Type                = Food,
     DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
+    Icon                = serum_epic,
     Medical             = TRUE,
     CustomContextMenu   = serum_useInjector,
     EatType             = popcan,
-    OnEat               = OnEat_serum_fitness,
+    OnEat               = OnEat_serum_epic,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
-    Tags                = CMP,
-}
-
-item serum_sprinting
-{
-    DisplayCategory     = FirstAid,
-    Weight              = 0.2,
-    Type                = Food,
-    DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
-    Medical             = TRUE,
-    CustomContextMenu   = serum_useInjector,
-    EatType             = popcan,
-    OnEat               = OnEat_serum_sprinting,
-    CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
-    Tags                = CMP,
-}
-
-item serum_lightfoot
-{
-    DisplayCategory     = FirstAid,
-    Weight              = 0.2,
-    Type                = Food,
-    DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
-    Medical             = TRUE,
-    CustomContextMenu   = serum_useInjector,
-    EatType             = popcan,
-    OnEat               = OnEat_serum_lightfoot,
-    CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
-    Tags                = CMP,
-}
-
-item serum_nimble
-{
-    DisplayCategory     = FirstAid,
-    Weight              = 0.2,
-    Type                = Food,
-    DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
-    Medical             = TRUE,
-    CustomContextMenu   = serum_useInjector,
-    EatType             = popcan,
-    OnEat               = OnEat_serum_nimble,
-    CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
-    Tags                = CMP,
-}
-
-item serum_sneak
-{
-    DisplayCategory     = FirstAid,
-    Weight              = 0.2,
-    Type                = Food,
-    DisplayName         = Enhancement Serum,
-    Icon                = serum_supreme,
-    Tooltip             = Tooltip_serum_normal,
-    Medical             = TRUE,
-    CustomContextMenu   = serum_useInjector,
-    EatType             = popcan,
-    OnEat               = OnEat_serum_sneak,
-    CustomEatSound      = serum_inject,
-    WorldStaticModel    = PongDuSerumSupreme,
+    WorldStaticModel    = PongDuSerumEpic,
     Tags                = CMP,
 }
 
