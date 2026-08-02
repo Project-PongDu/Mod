@@ -380,14 +380,41 @@ end
 -- 기준으로 재선정한다.
 local _sniperJobs = {}
 
+local function sniperBroadcastStart(job)
+    local now = getTimestampMs()
+    local payload = { own = job.own, remain = job.expireAt - now }
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        sendServerCommand(players:get(k), "PongDuFireSupport", "SniperStart", payload)
+    end
+end
+
 DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
+    local dur    = (tonumber(data["dur"]) or 30) * 1000
     local r      = tonumber(data["r"])  or 30
-    local n      = tonumber(data["n"])  or 10
     local iv     = tonumber(data["iv"]) or 3000
     local pierce = data["pc"] and true or false
     local pcChan = tonumber(data["pcc"]) or 50
     local kdChan = tonumber(data["kd"])  or 50
     local sender = data["sender"] or ""
+
+    -- 중첩: 이미 저격 중인 플레이어면 남은 시간만 연장한다(헬기/드론과 동일
+    -- 정책). 저격수 위치·조준 파라미터는 최초 발동 시점 그대로 유지하고,
+    -- 사거리/간격/관통 설정만 최신 후원 값으로 갱신한다.
+    for i = 1, #_sniperJobs do
+        local job = _sniperJobs[i]
+        if job.player == player then
+            local now2 = getTimestampMs()
+            job.r, job.iv, job.pierce, job.pcChan, job.kdChan, job.sender =
+                r, iv, pierce, pcChan, kdChan, sender
+            job.expireAt = math.max(job.expireAt, now2) + dur
+            sniperBroadcastStart(job)
+            print(string.format(
+                "[PongDu][Sniper] job EXTENDED +%dms remain=%dms sender=%s",
+                dur, job.expireAt - now2, tostring(sender)))
+            return
+        end
+    end
 
     -- 저격수 위치는 발동 시점 1회만 고정("한 곳에 자리잡은 저격수").
     -- r+50 타일 거리면 통상 줌에서 화면 밖이다. 
@@ -398,16 +425,20 @@ DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
     local oy     = cy + math.sin(ang) * odist
     local oz     = player:getZ()
 
-    _sniperJobs[#_sniperJobs + 1] = {
-        player = player, r = r, iv = iv, sender = sender,
+    local now = getTimestampMs()
+    local job = {
+        player = player, own = player:getOnlineID(),
+        r = r, iv = iv, sender = sender,
         ox = ox, oy = oy, oz = oz,
         pierce = pierce, pcChan = pcChan, kdChan = kdChan,
-        remaining = n, nextAt = getTimestampMs(),
+        nextAt = now, expireAt = now + dur,
         shotZids = {},   -- 이 job에서 이미 쏜 zid는 재선정 대상에서 제외
     }
+    _sniperJobs[#_sniperJobs + 1] = job
 
-    print(string.format("[PongDu][Sniper] job queued n=%d r=%d iv=%d pierce=%s chance=%d%% knockdown=%d%% origin=%d,%d sender=%s",
-        n, r, iv, tostring(pierce), pcChan, kdChan,
+    sniperBroadcastStart(job)
+    print(string.format("[PongDu][Sniper] job queued dur=%dms r=%d iv=%d pierce=%s chance=%d%% knockdown=%d%% origin=%d,%d sender=%s",
+        dur, r, iv, tostring(pierce), pcChan, kdChan,
         math.floor(ox), math.floor(oy), tostring(sender)))
 end
 
@@ -495,8 +526,13 @@ local function processSniperJobs()
     local now = getTimestampMs()
     for i = #_sniperJobs, 1, -1 do
         local job = _sniperJobs[i]
-        if job.remaining <= 0 then
+        if now >= job.expireAt then
             table.remove(_sniperJobs, i)
+            local players = getOnlinePlayers()
+            for k = 0, players:size() - 1 do
+                sendServerCommand(players:get(k), "PongDuFireSupport", "SniperStop", { own = job.own })
+            end
+            print("[PongDu][Sniper] job finished own=" .. tostring(job.own))
         elseif now >= job.nextAt then
             local target  = pickSniperTarget(job)
             local payload = { ox = job.ox, oy = job.oy, oz = job.oz, sender = job.sender }
@@ -509,7 +545,7 @@ local function processSniperJobs()
                 payload.ex, payload.gz, payload.kd = ex, gz, job.kdChan
                 print("[PongDu][Sniper] shot zid=" .. zid
                     .. " pierced=" .. #ex .. " grazed=" .. #gz
-                    .. " remaining_after=" .. (job.remaining - 1))
+                    .. " remain=" .. (job.expireAt - now) .. "ms")
             else
                 print("[PongDu][Sniper] shot MISS: no target in radius r=" .. job.r)
             end
@@ -519,8 +555,7 @@ local function processSniperJobs()
                 sendServerCommand(players:get(k), "PongDuFireSupport", "SniperFire", payload)
             end
 
-            job.remaining = job.remaining - 1
-            job.nextAt    = now + job.iv
+            job.nextAt = now + job.iv
         end
     end
 end

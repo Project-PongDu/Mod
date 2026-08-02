@@ -75,11 +75,11 @@ end
 -- 조용히 어긋날 위험만 만든다. 값 범위(min/max/default)는 sandbox-options.txt
 -- 한 곳에서만 정의한다.
 
--- 저격 파라미터: Sniper_Radius / Sniper_Count / Sniper_Interval(ms).
+-- 저격 파라미터: Sniper_Radius / Sniper_Duration(s) / Sniper_Interval(ms).
 local function sniperCfg()
     local sv = SandboxVars.PongDu
     return sv.Sniper_Radius,
-           sv.Sniper_Count,
+           sv.Sniper_Duration,
            sv.Sniper_Interval,
            sv.Sniper_PierceChance,
            sv.Sniper_KnockdownChance
@@ -120,14 +120,14 @@ local runners = {}
 -- 기준이라 총합이 N을 넘어버린다(폭격처럼 반경 전체 킬이 아니라 "N마리"가
 -- 스펙이므로 서버 권위 선정이 필수).
 runners.sniper = function(player, sender)
-    local radius, count, interval, pcChance, kdChance = sniperCfg()
+    local radius, dur, interval, pcChance, kdChance = sniperCfg()
     -- 관통: 저격수와 주 표적 사이 직선상의 좀비를 전부 훑는다.
     -- 사살 여부/넉다운 여부는 서버가 굴려서 내려보낸다.
     local pierce = SandboxVars.PongDu.Sniper_Pierce
-    print(string.format("[PongDu] fire_support/sniper request r=%d n=%d interval=%d pierce=%s chance=%d knockdown=%d",
-        radius, count, interval, tostring(pierce), pcChance, kdChance))
+    print(string.format("[PongDu] fire_support/sniper request r=%d dur=%d interval=%d pierce=%s chance=%d knockdown=%d",
+        radius, dur, interval, tostring(pierce), pcChance, kdChance))
     sendClientCommand("PongDuFireSupport", "Sniper", {
-        r = radius, n = count, iv = interval, sender = sender or "",
+        r = radius, dur = dur, iv = interval, sender = sender or "",
         pc = pierce, pcc = pcChance, kd = kdChance,
     })
 end
@@ -496,6 +496,55 @@ local function tcount(t)
     local n = 0
     for _ in pairs(t) do n = n + 1 end
     return n
+end
+
+-- ── 저격 남은시간 패널 (내 화력지원 전용) ──────────────────────────────────
+-- 헬기/드론 패널과 동시 표시될 수 있으므로 timerStack이 배치한다.
+local _sniperEndAt = nil
+local _sniperPanel = nil
+
+local SniperTimerDisplay = ISPanel:derive("SniperTimerDisplay")
+
+function SniperTimerDisplay:new()
+    local w = getCore():getScreenWidth()
+    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    return o
+end
+
+function SniperTimerDisplay:render()
+    if not _sniperEndAt then return end
+    local ms = _sniperEndAt - getTimestampMs()
+    if ms < 0 then ms = 0 end
+    local totalSec = math.floor(ms / 1000)
+    self:drawTextCentre(getText("IGUI_donation_fire_support_sniper_timer")
+        .. " " .. string.format("%02d:%02d",
+            math.floor(totalSec / 60), totalSec % 60),
+        self.width / 2, 0, 0.65, 0.85, 0.65, 1, UIFont.Medium)
+end
+
+function SniperTimerDisplay:update()
+    if not _sniperEndAt or _sniperEndAt - getTimestampMs() <= 0 then
+        timerStack.unregister(self)
+        self:removeFromUIManager()
+        _sniperPanel = nil
+    end
+end
+
+local function sniperTimerShow(remainMs)
+    _sniperEndAt = getTimestampMs() + (tonumber(remainMs) or 0)
+    if not _sniperPanel then
+        _sniperPanel = SniperTimerDisplay:new()
+        _sniperPanel:addToUIManager()
+        _sniperPanel:setVisible(true)
+        timerStack.register(_sniperPanel)
+    end
+end
+
+local function sniperTimerHide()
+    _sniperEndAt = nil   -- 패널 update()가 다음 프레임에 스스로 제거한다
 end
 
 local HELI_VOL_NEAR     = 1.00   -- 최근접 시 로터음 볼륨
@@ -1538,6 +1587,14 @@ Events.OnServerCommand.Add(function(module, command, args)
     elseif command == "DroneFire" then
         handleDroneFire(args)
         return
+    elseif command == "SniperStart" then
+        local own = ownOf(args, "SniperStart")
+        if own == myOnlineID() then sniperTimerShow(args.remain) end
+        return
+    elseif command == "SniperStop" then
+        local own = ownOf(args, "SniperStop")
+        if own == myOnlineID() then sniperTimerHide() end
+        return
     end
 
     if command ~= "SniperFire" then return end
@@ -1624,6 +1681,7 @@ function _a.b()
     _tracers = {}
     heliRemoveAll("cleanup")
     droneRemoveAll("cleanup")
+    sniperTimerHide()
 end
 
 return _a
