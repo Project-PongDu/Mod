@@ -637,7 +637,8 @@ local function applyDonation(amount, featureId, sender, message)
         amount       = amount,
         featureId    = featureId,
         message      = message or "",   -- 재접속 복원(직렬화) 시 필요
-        locked       = false,    -- onTick이 매 틱 갱신 (안전지대 && zone-blocked 타입)
+        locked       = false,    -- onTick이 매 틱 갱신 (안전지대 락 || 기능 자체 락)
+        zoneLocked   = false,    -- 위 중 안전지대 락 성분만 (락 해제 시 병렬 승격 판정용)
         parallel     = false,    -- 락에서 풀려나면 true로 승격 -> 직렬 순서 무시하고 병렬 소모
         counting     = false,    -- onTick이 갱신: 지금 실제로 카운트다운 중인지 (render 표시용)
     }
@@ -835,13 +836,20 @@ local function onTick()
     local player = getPlayer()
     local inSafeZone = player ~= nil and zone.a(player)
 
-    -- 1) 락 상태 갱신 + 락 해제 감지 (락이었다가 풀린 슬롯만 병렬로 승격)
+    -- 1) 락 상태 갱신 + 락 해제 감지. 락은 두 종류다:
+    --    * 안전지대 락(zoneLocked): 안전지대 안 && zone-blocked 타입. 풀리는
+    --      순간 병렬 레인으로 승격 -- 안전지대에서 못 나가 쌓인 것들을 한꺼번에 푼다.
+    --    * 기능 자체 락(featLocked): 그 기능이 지금 진행 중이라 겹치면 안 되는 경우
+    --      (랜텔 착지 검증 / 생존 복귀 카운트다운). 이건 "순차로 하나씩"이 목적이라
+    --      병렬 승격을 하지 않고 직렬 헤드 경쟁으로 돌아간다.
     for _, e in ipairs(activeEntries) do
-        local nowLocked = inSafeZone and rewardManager.isZoneBlocked(e.featureId)
-        if e.locked and not nowLocked then
+        local zoneLocked = inSafeZone and rewardManager.isZoneBlocked(e.featureId)
+        local featLocked = rewardManager.isFeatureBlocked(e.featureId, player)
+        if e.zoneLocked and not zoneLocked then
             e.parallel = true   -- 안전지대에서 쌓여있다 풀려난 슬롯: 병렬 소모
         end
-        e.locked = nowLocked
+        e.zoneLocked = zoneLocked
+        e.locked = zoneLocked or featLocked
     end
 
     -- 2) 직렬 헤드 선정: 락/병렬이 아닌 슬롯들 중, 다음에 발동할 유닛의 도착 순번

@@ -144,6 +144,12 @@ local rewardHandlers = {
     },
     ["random_teleport"] = {
         immediate = true,
+        -- 안전지대와 무관한 기능 자체 락. 착지 검증 중이거나 생존 복귀
+        -- 카운트다운(RT_Return)이 도는 동안엔 큐박스 슬롯이 자물쇠 상태로 대기하고,
+        -- 원점 복귀로 타이머가 끝나면 풀리면서 다음 유닛이 발동된다.
+        blocked = function(player)
+            return randomteleport.isBusy(player)
+        end,
         fn = function()
             global.b(" random_teleport FUNCTION START")
             getSoundManager():PlaySound("anomaly", false, 1.0)
@@ -329,6 +335,18 @@ function rewardManager.isZoneBlocked(featureId)
     local entry = rewardHandlers[featureId]
     if entry == nil then return false end
     return not isImmediate(entry)
+end
+
+-- isFeatureBlocked(featureId, player) -> true면 안전지대 여부와 무관하게 지금은
+-- 발동 불가. 기능 자체의 진행 상태로 결정된다 (예: 랜덤텔포의 착지 검증 /
+-- 생존 복귀 카운트다운). 핸들러에 blocked 훅이 없는 기능은 항상 false.
+-- 안전지대 락(isZoneBlocked)과 달리 "쌓인 걸 한꺼번에 풀어주는" 성격이 아니라
+-- "순차로 하나씩" 이 목적이라, 락 해제 시 병렬 승격을 하지 않는다
+-- (DonationReceiver.onTick 참조).
+function rewardManager.isFeatureBlocked(featureId, player)
+    local entry = rewardHandlers[featureId]
+    if entry == nil or entry.blocked == nil then return false end
+    return entry.blocked(player) == true
 end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]

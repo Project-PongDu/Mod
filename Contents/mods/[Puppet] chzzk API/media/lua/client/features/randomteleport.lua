@@ -108,10 +108,12 @@ end
 -- (rtReturnTime/rtOrigin)에 저장해 재접속 복구를 지원한다 -- exile의
 -- returnTime/originalPosition과 키를 분리해 두 기능이 동시 진행돼도 서로 안
 -- 덮는다. 사망 시 취소 (exile과 동일 정책).
--- 카운트다운 중 랜텔 재발동 시: 세이프존 중 좀비룰렛류가 큐잉되는 것과 동일한
--- 패턴으로 락을 건다 -- 즉시 연쇄 텔포하지 않고 rtPending만 세워둔다.
--- 카운트다운이 끝나 원점으로 복귀(rtDoReturn)한 '직후'에 큐잉된 텔포를 발동한다
--- (randomteleport.a() 재귀 호출). 복귀 없이 사망하면(rtStopCountdown) 큐도 함께 폐기.
+-- 카운트다운 중 랜텔 재발동 시: 세이프존 중 좀비룰렛류가 큐박스 슬롯에서 락되는
+-- 것과 완전히 동일한 방식으로 처리한다 -- 도네큐박스가 randomteleport.isBusy()를
+-- 매 틱 확인해서 슬롯에 자물쇠를 걸고, 카운트다운이 끝나 원점으로 복귀하면
+-- 락이 풀리며 준비 카운트다운 후 다음 유닛이 발동된다. 즉 대기 상태가 큐박스
+-- UI에 그대로 보이고, 접속 종료 시 저장/복원도 기존 큐 로직을 그대로 탄다.
+-- (여기서 rtPending 같은 자체 큐를 들고 있으면 큐박스와 이중 관리가 된다.)
 local RTReturnTimerDisplay = ISPanel:derive("RTReturnTimerDisplay")
 local _retTick  = nil
 local _retPanel = nil
@@ -156,12 +158,8 @@ local function rtDoReturn(p)
     end
     md.rtReturnTime = 0
     md.rtOrigin = nil
-    local pending = md.rtPending
-    md.rtPending = nil
-    if pending then
-        global.b(" random_teleport: firing queued request after return")
-        randomteleport.a(p)
-    end
+    -- 대기 중이던 후속 랜텔은 큐박스 슬롯에 락 상태로 남아 있다. 여기서
+    -- rtReturnTime이 0이 되는 순간 다음 틱에 락이 풀리며 큐박스가 알아서 발동한다.
 end
 
 local function rtStopCountdown(p)
@@ -169,7 +167,6 @@ local function rtStopCountdown(p)
     if md then
         md.rtReturnTime = 0
         md.rtOrigin = nil
-        md.rtPending = nil
     end
     if _retTick then
         Events.OnTick.Remove(_retTick)
@@ -292,21 +289,31 @@ local function onTick()
     end
 end
 
+-- isBusy(player) -> true면 지금 랜텔을 새로 발동하면 안 되는 상태.
+-- 도네큐박스(DonationReceiver)가 매 틱 확인해서 슬롯에 자물쇠(락)를 걸고,
+-- false로 바뀌면 락이 풀리며 준비 카운트다운 후 다음 유닛이 발동된다.
+--   1) 착지 검증 루프 진행 중(state ~= nil): 좌표가 아직 확정 안 됐다. 이 상태에서
+--      재발동하면 기존 루프가 버려지고 원점이 현재(=텔포된) 위치로 갱신돼
+--      복귀 지점이 어긋난다. RT_Return 옵션과 무관하게 잠근다.
+--   2) 복귀 카운트다운 진행 중(RT_Return 켜짐 && rtReturnTime > 0): 타이머가 끝나
+--      원점으로 돌아올 때까지 다음 텔포를 잠근다.
+function randomteleport.isBusy(player)
+    if state ~= nil then return true end
+    if not player then return false end
+    if not returnCfg() then return false end
+    return (player:getModData().rtReturnTime or 0) > 0
+end
+
 -- 랜덤 텔레포트 발동  [public name: .a]
 function randomteleport.a(player)
     if not player then return end
 
-    -- 복귀 기능이 켜져 있고, 이미 복귀 카운트다운이 진행 중이면 즉시 재텔포하지
-    -- 않고 락(rtPending)만 세워둔다 -- 세이프존 중 좀비룰렛류가 큐잉되는 것과
-    -- 동일한 패턴. 실제 발동은 원점 복귀(rtDoReturn) 직후 이뤄진다.
-    local returnOn = returnCfg()
-    if returnOn then
-        local md = player:getModData()
-        if (md.rtReturnTime or 0) > 0 then
-            md.rtPending = true
-            global.b(" random_teleport: return countdown active, request locked/queued")
-            return
-        end
+    -- 안전망. 정상 경로(큐박스)는 isBusy 동안 슬롯을 락해두므로 여기 도달하지
+    -- 않는다. 큐박스를 거치지 않는 직접 호출까지 통과시키면 복귀 원점이 어긋나므로
+    -- 막는다 -- 이 경로엔 재큐잉할 곳이 없어 요청은 버려진다.
+    if randomteleport.isBusy(player) then
+        global.b(" random_teleport: aborted, busy (landing check or return countdown active)")
+        return
     end
 
     -- 이미 진행 중이면 기존 루프를 버리고 현재 위치 기준으로 새로 시작
