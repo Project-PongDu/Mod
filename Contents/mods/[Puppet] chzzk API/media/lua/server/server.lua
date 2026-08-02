@@ -563,6 +563,11 @@ local _heliJobs = {}
 -- iv(기본 100ms) 기준 3회 = 약 300ms. 너무 크면 clear 반응이 굼떠 보이고,
 -- 1이면(=즉시) 반경 경계 진동으로 LMG 루프가 재시작되며 끊겨 들린다.
 local HELI_MISS_THRESHOLD = 3
+-- 사살 지시를 보낸 zid를 잠시 후보에서 제외하는 유예 시간(ms).
+-- 킬은 소유 클라가 수행하므로 서버의 isDead()가 즉시 true가 되지 않는다.
+-- 이 유예가 없으면 방금 죽인 좀비를 다음 스캔에서 또 락온해 탄을 낭비한다
+-- (알파테스트#2 로그 실측: KILL 48발 / 고유 32마리 = 33% 낭비).
+local HELI_KILL_TTL       = 3000
 
 -- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
 -- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
@@ -840,6 +845,7 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         startAt = now, endAt = now + dur, nextAt = now,
         legDur = dur, expireAt = now + dur,
         missStreak = 0,
+        killed = {},   -- zid -> 재선정 허용 시각(ms). HELI_KILL_TTL 참조
     }
     _heliJobs[#_heliJobs + 1] = job
 
@@ -854,7 +860,7 @@ end
 
 -- 반경 내 랜덤 좀비 1마리. 헬기는 이 좀비를 "락온"해서 사살할 때까지 계속
 -- 쏘고, 죽으면 다음 타겟을 다시 랜덤으로 고른다 (매 발 랜덤 대상 아님).
-local function pickHeliTarget(job)
+local function pickHeliTarget(job, now)
     local ok, cx, cy, cell = pcall(function()
         return job.player:getX(), job.player:getY(), job.player:getCell()
     end)
@@ -869,7 +875,13 @@ local function pickHeliTarget(job)
         if z and not z:isDead() then
             local dx, dy = z:getX() - cx, z:getY() - cy
             if dx * dx + dy * dy <= r2 then
-                pool[#pool + 1] = z
+                -- 사살 지시를 이미 보낸 좀비는 유예 시간 동안 제외.
+                -- 클라의 사망 동기화가 돌아오기 전까지 isDead()가 false라서
+                -- 이 가드가 없으면 같은 좀비를 반복 락온한다.
+                local exp = job.killed[z:getOnlineID()]
+                if not (exp and now < exp) then
+                    pool[#pool + 1] = z
+                end
             end
         end
     end
@@ -945,7 +957,7 @@ local function processHeliJobs()
                 end
             end
             if not target then
-                target = pickHeliTarget(job)
+                target = pickHeliTarget(job, now)
                 job.target = target
                 if target then
                     print("[PongDu][Heli] lock zid=" .. target:getOnlineID())
@@ -984,6 +996,7 @@ local function processHeliJobs()
                 if ZombRand(100) < job.kc then
                     payload.kill = true
                     job.target = nil   -- 사살 -> 다음 발에 새 타겟 랜덤 선정
+                    job.killed[payload.id] = now + HELI_KILL_TTL
                     print("[PongDu][Heli] shot KILL zid=" .. payload.id)
                 end
             else

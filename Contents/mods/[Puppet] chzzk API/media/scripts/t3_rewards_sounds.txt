@@ -116,4 +116,93 @@ module Base
         }
     }
 
+    /* ── 아래 8종: 에셋은 media/sound/ 에 있었으나 GameSound 등록이 누락돼
+       있던 것들. 미등록 상태에서도 GameSounds.getOrCreateSound() 가
+       category="AUTO" 더미를 자동 생성해 재생 자체는 됐지만, 카테고리가
+       없어 게임 옵션의 볼륨 슬라이더가 적용되지 않았고 서버 콘솔에
+       "no GameSound called ..." 경고가 매번 찍혔다 (알파테스트#2 로그). */
+
+    sound necromance
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/necromance.wav,
+        }
+    }
+
+    sound zombie_rain
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/zombie_rain.wav,
+        }
+    }
+
+    sound alert
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/alert.wav,
+        }
+    }
+
+    sound anomaly
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/anomaly.wav,
+        }
+    }
+
+    sound ding
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/ding.wav,
+        }
+    }
+
+    /* 폭격 착탄음. bombard.lua doExplosion() */
+    sound day_one_kaboom
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/day_one_kaboom.wav,
+        }
+    }
+
+    /* 헬기 소탕 완료 무전. firesupport.lua handleHeliClear() */
+    sound area_clear
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/area_clear.wav,
+        }
+    }
+
+    /* 저격 총성. firesupport.lua handleSniperFire() */
+    sound AWP_Bang
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/AWP_Bang.wav,
+        }
+    }
+
 }

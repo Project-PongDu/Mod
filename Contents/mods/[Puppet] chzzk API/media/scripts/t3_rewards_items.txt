@@ -1,14 +1,22 @@
 module t3chzzkDonation
 {
 
-model serum_supreme_model
+/* [주의] model 블록 이름에 "model" 문자열을 넣지 말 것.
+   ScriptModule.Load()가 블록명에서 String.replace("model","")로 키워드를
+   제거하는데, replace는 모든 occurrence를 지우기 때문에 이름 뒤쪽의
+   "model"까지 같이 날아간다. serum_supreme_model 은 serum_supreme_ 로
+   등록돼 WorldStaticModel 참조가 전부 미스나고, 부팅 시
+   ModelScript.check> no such model "???.serum_supreme_model" 이 뜬다.
+   (대소문자 구분이라 Model 은 안전하지만 헷갈리므로 아예 쓰지 않는다) */
+
+model PongDuSerumSupreme
 {
     mesh    = WorldItems/Candle,
     texture = WorldItems/serum_supreme_world,
     scale   = 0.4,
 }
 
-model serum_used_model
+model PongDuSerumUsed
 {
     mesh    = WorldItems/Candle,
     texture = WorldItems/serum_used_world,
@@ -37,7 +45,7 @@ item serum_supreme
     EatType             = popcan,
     OnEat               = OnEat_serum_supreme,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -49,7 +57,7 @@ item serum_used
     DisplayName         = Enhancement Serum (used),
     Icon                = serum_used,
     Tooltip             = Tooltip_serum_supreme,
-    WorldStaticModel    = serum_used_model,
+    WorldStaticModel    = PongDuSerumUsed,
 }
 
 item serum_strength
@@ -65,7 +73,7 @@ item serum_strength
     EatType             = popcan,
     OnEat               = OnEat_serum_strength,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -82,7 +90,7 @@ item serum_fitness
     EatType             = popcan,
     OnEat               = OnEat_serum_fitness,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -99,7 +107,7 @@ item serum_sprinting
     EatType             = popcan,
     OnEat               = OnEat_serum_sprinting,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -116,7 +124,7 @@ item serum_lightfoot
     EatType             = popcan,
     OnEat               = OnEat_serum_lightfoot,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -133,7 +141,7 @@ item serum_nimble
     EatType             = popcan,
     OnEat               = OnEat_serum_nimble,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -150,7 +158,7 @@ item serum_sneak
     EatType             = popcan,
     OnEat               = OnEat_serum_sneak,
     CustomEatSound      = serum_inject,
-    WorldStaticModel    = serum_supreme_model,
+    WorldStaticModel    = PongDuSerumSupreme,
     Tags                = CMP,
 }
 
@@ -295,7 +303,7 @@ item inv_save_ticket
 
 /* FirstAidOverhaul 모드에서 이식. 제작 레시피 없이 아이템만 지급되는 형태로
    단순화 (features/syringe.lua가 인벤토리 우클릭 메뉴에서 "주사하기"로 처리). */
-model PongDuSyringe_model
+model PongDuSyringe
 {
     mesh    = items/Item_Syringe|Syringe,
     texture = WorldItems/MetalSheet,
@@ -311,7 +319,7 @@ item Syringe_Adrenaline
     DisplayName         = Adrenaline Syringe,
     Icon                = SyringeAdrenline,
     Tooltip             = Tooltip_Syringe_Adrenaline,
-    WorldStaticModel    = PongDuSyringe_model,
+    WorldStaticModel    = PongDuSyringe,
 }
 
 item Syringe_Doxycycline
@@ -323,7 +331,7 @@ item Syringe_Doxycycline
     DisplayName         = Doxycycline Syringe,
     Icon                = DoxycyclineSyringe,
     Tooltip             = Tooltip_Syringe_Doxycycline,
-    WorldStaticModel    = PongDuSyringe_model,
+    WorldStaticModel    = PongDuSyringe,
 }
 
 /* 신규 2종. 아이콘은 전용 아트가 없어 FAO 미사용 텍스처를 임시로 재활용함
@@ -344,7 +352,7 @@ item Syringe_Morphine
     DisplayName         = Morphine Syringe,
     Icon                = MorphineSyringe,
     Tooltip             = Tooltip_Syringe_Morphine,
-    WorldStaticModel    = PongDuSyringe_model,
+    WorldStaticModel    = PongDuSyringe,
 }
 
 item Syringe_Emergency
@@ -356,7 +364,7 @@ item Syringe_Emergency
     DisplayName         = Emergency Regen Syringe,
     Icon                = EmergencyRegenSyringe,
     Tooltip             = Tooltip_Syringe_Emergency,
-    WorldStaticModel    = PongDuSyringe_model,
+    WorldStaticModel    = PongDuSyringe,
 }
 
 /* zRe Vaccin("They Knew") 모드의 TheyKnew.Zomboxivir 이식. vaccine 후원(rewardManager.lua)이
