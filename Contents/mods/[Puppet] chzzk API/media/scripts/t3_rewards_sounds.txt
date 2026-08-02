@@ -188,7 +188,8 @@ module Base
         }
     }
 
-    /* 헬기 소탕 완료 무전. firesupport.lua handleHeliClear() */
+    /* 헬기 소탕 완료 무전. firesupport.lua handleHeliClear()
+       PlaySound()의 maxGain은 무시되므로 볼륨은 여기 clip volume으로만 조절된다. */
     sound area_clear
     {
         category = Object,
@@ -196,10 +197,14 @@ module Base
         clip
         {
             file = media/sound/area_clear.wav,
+            volume = 0.5,
         }
     }
 
-    /* 저격 총성. firesupport.lua handleSniperFire() */
+    /* 저격 총성. firesupport.lua handleSniperFire()
+       PlaySound(name, loop, maxGain)의 maxGain은 SoundManager.java에서 통째로
+       무시되므로(내부에서 emitter.playSound(name)만 호출), 헬기 LMG/드론 SMG와
+       마찬가지로 볼륨은 여기 clip volume으로만 조절된다. */
     sound AWP_Bang
     {
         category = Object,
@@ -207,6 +212,7 @@ module Base
         clip
         {
             file = media/sound/AWP_Bang.wav,
+            volume = 0.5,
         }
     }
 
