@@ -510,7 +510,7 @@ option PongDu.Rain_SprinterNameTag = {
 }
 
 option PongDu.Rain_SafeZoneBlock = {
-    type = boolean, default = false,
+    type = boolean, default = true,
     page = PongDu_Debuff, translation = PongDu_Rain_SafeZoneBlock,
 }
 

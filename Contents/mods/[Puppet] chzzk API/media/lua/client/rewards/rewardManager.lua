@@ -193,13 +193,10 @@ local rewardHandlers = {
         fn = function(sender)
             -- 스킬 균등 추첨 -> 등급 가중 추첨. 확률/제외 판정은 전부
             -- features/skillpotion.lua 가 샌드박스 옵션을 보고 처리한다.
-            local skill, grade = serum.roll()
-            if skill then
-                local item = giveSupply("serum_" .. grade.id, sender,
-                    serum.buildLabel(skill, grade))
-                if item then
-                    serum.stamp(item, skill, grade)
-                end
+            -- 표시명은 아이템의 ItemName_* 번역을 그대로 쓴다(label 생략).
+            local itemType = serum.roll()
+            if itemType then
+                giveSupply(itemType, sender)
             end
             global.processingEvent = false
         end,
