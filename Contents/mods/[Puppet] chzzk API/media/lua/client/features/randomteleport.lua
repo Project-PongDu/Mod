@@ -107,8 +107,10 @@ end
 -- (rtReturnTime/rtOrigin)에 저장해 재접속 복구를 지원한다 -- exile의
 -- returnTime/originalPosition과 키를 분리해 두 기능이 동시 진행돼도 서로 안
 -- 덮는다. 사망 시 취소 (exile과 동일 정책).
--- 카운트다운 중 랜텔 재발동 시: 최초 원점(rtOrigin)은 유지하고 타이머만 리셋
--- -> 어디로 연쇄 텔포되든 복귀 지점은 "맨 처음 발동한 자리".
+-- 카운트다운 중 랜텔 재발동 시: 세이프존 중 좀비룰렛류가 큐잉되는 것과 동일한
+-- 패턴으로 락을 건다 -- 즉시 연쇄 텔포하지 않고 rtPending만 세워둔다.
+-- 카운트다운이 끝나 원점으로 복귀(rtDoReturn)한 '직후'에 큐잉된 텔포를 발동한다
+-- (randomteleport.a() 재귀 호출). 복귀 없이 사망하면(rtStopCountdown) 큐도 함께 폐기.
 local RTReturnTimerDisplay = ISPanel:derive("RTReturnTimerDisplay")
 local _retTick  = nil
 local _retPanel = nil
@@ -153,6 +155,12 @@ local function rtDoReturn(p)
     end
     md.rtReturnTime = 0
     md.rtOrigin = nil
+    local pending = md.rtPending
+    md.rtPending = nil
+    if pending then
+        global.b(" random_teleport: firing queued request after return")
+        randomteleport.a(p)
+    end
 end
 
 local function rtStopCountdown(p)
@@ -160,6 +168,7 @@ local function rtStopCountdown(p)
     if md then
         md.rtReturnTime = 0
         md.rtOrigin = nil
+        md.rtPending = nil
     end
     if _retTick then
         Events.OnTick.Remove(_retTick)
@@ -285,6 +294,20 @@ end
 -- 랜덤 텔레포트 발동  [public name: .a]
 function randomteleport.a(player)
     if not player then return end
+
+    -- 복귀 기능이 켜져 있고, 이미 복귀 카운트다운이 진행 중이면 즉시 재텔포하지
+    -- 않고 락(rtPending)만 세워둔다 -- 세이프존 중 좀비룰렛류가 큐잉되는 것과
+    -- 동일한 패턴. 실제 발동은 원점 복귀(rtDoReturn) 직후 이뤄진다.
+    local returnOn = returnCfg()
+    if returnOn then
+        local md = player:getModData()
+        if (md.rtReturnTime or 0) > 0 then
+            md.rtPending = true
+            global.b(" random_teleport: return countdown active, request locked/queued")
+            return
+        end
+    end
+
     -- 이미 진행 중이면 기존 루프를 버리고 현재 위치 기준으로 새로 시작
     stopLoop()
 
