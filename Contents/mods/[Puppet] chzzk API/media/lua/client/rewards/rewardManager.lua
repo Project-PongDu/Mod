@@ -13,6 +13,7 @@ local zombierain = require("features/zombierain")
 local randomteleport = require("features/randomteleport")
 local firesupport = require("features/firesupport")
 local serum      = require("features/skillpotion")
+local hordenight = require("features/hordenight")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -269,6 +270,7 @@ local rewardHandlers = {
         immediate = true,
         fn = function(sender)
             -- TODO: 호드나이트
+            hordenight.a(sender)
             global.processingEvent = false
         end,
     },

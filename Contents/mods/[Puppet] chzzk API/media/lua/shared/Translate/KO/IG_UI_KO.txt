@@ -127,6 +127,30 @@ IGUI_KO = {
     IGUI_donation_horde_night = "호드 나이트",
 
 
+    IGUI_donation_horde_night_reserve1 = "재수 옴 붙은 날이군...",
+    IGUI_donation_horde_night_reserve2 = "더럽게 힘든 밤이 되겠어...",
+    IGUI_donation_horde_night_reserve3 = "느낌이 좋지 않은데...",
+    IGUI_donation_horde_night_reserve4 = "그래, 손님이 몰려오는 날이라 이거지...",
+    IGUI_donation_horde_night_reserve5 = "각오해두는 게 좋겠어.",
+
+    IGUI_donation_horde_night_warn1 = "느껴진다... 놈들이 오고 있어.",
+    IGUI_donation_horde_night_warn2 = "사방에서 접근하고 있어.",
+    IGUI_donation_horde_night_warn3 = "조심해, 거대한 좀비 떼다.",
+    IGUI_donation_horde_night_warn4 = "언데드 무리... 전부 여길 노리고 있어...",
+    IGUI_donation_horde_night_warn5 = "시간이 됐어. 놈들이 밀려들어올거야.",
+    IGUI_donation_horde_night_warn6 = "여긴 안전하지 않아. 곧 위험해진다.",
+    IGUI_donation_horde_night_warn7 = "이번에도 살아남을 수 있기를...",
+    IGUI_donation_horde_night_warn8 = "살아남을 수 있겠지...",
+    IGUI_donation_horde_night_warn9 = "놈들이 몰려온다... 과연 네놈들 마음대로 될까?",
+    IGUI_donation_horde_night_warn10 = "상황은 좋지 않아... 놈들이 온다.",
+    
+    IGUI_donation_horde_night_over1 = "...조용해졌어.",
+    IGUI_donation_horde_night_over2 = "지나간 건가.",
+    IGUI_donation_horde_night_over3 = "더는 안 오는 것 같아.",
+    IGUI_donation_horde_night_over4 = "이제 발소리가 안 들려.",
+    IGUI_donation_horde_night_over5 = "겨우 넘겼어.",
+
+
 
     IGUI_donation_fire_support = "화력 지원",
     IGUI_donation_fire_support_sniper = "저격 지원이다! 특수좀비부터 제거해!!",

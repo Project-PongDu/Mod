@@ -172,13 +172,15 @@ local function startHordeNight()
                 startMs = now,
             }
             opened = opened + 1
+            -- 시작 연출(대사 + 효과음)은 세션이 실제로 열린 플레이어에게만 보낸다.
+            -- 전체 브로드캐스트를 쓰면 세션이 없는 접속자도 대사를 치게 된다.
+            sendServerCommand(p, "PongDuHorde", "Fire", { ["cnt"] = cnt })
         end
     end
     hlog("START sessions=" .. tostring(opened)
         .. " countPerPlayer=" .. tostring(cnt)
         .. " dist=" .. tostring(dist)
         .. " intervalMs=" .. tostring(SPAWN_INTERVAL_MS))
-    sendServerCommand("PongDuHorde", "Fire", { ["cnt"] = cnt })
     return opened > 0
 end
 
@@ -231,6 +233,12 @@ local function onTick()
                     .. " spawned=" .. tostring(s.spawned)
                     .. " hits=" .. tostring(s.hits)
                     .. " missedPick=" .. tostring(s.missed))
+                -- 종료 연출(대사)도 해당 세션 소유 플레이어에게만. 세션 종료 시점은
+                -- 인당 스폰 완료/유예 만료 기준이라 플레이어마다 다를 수 있다.
+                sendServerCommand(s.player, "PongDuHorde", "End", {
+                    ["spawned"] = s.spawned,
+                    ["hits"]    = s.hits,
+                })
                 table.remove(_sessions, i)
                 if #_sessions == 0 then
                     hlog("ALL SESSIONS DONE")
