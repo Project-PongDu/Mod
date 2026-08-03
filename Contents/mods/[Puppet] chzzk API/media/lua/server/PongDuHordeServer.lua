@@ -66,11 +66,26 @@ local function setPending(n)
     ModData.transmit(MD_KEY)
 end
 
+-- 열려있는 세션 중 가장 늦게 끝나는 것의 잔여 ms. 전원이 동시에 시작하므로
+-- 사실상 값이 하나뿐이지만, 중간 접속자가 Sync를 던졌을 때 툴팁에 쓸 기준값이
+-- 필요해 최대값으로 통일한다.
+local function sessionRemainMs()
+    local now  = getTimestampMs()
+    local best = 0
+    for i = 1, #_sessions do
+        local s = _sessions[i]
+        local r = (s.startMs + s.total * SPAWN_INTERVAL_MS) - now
+        if r > best then best = r end
+    end
+    return best
+end
+
 -- 클라 인디케이터 동기화. active 는 "지금 스폰이 돌고 있는가".
 local function broadcastState(active)
     sendServerCommand("PongDuHorde", "State", {
         ["pending"] = getPending(),
         ["active"]  = active and 1 or 0,
+        ["remain"]  = sessionRemainMs(),   -- 호버 툴팁 "종료까지" 계산용
     })
 end
 
@@ -174,7 +189,11 @@ local function startHordeNight()
             opened = opened + 1
             -- 시작 연출(대사 + 효과음)은 세션이 실제로 열린 플레이어에게만 보낸다.
             -- 전체 브로드캐스트를 쓰면 세션이 없는 접속자도 대사를 치게 된다.
-            sendServerCommand(p, "PongDuHorde", "Fire", { ["cnt"] = cnt })
+            -- dur: 스폰 루프 총 길이(ms). 클라 호버 툴팁의 "종료까지" 기준값.
+            sendServerCommand(p, "PongDuHorde", "Fire", {
+                ["cnt"] = cnt,
+                ["dur"] = cnt * SPAWN_INTERVAL_MS,
+            })
         end
     end
     hlog("START sessions=" .. tostring(opened)

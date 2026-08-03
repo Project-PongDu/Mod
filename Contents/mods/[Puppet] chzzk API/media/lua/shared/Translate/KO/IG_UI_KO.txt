@@ -142,13 +142,18 @@ IGUI_KO = {
     IGUI_donation_horde_night_warn7 = "이번에도 살아남을 수 있기를...",
     IGUI_donation_horde_night_warn8 = "살아남을 수 있겠지...",
     IGUI_donation_horde_night_warn9 = "놈들이 몰려온다... 과연 네놈들 마음대로 될까?",
-    IGUI_donation_horde_night_warn10 = "상황은 좋지 않아... 놈들이 온다.",
+    IGUI_donation_horde_night_warn10 = "상황이 좋지 않아... 놈들이 온다.",
     
-    IGUI_donation_horde_night_over1 = "...조용해졌어.",
-    IGUI_donation_horde_night_over2 = "지나간 건가.",
-    IGUI_donation_horde_night_over3 = "더는 안 오는 것 같아.",
-    IGUI_donation_horde_night_over4 = "이제 발소리가 안 들려.",
-    IGUI_donation_horde_night_over5 = "겨우 넘겼어.",
+    IGUI_donation_horde_night_over1 = "...아까보단 좀 조용해졌어!",
+    IGUI_donation_horde_night_over2 = "큰 건 지나갔다!",
+    IGUI_donation_horde_night_over3 = "보이는 것들만 마무리하면 된다!",
+    IGUI_donation_horde_night_over4 = "이번엔 거의 끝났다!",
+    IGUI_donation_horde_night_over5 = "더는 몰려오지 않는다! 이놈들이 다야!",
+
+    IGUI_donation_horde_night_tip_start = "호드나이트 시작까지: %1",
+    IGUI_donation_horde_night_tip_end = "호드나이트 종료까지: %1",
+    IGUI_donation_horde_night_tip_hm = "%1시간 %2분",
+    IGUI_donation_horde_night_tip_m = "%1분",
 
 
 
