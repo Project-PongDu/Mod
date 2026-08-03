@@ -603,6 +603,11 @@ local HELI_MISS_THRESHOLD = 3
 -- 이 유예가 없으면 방금 죽인 좀비를 다음 스캔에서 또 락온해 탄을 낭비한다
 -- (알파테스트#2 로그 실측: KILL 48발 / 고유 32마리 = 33% 낭비).
 local HELI_KILL_TTL       = 3000
+-- CLEAR 판정 확장 반경(사격반경에 더하는 값, 타일). 사격반경(job.r) 안이
+-- 비었어도 이 여유분 안에 아직 살아있는 좀비가 있으면 clear 방송을 보류한다.
+-- 헬기가 leg를 따라 계속 이동 중이므로, 근처에 다음 타겟이 있는데도 매번
+-- "구역 정리"가 뜨는 게 부자연스럽다는 피드백으로 추가.
+local HELI_CLEAR_EXTRA_RADIUS = 20
 
 -- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
 -- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
@@ -924,6 +929,32 @@ local function pickHeliTarget(job, now)
     return pool[ZombRand(#pool) + 1]
 end
 
+-- 확장 반경(사격반경 + HELI_CLEAR_EXTRA_RADIUS) 내 생존 좀비 존재 여부.
+-- pickHeliTarget과 달리 락온 대상을 뽑는 게 아니라 "clear 방송을 보류할
+-- 근거가 있는가"만 보면 되므로, killed TTL 가드 없이 첫 매치에서 바로
+-- true를 반환한다(풀 배열을 만들 필요가 없다).
+local function hasZombieInExtendedRadius(job)
+    local ok, cx, cy, cell = pcall(function()
+        return job.player:getX(), job.player:getY(), job.player:getCell()
+    end)
+    if not ok then return false end
+    local zl = cell and cell:getZombieList()
+    if not zl then return false end
+
+    local r = job.r + HELI_CLEAR_EXTRA_RADIUS
+    local r2 = r * r
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local dx, dy = z:getX() - cx, z:getY() - cy
+            if dx * dx + dy * dy <= r2 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function processHeliJobs()
     if #_heliJobs == 0 then return end
     local now = getTimestampMs()
@@ -1006,7 +1037,23 @@ local function processHeliJobs()
             if target then
                 job.missStreak = 0
             else
-                job.missStreak = (job.missStreak or 0) + 1
+                -- 사격반경(job.r) 안은 비었어도 확장반경(+HELI_CLEAR_EXTRA_RADIUS)
+                -- 안에 아직 좀비가 있으면 missStreak를 계속 0으로 눌러서
+                -- clear 전환 자체를 보류한다. 헬기가 leg를 따라 이동하며
+                -- 곧 그 좀비를 사격반경 안으로 다시 포착할 가능성이 높은데,
+                -- 그 사이 "구역 정리" 무전이 뜨는 게 부자연스럽기 때문.
+                if hasZombieInExtendedRadius(job) then
+                    if job.clearHeld ~= true then
+                        job.clearHeld = true
+                        print(string.format(
+                            "[PongDu][Heli] CLEAR HOLD: zombie within extended radius r=%d+%d sender=%s",
+                            job.r, HELI_CLEAR_EXTRA_RADIUS, tostring(job.sender)))
+                    end
+                    job.missStreak = 0
+                else
+                    job.clearHeld = false
+                    job.missStreak = (job.missStreak or 0) + 1
+                end
             end
 
             -- ── engage/clear 상태머신 ──
