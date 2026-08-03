@@ -151,7 +151,7 @@ local function rtDoReturn(p)
     local md = p:getModData()
     local o = md.rtOrigin
     if o then
-        getSoundManager():PlaySound("exile_exit", false, 1.0)
+        getSoundManager():PlaySound("anomaly_reversed", false, 1.0)
         forceExitVehicle(p)
         movePlayer(p, o.x, o.y, o.z)
         global.b(" random_teleport: survived, returned to origin")

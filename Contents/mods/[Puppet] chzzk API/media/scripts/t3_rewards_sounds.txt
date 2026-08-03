@@ -144,6 +144,7 @@ module Base
         clip
         {
             file = media/sound/zombie_rain.wav,
+            volume = 0.5,
         }
     }
 
@@ -185,6 +186,7 @@ module Base
         clip
         {
             file = media/sound/day_one_kaboom.wav,
+            volume = 0.5,
         }
     }
 
@@ -212,6 +214,23 @@ module Base
         clip
         {
             file = media/sound/AWP_Bang.wav,
+            volume = 0.5,
+        }
+    }
+
+    /* 랜덤텔포 복귀음. randomteleport.lua rtDoReturn().
+       기존엔 exile_exit(exile 기능용 에셋, GameSound 미등록 -- "AUTO" 더미로
+       재생만 되던 상태)을 그대로 갖다 썼다. 이번에 랜덤텔포 전용으로 새로
+       추가된 anomaly-reversed.wav(anomaly.wav 역재생)로 교체 등록.
+       exile_exit / exile_enter는 이제 아무 데서도 참조하지 않는 고아 에셋이다
+       (exile 기능 자체가 rewardManager.lua에서 더미 처리돼 미사용). */
+    sound anomaly_reversed
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/anomaly-reversed.wav,
             volume = 0.5,
         }
     }
