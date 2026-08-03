@@ -235,9 +235,11 @@ module Base
         }
     }
 
-    /* 호드 나이트 예약 알림음.
-       발동음이 아니라 후원 접수 시점의 예고음이라 loop = false 1회 재생이다
-       (features/hordenight.lua 의 PongDuHorde/Reserved 수신부).
+    /*
+        호드 나이트 예약 알림음.
+        발동음이 아니라 후원 접수 시점의 예고음이라 loop = false 1회 재생이다
+        (features/hordenight.lua 의 PongDuHorde/Reserved 수신부).
+    */
     sound pongdu_heartbeat
     {
         category = Object,
@@ -245,14 +247,16 @@ module Base
         clip
         {
             file = media/sound/heartbeat.wav,
-            volume = 0.8,
+            volume = 1.2,
         }
     }
 
-    /* 호드 나이트 발동 효과음. 
-       예약 알림음(pongdu_heartbeat)과 달리
-       Fire 시점(실제 발동)에 1회 재생
-       (features/hordenight.lua 의 PongDuHorde/Fire 수신부, HORDE_START_SOUND 상수).
+    /* 
+        호드 나이트 발동 효과음. 
+        예약 알림음(pongdu_heartbeat)과 달리
+        Fire 시점(실제 발동)에 1회 재생
+        (features/hordenight.lua 의 PongDuHorde/Fire 수신부, HORDE_START_SOUND 상수).
+    */
     sound pongdu_horde_start
     {
         category = Object,
