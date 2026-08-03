@@ -514,6 +514,44 @@ option PongDu.Rain_SafeZoneBlock = {
     page = PongDu_Debuff, translation = PongDu_Rain_SafeZoneBlock,
 }
 
+/***** PONGDU SERVER (서버 전체 대상 후원 효과) *****/
+/* 접속자 전원에게 동시에 걸리는 기능만 이 페이지에 둔다.
+   ※ 페이지 탭 순서는 sandbox-options.txt 안에서 그 페이지의 옵션이 처음
+      등장하는 위치로 결정된다(ServerSettingsScreen.lua:4294 -- getOptionByIndex
+      순회 중 처음 보는 pageName마다 페이지를 만든다). 이 블록이 PongDu_Debuff
+      마지막 옵션과 PongDu_Dev 첫 옵션 사이에 있어야 방해/Dev 사이에 탭이 뜬다.
+      블록을 옮기면 탭 위치도 같이 움직인다. */
+
+option PongDu.Divider_HordeNight = {
+    type = boolean, default = false,
+    page = PongDu_Server, translation = PongDu_Divider_HordeNight,
+}
+
+option PongDu.Delay_horde_night = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Server, translation = PongDu_Delay_horde_night,
+}
+
+option PongDu.Horde_Hour = {
+    type = integer, min = 0, max = 23, default = 22,
+    page = PongDu_Server, translation = PongDu_Horde_Hour,
+}
+
+option PongDu.Horde_Count = {
+    type = integer, min = 1, max = 500, default = 100,
+    page = PongDu_Server, translation = PongDu_Horde_Count,
+}
+
+option PongDu.Horde_Distance = {
+    type = integer, min = 10, max = 90, default = 75,
+    page = PongDu_Server, translation = PongDu_Horde_Distance,
+}
+
+option PongDu.Horde_ShowIndicator = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_Horde_ShowIndicator,
+}
+
 /***** PONGDU DEV (dummy / stub features) *****/
 
 option PongDu.Divider_Bandit = {
@@ -569,16 +607,6 @@ option PongDu.Divider_SecretPassageKit = {
 option PongDu.Delay_secret_passage_kit = {
     type = integer, min = 0, max = 60, default = 3,
     page = PongDu_Dev, translation = PongDu_Delay_secret_passage_kit,
-}
-
-option PongDu.Divider_HordeNight = {
-    type = boolean, default = false,
-    page = PongDu_Dev, translation = PongDu_Divider_HordeNight,
-}
-
-option PongDu.Delay_horde_night = {
-    type = integer, min = 0, max = 60, default = 3,
-    page = PongDu_Dev, translation = PongDu_Delay_horde_night,
 }
 
 option PongDu.Divider_FireSupport_Airborne = {

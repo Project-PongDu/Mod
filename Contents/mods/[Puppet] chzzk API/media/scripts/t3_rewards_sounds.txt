@@ -235,4 +235,21 @@ module Base
         }
     }
 
+    /* 호드 나이트 예약 알림음. 211a70a6b68dc6415b711ccf98160e81f33cbb9a 에서
+       에셋(heartbeat.wav, 8.08초)만 추가되고 GameSound 등록이 빠져 있던 것.
+       발동음이 아니라 후원 접수 시점의 예고음이라 loop = false 1회 재생이다
+       (features/hordenight.lua 의 PongDuHorde/Reserved 수신부).
+       ※ GameSound 스크립트는 부팅 시에만 로드된다 -- 이 항목이 추가된 뒤
+         처음 적용하려면 게임을 완전히 재시작해야 한다. */
+    sound pongdu_heartbeat
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/heartbeat.wav,
+            volume = 0.7,
+        }
+    }
+
 }
