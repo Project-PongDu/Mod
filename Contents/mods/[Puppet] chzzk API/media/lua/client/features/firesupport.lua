@@ -1546,14 +1546,19 @@ Events.OnServerCommand.Add(function(module, command, args)
         if h then h.engaged = true end
         return
     elseif command == "HeliClear" then
-        -- 교전 종료: 기관총 소리는 OnTick 집계가 끄고, "구역 정리" 무전은
-        -- 내 헬기일 때만 1회 재생한다. 전 인스턴스가 방송하면 동시 발동
-        -- 상황에서 무전이 인원수만큼 겹쳐 들린다.
+        -- LMG 사운드 전용 -- 실제 사격이 끊겼을 때만 서버가 보낸다.
+        -- 무전("구역 정리")은 더 이상 여기서 재생하지 않는다 -- HeliAreaClear로 분리됨.
         -- 남은 시간 동안 헬기(로터음)는 계속 떠 있고, 좀비가 다시 감지되면
         -- 서버가 HeliEngage를 다시 보내 사격을 재개한다.
         local own = ownOf(args, "HeliClear")
         local h = own and _helis[own] or nil
         if h then h.engaged = false end
+        return
+    elseif command == "HeliAreaClear" then
+        -- 무전 전용: 사격/LMG 상태와 무관하게, 확장반경까지 완전히 비었을 때
+        -- 서버가 1회 보낸다. 내 헬기일 때만 재생 -- 전 인스턴스가 방송하면
+        -- 동시 발동 상황에서 무전이 인원수만큼 겹쳐 들린다.
+        local own = ownOf(args, "HeliAreaClear")
         if own and own == myOnlineID() then
             local okS = pcall(function()
                 getSoundManager():PlaySound("area_clear", false, 1.0)

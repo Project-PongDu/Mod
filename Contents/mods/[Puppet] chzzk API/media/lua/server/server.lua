@@ -1034,36 +1034,36 @@ local function processHeliJobs()
             -- 매 스캔 CLEAR<->ENGAGE가 반복돼 LMG 루프가 재시작될 때마다
             -- 끊겨 들린다("씹힘"). 연속 3회(iv 100ms 기준 약 300ms) 미탐지가
             -- 확인돼야만 진짜로 소진된 것으로 보고 clear 전환한다.
+            -- ※ LMG 사운드(engaged)는 실제 사격 여부(사격반경 job.r 기준)만
+            --   따진다. 확장반경은 아래 "무전 전용" 판정에서만 쓴다 -- 예전엔
+            --   이 히스테리시스가 확장반경까지 같이 보류시켜서, 사격이 끊긴
+            --   상태에서도 LMG 루프가 계속 도는 버그가 있었다.
             if target then
                 job.missStreak = 0
             else
-                -- 사격반경(job.r) 안은 비었어도 확장반경(+HELI_CLEAR_EXTRA_RADIUS)
-                -- 안에 아직 좀비가 있으면 missStreak를 계속 0으로 눌러서
-                -- clear 전환 자체를 보류한다. 헬기가 leg를 따라 이동하며
-                -- 곧 그 좀비를 사격반경 안으로 다시 포착할 가능성이 높은데,
-                -- 그 사이 "구역 정리" 무전이 뜨는 게 부자연스럽기 때문.
-                if hasZombieInExtendedRadius(job) then
-                    if job.clearHeld ~= true then
-                        job.clearHeld = true
-                        print(string.format(
-                            "[PongDu][Heli] CLEAR HOLD: zombie within extended radius r=%d+%d sender=%s",
-                            job.r, HELI_CLEAR_EXTRA_RADIUS, tostring(job.sender)))
-                    end
-                    job.missStreak = 0
-                else
-                    job.clearHeld = false
-                    job.missStreak = (job.missStreak or 0) + 1
-                end
+                job.missStreak = (job.missStreak or 0) + 1
             end
 
-            -- ── engage/clear 상태머신 ──
+            -- 무전("구역 정리") 전용 히스테리시스. LMG와 별개로, 확장반경
+            -- (job.r + HELI_CLEAR_EXTRA_RADIUS) 안에 좀비가 남아있으면 계속
+            -- 0으로 눌러서 "구역 이상무" 방송 자체를 보류한다 -- 헬기가 leg를
+            -- 따라 이동하며 곧 그 좀비를 사격반경 안으로 다시 포착할 가능성이
+            -- 높은데, 그 사이 무전이 뜨는 게 부자연스럽기 때문. LMG 판정과
+            -- 분리했으므로 이 보류 기간 동안 총성은 이미 멈춰 있다.
+            if target or hasZombieInExtendedRadius(job) then
+                if job.radioMissStreak and job.radioMissStreak > 0 then
+                    job.radioMissStreak = 0
+                end
+            else
+                job.radioMissStreak = (job.radioMissStreak or 0) + 1
+            end
+
+            -- ── engage/clear 상태머신 (LMG 사운드 전용) ──
             -- 대상 있음: engage 상태로 사격. 없음: 사격 자체를 중단(HeliFire
             -- 미전송 -- 구버전의 "랜덤 지면 난사" 제거). 상태가 바뀌는 순간에만
             -- HeliEngage/HeliClear를 브로드캐스트해서 클라가 기관총 루프음을
-            -- 켜고 끄게 한다.
-            -- job.engaged 3상태: nil(초기 스캔 전) / true(교전 중) / false(clear
-            -- 방송 완료). 교전하다 대상이 소진되면 즉시 clear, 시작부터 반경이
-            -- 비어 있으면 도착 연출을 위해 3초 유예 후 "구역 이상무" 1회 방송.
+            -- 켜고 끄게 한다. (구역 정리 무전은 더 이상 여기서 재생하지 않음
+            -- -- HeliAreaClear로 완전히 분리.)
             if target then
                 if job.engaged ~= true then
                     job.engaged = true
@@ -1088,18 +1088,33 @@ local function processHeliJobs()
                     for k = 0, players:size() - 1 do
                         sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { own = job.own })
                     end
-                    print("[PongDu][Heli] CLEAR (targets depleted)")
-                elseif job.engaged == nil and now - job.startAt >= 3000
-                    and job.missStreak >= HELI_MISS_THRESHOLD then
+                    print("[PongDu][Heli] LMG STOP (targets depleted)")
+                elseif job.engaged == nil and job.missStreak >= HELI_MISS_THRESHOLD then
+                    -- 시작부터 사격반경이 비어 있으면 별도 유예 없이 바로 engaged=false로
+                    -- 확정한다 (LMG가 애초에 켜진 적 없으니 HeliClear를 보낼 필요도 없음).
                     job.engaged = false
+                end
+
+                -- ── 무전 전용 상태머신 ──
+                -- job.engaged와 별개인 job.radioCleared로 관리한다. 시작부터
+                -- 반경이 비어 있으면 도착 연출을 위해 3초 유예 후 1회 방송.
+                if job.radioCleared ~= true
+                    and job.radioMissStreak and job.radioMissStreak >= HELI_MISS_THRESHOLD
+                    and now - job.startAt >= 3000 then
+                    job.radioCleared = true
                     local players = getOnlinePlayers()
                     for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { own = job.own })
+                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliAreaClear", { own = job.own })
                     end
-                    print("[PongDu][Heli] CLEAR (initial sweep, no targets)")
+                    print("[PongDu][Heli] AREA CLEAR radio (extended radius empty)")
                 end
                 -- 사격 없음: 다음 스캔 예약만 하고 이번 발은 건너뛴다
                 job.nextAt = now + job.iv
+            end
+            -- 좀비가 (사격반경이든 확장반경이든) 다시 감지되면 무전 방송 재무장
+            -- -- 다음번 진짜로 이탈할 때 또 한 번 방송할 수 있게.
+            if target or hasZombieInExtendedRadius(job) then
+                job.radioCleared = false
             end
 
             if not payload.id then
