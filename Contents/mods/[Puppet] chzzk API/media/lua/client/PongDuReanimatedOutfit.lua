@@ -5,63 +5,68 @@
 -- 죽여서 나온 시체는 원래 복장/아이템을 정상적으로 갖고 있다. 데이터는 멀쩡하고
 -- 렌더용 비주얼만 비어 있는 상태다.
 --
--- ── 왜 강령술(RiseUp)에서 유독 잘 보이는가 ──────────────────────────────────
--- 알파테스트 클라 로그 대조 결과: 플레이어 좀비화 12건 중 10건이 RiseUp 발동
--- 60초 이내, 그중 7건은 25초 이내(최소 0.0초 = 같은 틱)였다. 바닐라 자연 부활
--- (ZombieLore.Reanimate 기본값 3 = 1분 뒤)은 목격 자체가 드문 반면, RiseUp은
--- 반경 55칸의 시체를 즉시, 수십~수백 구 동시에 일으켜 아래 레이스를 대량으로
--- 노출시킨다. 결함 있는 코드 경로 자체는 바닐라 것이지만, 실질 트리거는 강령술이다.
+-- ── 두 가지 원인이 존재한다 ─────────────────────────────────────────────────
 --
--- server.lua의 RiseUp 핸들러는 플레이어 시체를 markFakeDead에서 의도적으로
--- 제외한다(플레이어 옷은 pid가 아닌 실제 wornItems라 pid 재구성이 불가능하므로
--- 디스크립터 경로가 맞다). 그 판단은 옳고, 이 파일은 그 경로의 레이스만 보정한다.
---
--- ── 원인 (바닐라 B41 MP의 패킷 도착 순서 레이스) ────────────────────────────
+-- [원인 A] 디스크립터 도착 지연 (이 파일이 고치는 것)
 --   IsoDeadBody.reanimate() (IsoDeadBody.java:1309)
 --     isFakeDead()==false -> setReanimatedPlayer(true)
 --                            + SharedDescriptors.createPlayerZombieDescriptor()
 --   -> 옷이 pid로 재구성되지 않고 ZombieDescriptors 패킷으로 따로 push된다
 --      (SharedDescriptors.java:82). 좀비 sync와 완전히 다른 채널이다.
 --
--- 클라가 이 좀비를 처음 렌더 리스트에 올릴 때:
---   ModelManager.dressInRandomOutfit:558 -> dressInPersistentOutfitID(pid)
---   IsoZombie.dressInPersistentOutfitID:3575
---       getHumanVisual().clear()          <- 먼저 벗기고
---       itemVisuals.clear()
---       m_bPersistentOutfitInit = true    <- "처리 완료"로 봉인하고
---       dressInOutfit() -> ApplyReanimatedPlayerOutfit
---   SharedDescriptors.ApplyReanimatedPlayerOutfit:136
---       PlayerZombieDescriptors[slot]이 아직 null이면 조용히 리턴 (아무것도 안 입힘)
+--   클라가 이 좀비를 처음 렌더 리스트에 올릴 때:
+--     ModelManager.dressInRandomOutfit:558 -> dressInPersistentOutfitID(pid)
+--     IsoZombie.dressInPersistentOutfitID:3575
+--         getHumanVisual().clear()          <- 먼저 벗기고
+--         itemVisuals.clear()
+--         m_bPersistentOutfitInit = true    <- "처리 완료"로 봉인하고
+--         dressInOutfit() -> ApplyReanimatedPlayerOutfit
+--     SharedDescriptors.ApplyReanimatedPlayerOutfit:136
+--         PlayerZombieDescriptors[slot]이 아직 null이면 조용히 리턴
 --
--- 결과: descriptor가 좀비보다 늦게 도착하면 HumanVisual이 빈 채로 고착된다.
--- m_bPersistentOutfitInit=true라 엔진이 다시 시도하지도 않는다 -> 영구 알몸.
--- 반면 wornItems는 건드리지 않으므로(dressInNamedOutfit과 달리 wornItems.clear()가
--- 없다) 죽이면 시체가 옷을 정상적으로 물려받는다 -- 관측된 증상 그대로다.
+--   descriptor가 좀비보다 늦게 도착하면 HumanVisual이 빈 채로 고착된다.
+--   m_bPersistentOutfitInit=true라 엔진이 다시 시도하지도 않는다.
+--   -> 이건 곧 도착할 데이터를 기다리는 문제이므로 재시도로 100% 복구된다.
 --
--- ── 수정: 엔진이 딱 한 번 하고 포기한 시도를, 성공할 때까지 대신 눌러준다 ────
--- 성공 판정은 IsoZombie.sharedDesc를 읽는다:
---   · useDescriptor()가 성공했을 때만 세팅됨 (IsoZombie.java:3478)
---   · 풀 반환 시 resetForReuse()가 null로 초기화 (IsoZombie.java:3383,
---     VirtualZombieManager.java:70) -> 재활용 좀비의 잔여값 오탐 없음
--- 즉 "isReanimatedPlayer인데 sharedDesc가 nil" = 레이스에 당한 좀비다.
+-- [원인 B] 클라/서버 outfit 목록 인덱스 불일치 (이 파일로는 못 고친다)
+--   pid의 상위 16비트는 PersistentOutfits.m_all의 인덱스다. 이 목록은 세이브에
+--   저장되지 않고 게임 로드마다 재조립되며(PersistentOutfits.init:57), 서버와
+--   클라가 서로 목록을 맞춰보지 않는다. 번호만 주고받는다.
+--   "ReanimatedPlayer"는 목록 맨 끝에 등록되므로(registerCustomOutfits:110)
+--   그 앞 항목이 하나만 어긋나도 인덱스가 통째로 밀린다.
 --
--- ★ 타임아웃을 두지 않는 이유 (이 수정의 핵심)
---   ZombieDescriptors는 RELIABLE 패킷이다(PacketTypes.java:225, reliability=2).
---   유실돼도 RakNet이 재전송하므로 '반드시' 도착한다. 늦을 뿐이다.
---   따라서 좀비가 살아 있는 한 재시도를 포기하지 않으면 복원은 100% 성공한다.
---   타임아웃을 두면 그게 곧 "그 안에 안 오면 알몸 확정"이라는 구멍이 된다.
+--   밀리면 클라는 m_all[서버인덱스]에 있는 엉뚱한 일반 outfit의 outfitter를
+--   호출한다 -> PersistentOutfits.ApplyOutfit -> IsoZombie.dressInNamedOutfit:3556
+--       wornItems.clear()                     <- 렌더가 참조하는 목록을 비우고
+--       getHumanVisual().clear()              <- 머리모델/머리색/수염/피부색 소실
+--       humanVisual.dressInNamedOutfit(...)   <- itemVisuals에만 옷을 채운다
+--       UnderwearDefinition.addRandomUnderwear <- 속옷만 랜덤으로 입힌다
+--   reanimated player 좀비는 isUsingWornItems()==true라(IsoZombie.java:3530)
+--   렌더 시 wornItems를 참조하는데 그게 비어 있으므로 속옷 차림만 남는다.
+--   여기에 ApplyOutfit의 addRandomBloodDirtHolesEtc()가 매 호출마다 혈흔을
+--   새로 굴린다.
 --
--- ★ 오래 재시도해도 '남의 옷'을 입을 위험이 없는 이유
+--   즉 원인 B는 "알몸 + 딴사람 얼굴 + 혈흔 깜빡임" 3종 세트로 나타나며,
+--   재시도해도 영원히 성공하지 않는다. 클라/서버 모드 구성을 일치시켜
+--   목록을 맞추는 것 외에 클라 Lua에서 손댈 방법이 없다
+--   (PersistentOutfits는 LuaManager.Exposer에 노출되지 않아 접근 불가).
+--
+-- ── 재시도 상한을 두는 이유 ─────────────────────────────────────────────────
+-- 이전 버전은 "ZombieDescriptors가 RELIABLE 패킷이니 언젠간 반드시 도착한다"는
+-- 근거로 타임아웃 없이 무한 재시도했다. 원인 A만 존재한다는 전제에서는 맞지만,
+-- 원인 B에 걸린 좀비에게는 250ms마다 위의 clear() + 랜덤 속옷/혈흔 재생성을
+-- 영구히 반복하는 꼴이 된다. 가만히 알몸으로 두는 것보다 훨씬 나쁘다.
+--
+-- 원인 A의 실제 지연은 수백 ms 수준이므로 2초(8회)면 충분하고, 그 안에 안 되면
+-- 원인 B로 간주하고 손을 뗀다. 인덱스 불일치는 세션 내내 고정이라 한 마리가
+-- 실패하면 나머지도 전부 실패하므로, 첫 포기 시점에 세션 전체를 비활성화해서
+-- 두 번째 좀비부터는 아예 건드리지 않는다.
+--
+-- ── 오래 재시도해도 '남의 옷'을 입을 위험이 없는 이유 ───────────────────────
 --   descriptor 슬롯은 releasePlayerZombieDescriptor로만 반납되고, 그 유일한
 --   호출 경로는 VirtualZombieManager.RemoveZombie:661 ->
 --   ReanimatedPlayers.removeReanimatedPlayerFromWorld:115 다.
---   즉 '그 좀비가 월드에서 제거될 때'만 슬롯이 풀린다. 좀비가 살아 있는 동안은
---   슬롯이 계속 점유 중이라 다른 플레이어 좀비가 같은 슬롯을 가져갈 수 없다.
---   재시도 기간이 길어져도 슬롯이 바뀌지 않는다.
---
--- 재호출 자체도 부작용이 없다: ReanimatedPlayer outfitter는 useDescriptor만 하고,
--- 일반 옷 경로(applyOutfit)의 랜덤 피/먼지/부착무기 추가를 타지 않는다
--- (PersistentOutfits.dressInOutfit:331은 outfitter만 호출).
+--   즉 '그 좀비가 월드에서 제거될 때'만 슬롯이 풀린다.
 --
 -- 순수 클라 로컬 렌더 보정 -- 서버/네트워크/게임 상태 영향 없음.
 --
@@ -74,12 +79,13 @@
 if isClient() then
 
 local SCAN_INTERVAL_MS = 250     -- 좀비 리스트 스캔 간격 (= 재시도 간격)
-local REPORT_EVERY_MS  = 10000   -- 장기 대기 시 경과 보고 간격 (로그 폭주 방지)
+local MAX_TRIES        = 8       -- 좀비 1마리당 재시도 상한 (약 2초)
 local NO_HAT_BIT       = 32768   -- PersistentOutfits.NO_HAT_BIT
 
-local _done  = {}   -- [onlineID] = true (복원 완료 / 대상 아님)
-local _track = {}   -- [onlineID] = { first, tries, lastReport }
+local _done     = {}     -- [onlineID] = true (복원 완료 / 대상 아님)
+local _track    = {}     -- [onlineID] = { first, tries }
 local _lastScan = 0
+local _disabled = false  -- 원인 B 감지 시 세션 전체 비활성화
 
 -- 모자가 벗겨진 좀비는 pid에 NO_HAT_BIT이 켜진다(PersistentOutfits.setFallenHat).
 -- 그 pid를 그대로 넘기면 ApplyReanimatedPlayerOutfit의 (short)(pid & 0xFFFF)
@@ -99,30 +105,46 @@ local function tryFix(z, zid, rec, now)
     if z:getSharedDescriptor() then return true end          -- 옷 이미 정상 적용됨
 
     local pid = z:getPersistentOutfitID()
-    if pid ~= 0 then
-        rec.tries = rec.tries + 1
-        if rec.tries == 1 then
-            print("[PongDu][ZOutfit] naked reanimated player zid=" .. tostring(zid)
-                .. " pid=" .. tostring(pid) .. " -> reapplying outfit")
-        end
-        z:dressInPersistentOutfitID(stripHatBit(pid))
-        if z:getSharedDescriptor() then
-            z:resetModelNextFrame()
-            print("[PongDu][ZOutfit] outfit restored zid=" .. tostring(zid)
-                .. " tries=" .. tostring(rec.tries)
-                .. " after=" .. tostring(now - rec.first) .. "ms")
-            return true
-        end
+    if pid == 0 then return false end
+
+    rec.tries = rec.tries + 1
+    if rec.tries == 1 then
+        print("[PongDu][ZOutfit] naked reanimated player zid=" .. tostring(zid)
+            .. " pid=" .. tostring(pid) .. " -> reapplying outfit")
     end
 
-    -- 포기하지 않는다. descriptor는 RELIABLE이라 결국 도착한다.
-    -- 다만 비정상적으로 오래 걸리면 관측 가능하도록 주기적으로만 보고한다.
-    if now - rec.lastReport >= REPORT_EVERY_MS then
-        rec.lastReport = now
-        print("[PongDu][ZOutfit] still waiting for descriptor zid=" .. tostring(zid)
-            .. " pid=" .. tostring(pid) .. " tries=" .. tostring(rec.tries)
-            .. " elapsed=" .. tostring(now - rec.first) .. "ms")
+    z:dressInPersistentOutfitID(stripHatBit(pid))
+    if z:getSharedDescriptor() then
+        z:resetModelNextFrame()
+        print("[PongDu][ZOutfit] outfit restored zid=" .. tostring(zid)
+            .. " tries=" .. tostring(rec.tries)
+            .. " after=" .. tostring(now - rec.first) .. "ms")
+        return true
     end
+
+    if rec.tries >= MAX_TRIES then
+        -- 디스크립터 도착 지연(원인 A)이라면 이 안에 무조건 성공했어야 한다.
+        -- 여기 도달했다는 건 클라/서버 outfit 인덱스 불일치(원인 B)라는 뜻이므로
+        -- 재시도를 멈추고 세션 전체를 비활성화한다.
+        -- 아래 outfitIndex(서버 기준 ReanimatedPlayer 위치)와 slot을 로그로 남긴다.
+        -- 클라에서 실제 인덱스를 읽을 방법은 없지만, 서버 값 자체가 원인 추적의
+        -- 출발점이 된다.
+        local stripped   = stripHatBit(pid)
+        local outfitIdx  = math.floor(stripped / 65536)
+        local slot       = stripped % 65536
+        print("[PongDu][ZOutfit] GIVE UP zid=" .. tostring(zid)
+            .. " pid=" .. tostring(pid)
+            .. " outfitIndex=" .. tostring(outfitIdx)
+            .. " slot=" .. tostring(slot)
+            .. " tries=" .. tostring(rec.tries)
+            .. " after=" .. tostring(now - rec.first) .. "ms")
+        print("[PongDu][ZOutfit] descriptor arrived but ApplyReanimatedPlayerOutfit"
+            .. " was never reached -- client/server PersistentOutfits index mismatch"
+            .. " suspected. disabling for this session.")
+        _disabled = true
+        return true
+    end
+
     return false
 end
 
@@ -145,7 +167,7 @@ local function scan()
             if not _done[zid] then
                 local rec = _track[zid]
                 if not rec then
-                    rec = { first = now, tries = 0, lastReport = now }
+                    rec = { first = now, tries = 0 }
                     _track[zid] = rec
                 end
                 if tryFix(z, zid, rec, now) then
@@ -154,6 +176,7 @@ local function scan()
                 end
             end
         end
+        if _disabled then break end
     end
 
     -- 셀에서 사라진 좀비 북키핑 정리. 청크 리로드로 좀비 객체가 새로 만들어지면
@@ -167,6 +190,7 @@ local function scan()
 end
 
 Events.OnTick.Add(function()
+    if _disabled then return end
     local now = getTimestampMs()
     if now - _lastScan < SCAN_INTERVAL_MS then return end
     _lastScan = now
