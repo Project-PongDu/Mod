@@ -1,5 +1,5 @@
 ContextMenu_KO = {
 	ContextMenu_serum_useInjector = "각성제 주입하기",
-	ContextMenu_InjectSyringe = "주사하기",
+	ContextMenu_InjectSyringe = "약물 주사하기",
 	ContextMenu_Break_Ampule = "앰퓰 깨기",
 }

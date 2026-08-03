@@ -428,7 +428,7 @@ local function onFillInventoryObjectContextMenu(player, context, items)
             local fullType = item:getFullType()
             if SYRINGE_TYPES[fullType] and not seen[fullType] then
                 seen[fullType] = true
-                context:addOptionOnTop(getText("ContextMenu_InjectSyringe") .. " " .. item:getName(), playerObj, tryInjectSyringe, item)
+                context:addOptionOnTop(getText("ContextMenu_InjectSyringe"))
             end
         end
     end
