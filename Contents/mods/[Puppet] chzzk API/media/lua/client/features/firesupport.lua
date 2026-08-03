@@ -550,9 +550,9 @@ local function sniperTimerHide()
     _sniperEndAt = nil   -- 패널 update()가 다음 프레임에 스스로 제거한다
 end
 
-local HELI_VOL_NEAR     = 1.00   -- 최근접 시 로터음 볼륨
+local HELI_VOL_NEAR     = 0.50   -- 최근접 시 로터음 볼륨
 local HELI_VOL_FAR      = 0.20   -- 최원거리 시 로터음 볼륨
-local HELI_LMG_VOL_NEAR = 0.85   -- 기관총음은 로터음보다 살짝 낮게
+local HELI_LMG_VOL_NEAR = 0.40   -- 기관총음은 로터음보다 살짝 낮게
 local HELI_LMG_VOL_FAR  = 0.15
 
 local _heliSound = nil       -- 로터음 emitter 핸들 (전체 공유 1개)
@@ -980,10 +980,10 @@ local DRONE_TWO_PI      = 6.2831853
 
 -- 거리 기반 볼륨 램프. 헬기와 같은 원리지만 거리 프로파일이 다르다:
 -- 접근(58->4타일) 페이드인 -> 공전(4타일 고정) 최대 -> 이탈(4->64타일) 페이드아웃.
-local DRONE_VOL_NEAR    = 0.3167
+local DRONE_VOL_NEAR    = 0.25
 local DRONE_VOL_FAR     = 0.0333
 -- 사격음(SMG). 헬기 LMG 와 동일하게 발당 트리거가 아니라 교전 구간 루프.
-local DRONE_SMG_VOL_NEAR = 0.425
+local DRONE_SMG_VOL_NEAR = 0.3
 local DRONE_SMG_VOL_FAR  = 0.075
 
 local _droneSound    = nil   -- 모터음 emitter 핸들 (전체 공유 1개)
