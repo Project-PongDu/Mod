@@ -522,6 +522,16 @@ option PongDu.Rain_SafeZoneBlock = {
       마지막 옵션과 PongDu_Dev 첫 옵션 사이에 있어야 방해/Dev 사이에 탭이 뜬다.
       블록을 옮기면 탭 위치도 같이 움직인다. */
 
+/* 서버장 판정 기준. 이 탭의 모든 기능이 이 값 하나에 걸려 있으므로 최상단에 둔다.
+   type = integer 는 백킹 필드가 Java int(상한 21억)라 SteamID64 가 애초에 안 들어간다.
+   default 를 비우면 CustomStringSandboxOption.parse 가 null 을 반환해 옵션 자체가
+   등록되지 않을 수 있어 'none' 센티널을 쓴다. */
+
+option PongDu.Host_SteamID = {
+    type = string, default = ,
+    page = PongDu_Server, translation = PongDu_Host_SteamID,
+}
+
 option PongDu.Divider_HordeNight = {
     type = boolean, default = false,
     page = PongDu_Server, translation = PongDu_Divider_HordeNight,

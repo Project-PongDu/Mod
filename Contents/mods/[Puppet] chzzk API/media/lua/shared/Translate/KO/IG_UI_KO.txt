@@ -124,6 +124,12 @@ IGUI_KO = {
 
 
 
+    IGUI_donation_host_only = "서버장에게 후원했을 때만 발동하는 기능입니다.",
+    IGUI_donation_host_unset = "서버 설정에 서버장 Steam ID가 등록되어 있지 않습니다.",
+    IGUI_donation_host_badid = "서버 설정의 서버장 Steam ID 형식이 올바르지 않습니다.",
+    IGUI_donation_host_nosteam = "스팀을 거치지 않는 서버에서는 서버 후원을 사용할 수 없습니다.",
+
+
     IGUI_donation_horde_night = "호드나이트",
 
 

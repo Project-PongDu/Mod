@@ -1,0 +1,114 @@
+-- ── 서버장(호스트) 판정 ── 서버 후원(PongDu_Server 탭) 공용 게이트 ───────────
+--
+-- 서버 후원은 접속자 전원에게 효과가 걸리는 계열이라 아무나 쏠 수 있으면 안 된다.
+-- 판정 기준은 서버장의 Steam ID64 하나이며, 샌드박스 PongDu.Host_SteamID 에
+-- 수동 입력한다.
+--
+-- 이 파일은 media/lua/shared/ 에 있어 서버와 클라이언트 양쪽에서 로드된다.
+-- require 가 아니라 전역 테이블 패턴(HitmanUtils 와 동일)을 쓴다.
+--
+-- ── 판정은 반드시 서버에서만 한다 ──
+-- 클라에서 check() 를 불러 "발동 여부"를 결정하면 안 된다. 클라 코드와 파일은
+-- 전부 사용자 손에 있어 우회 가능하다. 위조 불가능한 값은 서버가 보는
+-- player:getSteamID() 뿐이다(GameServer.java:5308 에서 udpConnection.steamID 로
+-- 채워지며, 이건 Steam 인증 연결에서 온 값이다).
+--
+-- ── 왜 username 을 안 쓰나 ──
+-- 한글 계정명이면 AllowNonAsciiUsername(기본 false)이 필요하고, 샌드박스 저장
+-- 경로(SandboxOptions.java:956 FileWriter)가 플랫폼 기본 charset 을 써서
+-- OS/로케일이 바뀌면 저장된 값이 조용히 깨진다.
+--
+-- ── [중요] 숫자 비교를 문자열 비교로 바꾸지 말 것 ──
+-- Kahlua 는 정수 타입이 없고 모든 숫자가 double 이다. Java long 을 Lua 로 넘길 때
+-- KahluaNumberConverter.NumberToLuaConverter 가 무조건 new Double(...) 을 만든다.
+-- SteamID64(약 7.66e16)는 double 정수 정확도 한계(2^53≈9.0e15)를 넘어서 이 구간의
+-- ULP 가 16이다. 즉 76561198321169110 -> 76561198321169104 로 반올림된다.
+--   * tostring(player:getSteamID()) 는 지수표기가 나와 입력값과 절대 안 맞는다.
+--   * tonumber(샌드박스 문자열) 도 같은 double 로 떨어지므로 숫자 비교는 성립한다.
+-- 대가는 서버장 ID ±8 범위의 스팀계정도 통과한다는 것인데, 스팀 ID 는 가입
+-- 순서대로 순차 배정되므로 서버장과 몇 초 차이로 가입한 계정이어야 걸린다.
+-- 사설 서버에서는 사실상 발생하지 않는다.
+--
+-- 서버에는 무손실 경로가 없다. String 을 반환하는 Steam 함수는 전부 클라 전용이다
+-- (getCurrentUserSteamID: !GameServer.bServer / getSteamIDFromUsername: GameClient.bClient).
+
+PongDuHost = PongDuHost or {}
+
+-- 판정 결과. 클라에 그대로 넘겨 사유별 안내 문구를 띄운다.
+-- 17자리 오타는 눈으로 못 잡으므로 "왜 안 되는지"가 반드시 화면에 나와야 한다.
+PongDuHost.OK        = "ok"
+PongDuHost.NOT_HOST  = "not_host"          -- 후원 받은 사람이 서버장이 아님
+PongDuHost.UNSET     = "not_configured"    -- Host_SteamID 미설정
+PongDuHost.BAD_ID    = "bad_id"            -- 형식 오류(오타)
+PongDuHost.NO_STEAM  = "no_steam"          -- 스팀 모드 OFF 서버라 판정 불가
+
+-- 미설정 센티널. 빈 문자열 default 는 CustomStringSandboxOption.parse 가
+-- default 값을 못 찾으면 null 을 반환해 옵션 자체가 등록 안 될 수 있어
+-- 명시적 값을 쓴다.
+local NONE = "none"
+
+local function rawId()
+    local s = SandboxVars.PongDu.Host_SteamID
+    if s == nil then return "" end
+    return tostring(s)
+end
+
+-- 설정된 서버장 SteamID 문자열. 미설정이면 nil, 형식 오류면 false.
+-- (nil 과 false 를 구분해야 "미설정"과 "오타"를 다르게 안내할 수 있다)
+function PongDuHost.getId()
+    local s = rawId()
+    if s == "" or s == NONE then return nil end
+    -- isValidSteamID 는 SteamUtils 에서 BigInteger 로 파싱하며 서버/클라 어디서나
+    -- 동작한다(LuaManager.java:6910, 가드 없음). double 을 안 거치는 유일한 검증 경로.
+    if not isValidSteamID(s) then return false end
+    return s
+end
+
+-- 서버 판정. 반환값은 위 상수 중 하나.
+function PongDuHost.check(player)
+    -- 싱글플레이: 플레이어가 곧 서버장. setSteamID 호출처가
+    -- GameClient.java:3265 / GameServer.java:5308 두 곳뿐이라 SP 에서는
+    -- steamID 가 long 기본값 0 으로 남는다. ID 비교 자체가 성립하지 않는다.
+    if not isClient() and not isServer() then return PongDuHost.OK end
+    if not player then return PongDuHost.NOT_HOST end
+
+    -- 스팀 모드가 꺼진 서버(직접 IP 접속 전용)에서는 setSteamID 가 호출되지 않아
+    -- 전원 0 이다. 통과시키면 접속자 전원이 서버장이 되므로 기능을 막는다.
+    if not getSteamModeActive() then return PongDuHost.NO_STEAM end
+
+    local want = PongDuHost.getId()
+    if want == nil then return PongDuHost.UNSET end
+    if want == false then return PongDuHost.BAD_ID end
+
+    local wantNum = tonumber(want)
+    if not wantNum then return PongDuHost.BAD_ID end
+
+    local got = player:getSteamID()
+    if not got or got == 0 then return PongDuHost.NOT_HOST end
+    if wantNum ~= got then return PongDuHost.NOT_HOST end
+    return PongDuHost.OK
+end
+
+function PongDuHost.isHost(player)
+    return PongDuHost.check(player) == PongDuHost.OK
+end
+
+-- 서버 부팅 시 설정 검증 로그. 17자리 오타는 방송 시작 전에 잡혀야 한다.
+function PongDuHost.logConfig()
+    local s = rawId()
+    if s == "" or s == NONE then
+        print("[PongDuHost] Host_SteamID not set -- server-tier donations are DISABLED")
+        return
+    end
+    if not isValidSteamID(s) then
+        print("[PongDuHost] WARNING: Host_SteamID is malformed, server-tier donations DISABLED: '"
+            .. s .. "'")
+        return
+    end
+    if not getSteamModeActive() then
+        print("[PongDuHost] WARNING: Steam mode is OFF -- getSteamID() returns 0 for every"
+            .. " player, so Host_SteamID can never match")
+        return
+    end
+    print("[PongDuHost] host configured steamID=" .. s)
+end

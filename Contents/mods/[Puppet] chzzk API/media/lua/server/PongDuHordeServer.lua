@@ -291,12 +291,33 @@ local function onTick()
 end
 Events.OnTick.Add(onTick)
 
+-- ── 서버 시작 시 서버장 설정 검증 ────────────────────────────────────────────
+-- 17자리 오타나 미설정은 실제로 후원이 들어오기 전까지 드러나지 않는다.
+-- 방송 시작 전에 로그로 잡히게 한다.
+Events.OnServerStarted.Add(function()
+    if not isAuthority() then return end
+    PongDuHost.logConfig()
+end)
+
 -- ── 클라 커맨드 ──────────────────────────────────────────────────────────────
 Events.OnClientCommand.Add(function(module, command, player, data)
     if module ~= "PongDuHorde" then return end
     if not isAuthority() then return end
 
     if command == "Reserve" then
+        -- 서버장 게이트. isAuthority() 는 "이 코드가 서버에서 도는가"만 보지
+        -- 누가 보냈는지는 안 본다. 호드나이트는 접속자 전원에게 걸리는 효과라
+        -- 서버장에게 들어온 후원만 통과시킨다. 클라 쪽 검사는 전부 우회 가능하므로
+        -- 여기가 유일한 강제 지점이다.
+        local verdict = PongDuHost.check(player)
+        if verdict ~= PongDuHost.OK then
+            hlog("RESERVE DENIED user=" .. tostring(player and player:getUsername())
+                .. " steamID=" .. tostring(player and player:getSteamID())
+                .. " reason=" .. tostring(verdict))
+            sendServerCommand(player, "PongDuHost", "Denied", { ["why"] = verdict })
+            return
+        end
+
         local n = getPending() + 1
         setPending(n)
         local sender = tostring(data and data["sender"] or "")
