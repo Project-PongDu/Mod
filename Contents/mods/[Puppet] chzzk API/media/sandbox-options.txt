@@ -500,7 +500,7 @@ option PongDu.Rain_SprinterPercent = {
 }
 
 option PongDu.Rain_ShowRadius = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Rain_ShowRadius,
 }
 
@@ -558,7 +558,7 @@ option PongDu.Horde_DurationMin = {
 }
 
 option PongDu.Horde_Distance = {
-    type = integer, min = 10, max = 90, default = 75,
+    type = integer, min = 10, max = 90, default = 55,
     page = PongDu_Server, translation = PongDu_Horde_Distance,
 }
 
