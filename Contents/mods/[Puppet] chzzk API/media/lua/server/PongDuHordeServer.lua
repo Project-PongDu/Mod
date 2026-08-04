@@ -40,22 +40,32 @@ local HORDE_SOUND_VOLUME  = 10     -- 원본 addSound volume
 -- 없다 -- DayLength 세팅에 따라 마리당 실제 ms 간격이 달라져야 하기 때문.
 local PICK_TRIES          = 30     -- 원본은 101회. 전원 대상 대량 스폰이라 축소
 local SPAWN_CAP_PER_TICK  = 5      -- 랙 스파이크 후 몰아치기 상한 (레인과 동일)
-local SESSION_GRACE_MS    = 30000  -- 세션 강제 종료 여유
+local SESSION_GRACE_GAME_MIN = 10  -- 세션 강제 종료 여유 (인게임 분)
+
+-- ── 게임 시계 ────────────────────────────────────────────────────────────────
+-- 스폰 페이스는 현실시간이 아니라 인게임 시간으로 잰다. getWorldAgeHours() 는
+-- "월드 생성 후 경과 인게임 시간(시)"이고 게임 시계에서 직접 파생되므로,
+-- DayLength 설정이든 배속 변경(FastForward 류 모드의 setMultiplier)이든
+-- 자동으로 따라간다. 현실 ms 로 환산하면 getMinutesPerDay() 만 반영되고
+-- 배속은 반영되지 않아, 배속을 걸어도 스폰이 빨라지지 않는 문제가 생긴다.
+--
+-- 단조성 확인: GameTime.java:1147 은 NightsSurvived*24 + (timeOfDay 를 7시
+-- 기준으로 재배치한 값)이고, NightsSurvived 는 GameTime.java:661 에서
+-- timeOfDay 가 7.0 을 넘는 순간 증가한다. 피벗이 일치하므로 역행하지 않는다.
+--
+-- 정밀도: 내부 계산이 float 이라 인게임 1000일(24000시)쯤이면 ULP 가 약
+-- 0.003시간(10초)이 된다. 마리당 간격(기본 0.01시간)보다는 충분히 작지만,
+-- 극단적으로 오래된 세이브에서는 스폰 간격이 약간 들쭉날쭉해질 수 있다.
+local function gameHours()
+    return getGameTime():getWorldAgeHours()
+end
 
 -- ── 지속시간 -> 마리당 간격 계산 ─────────────────────────────────────────────
--- 인게임 1일(1440분) = 현실 getMinutesPerDay()분(서버 DayLength 설정)이므로,
---   총 현실 ms = durationGameMin x getMinutesPerDay() / 1440 x 60000
---   마리당 ms  = 총 현실 ms / count
--- 세션 시작 시점에 1회만 계산해서 세션에 고정한다(스냅샷). 도중에 DayLength가
--- 바뀌거나 잠자기로 배속이 튀면(최대 200배) 실제 소요 인게임 시간이 이 값에서
--- 벗어날 수 있지만, 그 경우까지 쫓아가는 재계산은 하지 않는다 -- 잠자기 중
--- 스폰이 재조정되는 것보다야 "시작 시점 기준으로 고정"이 예측 가능하다.
+-- 단위가 처음부터 인게임 시간이라 환산 자체가 없다.
 local function calcSpawnTiming(durationGameMin, count)
-    local mpd = getGameTime():getMinutesPerDay()
-    if not mpd or mpd <= 0 then mpd = 60 end  -- 이론상 도달 불가한 방어 하한
-    local totalMs    = durationGameMin * mpd / 1440 * 60000
-    local intervalMs = totalMs / count
-    return totalMs, intervalMs
+    local totalHours    = durationGameMin / 60
+    local intervalHours = totalHours / count
+    return totalHours, intervalHours
 end
 
 local MD_KEY = "PongDuHordeNight"
@@ -87,12 +97,13 @@ end
 -- 열려있는 세션 중 가장 늦게 끝나는 것의 잔여 ms. 전원이 동시에 시작하므로
 -- 사실상 값이 하나뿐이지만, 중간 접속자가 Sync를 던졌을 때 툴팁에 쓸 기준값이
 -- 필요해 최대값으로 통일한다.
-local function sessionRemainMs()
-    local now  = getTimestampMs()
+-- 남은 스폰 시간(인게임 분). 클라 툴팁 "종료까지" 기준값.
+local function sessionRemainGameMin()
+    local now  = gameHours()
     local best = 0
     for i = 1, #_sessions do
         local s = _sessions[i]
-        local r = (s.startMs + s.total * s.intervalMs) - now
+        local r = ((s.startHours + s.total * s.intervalHours) - now) * 60
         if r > best then best = r end
     end
     return best
@@ -103,7 +114,7 @@ local function broadcastState(active)
     sendServerCommand("PongDuHorde", "State", {
         ["pending"] = getPending(),
         ["active"]  = active and 1 or 0,
-        ["remain"]  = sessionRemainMs(),   -- 호버 툴팁 "종료까지" 계산용
+        ["remainMin"] = sessionRemainGameMin(),  -- 호버 툴팁 "종료까지" 계산용 (인게임 분)
     })
 end
 
@@ -185,14 +196,14 @@ local function startHordeNight()
     local cnt    = SandboxVars.PongDu.Horde_Count
     local dist   = SandboxVars.PongDu.Horde_Distance
     local durMin = SandboxVars.PongDu.Horde_DurationMin
-    local totalMs, intervalMs = calcSpawnTiming(durMin, cnt)
+    local totalHours, intervalHours = calcSpawnTiming(durMin, cnt)
     local list = playerList()
     if not list or list:size() == 0 then
         hlog("start aborted: no players online")
         return false
     end
 
-    local now     = getTimestampMs()
+    local now     = gameHours()
     local opened  = 0
     for i = 0, list:size() - 1 do
         local p = list:get(i)
@@ -204,16 +215,16 @@ local function startHordeNight()
                 spawned    = 0,
                 hits       = 0,
                 missed     = 0,
-                startMs    = now,
-                intervalMs = intervalMs,
+                startHours    = now,
+                intervalHours = intervalHours,
             }
             opened = opened + 1
             -- 시작 연출(대사 + 효과음)은 세션이 실제로 열린 플레이어에게만 보낸다.
             -- 전체 브로드캐스트를 쓰면 세션이 없는 접속자도 대사를 치게 된다.
-            -- dur: 스폰 루프 총 길이(ms). 클라 호버 툴팁의 "종료까지" 기준값.
+            -- durMin: 스폰 루프 총 길이(인게임 분). 클라 툴팁 "종료까지" 기준값.
             sendServerCommand(p, "PongDuHorde", "Fire", {
-                ["cnt"] = cnt,
-                ["dur"] = math.floor(totalMs),
+                ["cnt"]    = cnt,
+                ["durMin"] = totalHours * 60,
             })
         end
     end
@@ -221,7 +232,7 @@ local function startHordeNight()
         .. " countPerPlayer=" .. tostring(cnt)
         .. " dist=" .. tostring(dist)
         .. " durationGameMin=" .. tostring(durMin)
-        .. " intervalMs=" .. tostring(intervalMs))
+        .. " intervalGameMin=" .. tostring(intervalHours * 60))
     return opened > 0
 end
 
@@ -246,7 +257,7 @@ Events.EveryHours.Add(onEveryHours)
 -- ── 스폰 루프 ────────────────────────────────────────────────────────────────
 local function onTick()
     if #_sessions == 0 then return end
-    local now = getTimestampMs()
+    local now = gameHours()
     for i = #_sessions, 1, -1 do
         local s = _sessions[i]
         local alive = s.player and pcall(function() return s.player:getX() end)
@@ -254,8 +265,8 @@ local function onTick()
             hlog("session dropped (player gone) spawned=" .. tostring(s.spawned))
             table.remove(_sessions, i)
         else
-            local elapsed = now - s.startMs
-            local target  = math.floor(elapsed / s.intervalMs)
+            local elapsed = now - s.startHours
+            local target  = math.floor(elapsed / s.intervalHours)
             if target > s.total then target = s.total end
             local n = target - s.spawned
             if n > SPAWN_CAP_PER_TICK then n = SPAWN_CAP_PER_TICK end
@@ -269,7 +280,7 @@ local function onTick()
                 end
             end
             if s.spawned >= s.total
-                or elapsed > s.total * s.intervalMs + SESSION_GRACE_MS then
+                or elapsed > s.total * s.intervalHours + SESSION_GRACE_GAME_MIN / 60 then
                 hlog("session done player=" .. tostring(s.player:getUsername())
                     .. " spawned=" .. tostring(s.spawned)
                     .. " hits=" .. tostring(s.hits)

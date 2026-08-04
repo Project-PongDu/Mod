@@ -61,21 +61,17 @@ local _pending = 0
 local _active  = false
 local _panel   = nil
 local _syncTicks = -1
--- 스폰 루프가 끝나는 클라 로컬 시각(ms). 서버가 Fire/State로 잔여 ms를 주면
--- 거기에 현재 시각을 더해 보관한다. 서버 시계와 클라 시계를 비교하지 않고
--- "받은 시점 + 잔여"만 쓰므로 시계 오차 영향이 없다.
-local _activeEndMs = nil
-
--- ── 인게임 시간 환산 ─────────────────────────────────────────────────────────
--- GameTime.getMinutesPerDay()는 "인게임 하루당 현실 분"(샌드박스 DayLength).
--- GameTime.java:226 getGameWorldSecondsSinceLastUpdate()가 쓰는 환산과 동일하게
---   인게임 분 = 현실 초 x 1440 / (minutesPerDay x 60) = 현실 초 x 24 / minutesPerDay
--- 스폰 루프는 getTimestampMs() 기준 현실시간 고정이라 이 환산이 필요하다.
-local function realMsToGameMinutes(ms)
-    local mpd = getGameTime():getMinutesPerDay()
-    if not mpd or mpd <= 0 then return 0 end
-    return (ms / 1000) * 24 / mpd
-end
+-- 스폰 루프가 끝나는 인게임 시각(getWorldAgeHours 기준). 서버가 Fire/State로
+-- 잔여 인게임 분을 주면 거기에 현재 게임시각을 더해 보관한다. 서버 시계와
+-- 클라 시계를 비교하지 않고 "받은 시점 + 잔여"만 쓰므로 시계 오차 영향이 없다.
+-- 현실 ms 가 아니라 게임 시간을 쓰는 이유는 서버 스폰 루프와 같다 -- 배속
+-- (FastForward 류)이 걸렸을 때 스폰과 카운트다운이 함께 빨라져야 하기 때문.
+local _activeEndHours = nil
+-- 클램프용 상한(인게임 분). 클라의 NightsSurvived 는 SyncClock 패킷으로만
+-- 갱신되므로(GameClient.java:1563), 7시 경계를 넘는 순간 다음 패킷이 오기 전까지
+-- getWorldAgeHours() 가 24시간 뒤로 튈 수 있다. 잔여값을 [0, 총길이]로 조여서
+-- 그 찰나에 툴팁이 엉뚱한 숫자를 보이지 않게 한다.
+local _activeTotalMin = 0
 
 -- 현재 인게임 시각에서 목표 시(hour) 정각까지 남은 인게임 분.
 -- getTimeOfDay()는 0~24 실수 시각. 이미 지났으면 다음날로 넘긴다.
@@ -100,11 +96,11 @@ end
 -- (스택 예약이 여러 건이어도 "다음 1건까지 남은 시간"만 표시한다. 각 스택별
 -- 개별 시각까지 보여주려면 별도 요청 시 확장.)
 local function tooltipLines()
-    if _active and _activeEndMs then
-        local remain = _activeEndMs - getTimestampMs()
+    if _active and _activeEndHours then
+        local remain = (_activeEndHours - getGameTime():getWorldAgeHours()) * 60
         if remain < 0 then remain = 0 end
-        return { getText("IGUI_donation_horde_night_tip_end",
-            fmtGameMinutes(realMsToGameMinutes(remain))) }
+        if remain > _activeTotalMin then remain = _activeTotalMin end
+        return { getText("IGUI_donation_horde_night_tip_end", fmtGameMinutes(remain)) }
     end
     if _pending > 0 then
         return { getText("IGUI_donation_horde_night_tip_start",
@@ -200,15 +196,19 @@ Events.OnServerCommand.Add(function(module, command, args)
         _active  = (tonumber(args and args["active"]) or 0) == 1
         -- 중간 접속자/Sync 응답용 잔여 스폰 시간(ms). 세션이 여러 개면 서버가
         -- 최대값을 보낸다 -- 전원 동시 시작이라 사실상 동일하다.
-        local remain = tonumber(args and args["remain"]) or 0
+        local remain = tonumber(args and args["remainMin"]) or 0
         if _active then
-            if remain > 0 then _activeEndMs = getTimestampMs() + remain end
+            if remain > 0 then
+                _activeEndHours = getGameTime():getWorldAgeHours() + remain / 60
+                if remain > _activeTotalMin then _activeTotalMin = remain end
+            end
         else
-            _activeEndMs = nil
+            _activeEndHours = nil
+            _activeTotalMin = 0
         end
         print("[PongDuHorde] state pending=" .. tostring(_pending)
             .. " active=" .. tostring(_active)
-            .. " remainMs=" .. tostring(remain))
+            .. " remainGameMin=" .. tostring(remain))
         refreshIndicator()
 
     elseif command == "Reserved" then
@@ -228,15 +228,18 @@ Events.OnServerCommand.Add(function(module, command, args)
     elseif command == "Fire" then
         -- 발동 연출. 심박음(Reserved)이 "오늘 밤 온다"는 예고음이라면 이쪽이
         -- 실제 시작 신호다. 서버가 세션이 열린 플레이어에게만 보낸다.
-        -- 서버가 준 스폰 루프 총 길이(ms)로 종료 예정시각을 잡는다. State
+        -- 서버가 준 스폰 루프 총 길이(인게임 분)로 종료 예정시각을 잡는다. State
         -- 브로드캐스트보다 이쪽이 먼저 도착할 수 있어 여기서도 세팅한다.
-        local dur = tonumber(args and args["dur"]) or 0
+        local dur = tonumber(args and args["durMin"]) or 0
         _active = true
-        if dur > 0 then _activeEndMs = getTimestampMs() + dur end
+        if dur > 0 then
+            _activeEndHours = getGameTime():getWorldAgeHours() + dur / 60
+            _activeTotalMin = dur
+        end
         refreshIndicator()
         print("[PongDuHorde] horde night fired countPerPlayer="
             .. tostring(args and args["cnt"])
-            .. " durMs=" .. tostring(dur))
+            .. " durGameMin=" .. tostring(dur))
         sayRandomLine("warn", WARN_LINE_COUNT)
         -- PlaySound 의 maxGain 인자는 SoundManager.java 구현상 무시되므로
         -- 반환 핸들에 setVolume 을 직접 건다(Reserved 쪽과 동일한 이유).
@@ -249,7 +252,8 @@ Events.OnServerCommand.Add(function(module, command, args)
         -- 이 클라의 세션이 끝났다. active/인디케이터 자체는 전 세션 종료 시점에
         -- 서버 State가 내려 정리하지만, 툴팁이 "0분"으로 굳어 보이지 않도록
         -- 종료 예정시각은 여기서 즉시 지운다.
-        _activeEndMs = nil
+        _activeEndHours = nil
+        _activeTotalMin = 0
         print("[PongDuHorde] horde night ended spawned="
             .. tostring(args and args["spawned"])
             .. " hits=" .. tostring(args and args["hits"]))
