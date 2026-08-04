@@ -19,6 +19,7 @@ local REASON_KEY = {
     ["not_host"]        = "IGUI_donation_host_only",
     ["not_configured"]  = "IGUI_donation_host_unset",
     ["bad_id"]          = "IGUI_donation_host_badid",
+    ["wrong_kind"]      = "IGUI_donation_host_wrongkind",
     ["no_steam"]        = "IGUI_donation_host_nosteam",
 }
 

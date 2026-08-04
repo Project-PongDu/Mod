@@ -36,11 +36,25 @@ PongDuHost = PongDuHost or {}
 
 -- 판정 결과. 클라에 그대로 넘겨 사유별 안내 문구를 띄운다.
 -- 17자리 오타는 눈으로 못 잡으므로 "왜 안 되는지"가 반드시 화면에 나와야 한다.
-PongDuHost.OK        = "ok"
-PongDuHost.NOT_HOST  = "not_host"          -- 후원 받은 사람이 서버장이 아님
-PongDuHost.UNSET     = "not_configured"    -- Host_SteamID 미설정
-PongDuHost.BAD_ID    = "bad_id"            -- 형식 오류(오타)
-PongDuHost.NO_STEAM  = "no_steam"          -- 스팀 모드 OFF 서버라 판정 불가
+PongDuHost.OK         = "ok"
+PongDuHost.NOT_HOST   = "not_host"          -- 후원 받은 사람이 서버장이 아님
+PongDuHost.UNSET      = "not_configured"    -- Host_SteamID 미설정
+PongDuHost.BAD_ID     = "bad_id"            -- 형식 오류(오타)
+PongDuHost.WRONG_KIND = "wrong_kind"        -- 개인 계정 ID가 아님(그룹/게임서버 등)
+PongDuHost.NO_STEAM   = "no_steam"          -- 스팀 모드 OFF 서버라 판정 불가
+
+-- 개인 계정 SteamID64 범위.
+-- SteamID64 = (universe << 56) | (type << 52) | (instance << 32) | accountID 이고,
+-- 플레이어는 universe=Public / type=Individual / instance=Desktop 로 상위 비트가
+-- 고정이라 76561197960265728 + accountID(32비트) 의 닫힌 구간이 된다.
+--
+-- 이 검사는 판정 정확도를 올리지 않는다. 범위 밖 값은 어차피 어떤 접속자의
+-- getSteamID() 와도 일치하지 않아 not_host 로 떨어진다. 목적은 진단이다 --
+-- 게임서버 ID(예: 90290122427026461)는 개인 계정과 자릿수가 같아 육안 구분이
+-- 안 되고, 서버 콘솔 로그에 둘이 나란히 찍히므로 잘못 붙여넣는 실수가 나온다.
+-- 그 경우 영구 not_host 로 조용히 실패하는 대신 설정 오류로 즉시 알린다.
+local ID_MIN = 76561197960265728
+local ID_MAX = 76561202255233023
 
 -- 미설정 센티널. 빈 문자열 default 는 CustomStringSandboxOption.parse 가
 -- default 값을 못 찾으면 null 을 반환해 옵션 자체가 등록 안 될 수 있어
@@ -82,6 +96,8 @@ function PongDuHost.check(player)
 
     local wantNum = tonumber(want)
     if not wantNum then return PongDuHost.BAD_ID end
+    -- 경계값도 double 로 반올림되지만 오차가 16 수준이라 범위 판정에는 영향이 없다.
+    if wantNum < ID_MIN or wantNum > ID_MAX then return PongDuHost.WRONG_KIND end
 
     local got = player:getSteamID()
     if not got or got == 0 then return PongDuHost.NOT_HOST end
@@ -103,6 +119,13 @@ function PongDuHost.logConfig()
     if not isValidSteamID(s) then
         print("[PongDuHost] WARNING: Host_SteamID is malformed, server-tier donations DISABLED: '"
             .. s .. "'")
+        return
+    end
+    local n = tonumber(s)
+    if not n or n < ID_MIN or n > ID_MAX then
+        print("[PongDuHost] WARNING: Host_SteamID is not an individual account ID (expected "
+            .. string.format("%.0f", ID_MIN) .. "~" .. string.format("%.0f", ID_MAX)
+            .. "), got: " .. s .. " -- did you paste a group or game server ID?")
         return
     end
     if not getSteamModeActive() then

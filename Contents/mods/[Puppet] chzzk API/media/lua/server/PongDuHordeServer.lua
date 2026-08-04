@@ -312,7 +312,11 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         local verdict = PongDuHost.check(player)
         if verdict ~= PongDuHost.OK then
             hlog("RESERVE DENIED user=" .. tostring(player and player:getUsername())
-                .. " steamID=" .. tostring(player and player:getSteamID())
+                -- Kahlua 는 SteamID64 를 double 로 넘기므로 tostring() 하면
+                -- 7.6561198321169104E16 같은 지수표기가 나와 샌박 값과 육안
+                -- 대조가 안 된다. %.0f 로 정수 형태를 강제한다(값 자체는 이미
+                -- 반올림된 뒤라 뒷자리가 원본과 다를 수 있다 -- 정상이다).
+                .. " steamID=" .. string.format("%.0f", (player and player:getSteamID()) or 0)
                 .. " reason=" .. tostring(verdict))
             sendServerCommand(player, "PongDuHost", "Denied", { ["why"] = verdict })
             return
