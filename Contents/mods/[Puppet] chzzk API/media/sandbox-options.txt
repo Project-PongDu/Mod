@@ -538,8 +538,13 @@ option PongDu.Horde_Hour = {
 }
 
 option PongDu.Horde_Count = {
-    type = integer, min = 1, max = 500, default = 100,
+    type = integer, min = 1, max = 500, default = 200,
     page = PongDu_Server, translation = PongDu_Horde_Count,
+}
+
+option PongDu.Horde_DurationMin = {
+    type = integer, min = 10, max = 1440, default = 120,
+    page = PongDu_Server, translation = PongDu_Horde_DurationMin,
 }
 
 option PongDu.Horde_Distance = {

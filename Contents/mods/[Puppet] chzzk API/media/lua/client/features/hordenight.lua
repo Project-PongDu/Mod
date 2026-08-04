@@ -95,20 +95,21 @@ local function fmtGameMinutes(totalMin)
     return getText("IGUI_donation_horde_night_tip_m", tostring(m))
 end
 
--- 툴팁 줄 구성. 발동 중이면서 예약도 남아있는 경우 두 줄 다 보여준다.
+-- 툴팁 줄 구성. 한 줄만 보여준다 -- 진행 중인 이벤트가 최우선, 없으면 다음 예약.
+-- (스택 예약이 여러 건이어도 "다음 1건까지 남은 시간"만 표시한다. 각 스택별
+-- 개별 시각까지 보여주려면 별도 요청 시 확장.)
 local function tooltipLines()
-    local lines = {}
     if _active and _activeEndMs then
         local remain = _activeEndMs - getTimestampMs()
         if remain < 0 then remain = 0 end
-        lines[#lines + 1] = getText("IGUI_donation_horde_night_tip_end",
-            fmtGameMinutes(realMsToGameMinutes(remain)))
+        return { getText("IGUI_donation_horde_night_tip_end",
+            fmtGameMinutes(realMsToGameMinutes(remain))) }
     end
     if _pending > 0 then
-        lines[#lines + 1] = getText("IGUI_donation_horde_night_tip_start",
-            fmtGameMinutes(gameMinutesUntilHour(SandboxVars.PongDu.Horde_Hour)))
+        return { getText("IGUI_donation_horde_night_tip_start",
+            fmtGameMinutes(gameMinutesUntilHour(SandboxVars.PongDu.Horde_Hour))) }
     end
-    return lines
+    return {}
 end
 
 local function indicatorEnabled()
