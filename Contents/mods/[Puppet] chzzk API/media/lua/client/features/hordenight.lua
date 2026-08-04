@@ -10,18 +10,19 @@ local textOutline = require("utils/textOutline")
 --  ② 심박음: 서버 Reserved 브로드캐스트 수신 시 1회 재생. 발동음이 아니라
 --     "오늘 밤 온다"는 예고음이라, 발동 시점(22시)이 아니라 후원 시점에 울린다.
 --  ③ 인디케이터: 예약이 하나라도 걸려 있거나 스폰이 진행 중이면 화면 우상단에
---     상시 표시. 원본 모드의 무들 아이콘 자리를 그대로 쓰되, 텍스처는 도네
---     큐박스와 같은 horde_night.png 를 쓴다. 예약이 2건 이상이면 개수를 겹쳐 그린다.
+--     상시 표시. 위치/크기/텍스처 전부 원본 모드(HordeNightIndicator.lua,
+--     Moodle_HNzombie.png) 그대로 이식. 예약이 2건 이상이면 개수를 겹쳐 그린다.
 --
 -- 스폰/유인 사운드는 전부 서버가 처리한다. 클라가 하는 일은 없다.
 
--- 원본 무들 위치/크기 유지 (HordeNightIndicator.lua: screenW-210, 12, 32, 32).
--- 텍스처 원본은 1024x1024(큐박스 슬롯용)이라 ISUIElement:drawTextureScaled 로
--- 축소해 그린다.
+-- 원본 무들 위치/크기/텍스처 전부 그대로 (HordeNightIndicator.lua: screenW-210,
+-- 12, 32, 32, Moodle_HNzombie.png). 텍스처 원본 해상도가 도네 큐박스용
+-- horde_night.png(1024x1024)와 다를 수 있어 ISUIElement:drawTextureScaledAspect
+-- 로 종횡비 유지한 채 IND_SIZE에 맞춰 그린다.
 local IND_RIGHT_PAD = 210
 local IND_TOP       = 12
 local IND_SIZE      = 32
-local TEX_PATH      = "media/textures/donation/horde_night.png"
+local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
 
 -- 호버 툴팁 레이아웃. 인디케이터가 화면 최상단이라 툴팁은 아래로 깐다.
 -- 오른쪽 끝을 아이콘 오른쪽 끝에 맞춰 왼쪽으로 늘린다(화면 밖 잘림 방지).
@@ -145,13 +146,8 @@ function HordeIndicator:render()
     if self:isMouseOver() then
         local lines = tooltipLines()
         if #lines > 0 then
-            local col = colorMap.get("horde_night")
-            -- 테두리/글자는 효과색을 흰쪽으로 밝힌 톤 (큐박스 툴팁과 동일 기법)
-            local br = {
-                col[1] + (1 - col[1]) * 0.55,
-                col[2] + (1 - col[2]) * 0.55,
-                col[3] + (1 - col[3]) * 0.55,
-            }
+            -- 테두리/글자는 흰색 고정 (효과색 틴트 안 함)
+            local br = {1.0, 1.0, 1.0}
             local tw = 0
             for i = 1, #lines do
                 local w = getTextManager():MeasureStringX(UIFont.Small, lines[i])
