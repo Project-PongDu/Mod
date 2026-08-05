@@ -1,3 +1,22 @@
+-- backroom.lua : 백룸 탈출 (backroom)  [비활성]
+--
+-- 미사용 결정으로 기능 전체를 비활성화한다. rewardManager 쪽 핸들러는
+-- featureId "backroom"을 유효하게 남겨두되(퐁듀 런처의 amount->featureId 매핑이
+-- 깨지지 않도록) 아무것도 실행하지 않고, 이 파일은 통째로 주석 처리한다.
+--
+-- 파일 자체를 비워두지 않고 블록 주석으로 보존하는 이유:
+--   1) PZ는 media/lua/client 하위 .lua를 전부 자동 로드하므로, 코드를 남겨두면
+--      top-level의 Events.OnGameStart.Add(onGameStart) / OnPlayerDeath 등록이
+--      계속 살아난다. require 를 지우는 것만으로는 비활성화되지 않는다.
+--   2) 재활성화 시 아래 블록 주석만 풀면 그대로 복원된다.
+--
+-- [주의] 재활성화 전에 반드시 고칠 것: 아래 원본 코드의 v:removePassenger(a) 는
+-- B41 BaseVehicle 에 존재하지 않는 메서드다(41.78.19 전체 소스 확인). 차량 탑승
+-- 중 발동하면 즉시 런타임 에러로 텔레포트가 중단된다. teleport.lua /
+-- randomteleport.lua 와 동일하게 v:exit(a) + PlayAnim("Idle") +
+-- triggerEvent("OnExitVehicle", a) 로 교체해야 한다.
+
+--[[
 local _a = {}
 local _b = require("config")
 local _c = require("global")
@@ -99,3 +118,4 @@ local function onGameStart()
 end
 Events.OnGameStart.Add(onGameStart)
 return _a
+]]

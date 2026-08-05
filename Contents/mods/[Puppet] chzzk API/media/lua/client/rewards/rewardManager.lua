@@ -1,8 +1,12 @@
 local rewardManager = {}
 
 local bandit     = require("features/hitman")
-local teleport   = require("features/teleport")
-local backroom   = require("features/backroom")
+-- exile / backroom 은 미사용 결정으로 비활성화. features/teleport.lua 와
+-- features/backroom.lua 는 파일 전체가 블록 주석 처리돼 있어 아무것도 반환하지
+-- 않으므로 require 도 함께 막는다. 재활성화 시 두 파일의 주석과 아래 두 줄,
+-- 그리고 해당 핸들러 fn 내부 주석을 같이 푼다.
+-- local teleport   = require("features/teleport")
+-- local backroom   = require("features/backroom")
 local bombard    = require("features/bombard")
 local eventUtils = require("utils/Event")
 local zone       = require("utils/zone")

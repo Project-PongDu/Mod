@@ -1,3 +1,20 @@
+-- teleport.lua : 산타마을 유배 (exile)  [비활성]
+--
+-- 미사용 결정으로 기능 전체를 비활성화한다. rewardManager 쪽 핸들러는
+-- featureId "exile"을 유효하게 남겨두되(퐁듀 런처의 amount->featureId 매핑이
+-- 깨지지 않도록) 아무것도 실행하지 않고, 이 파일은 통째로 주석 처리한다.
+--
+-- 파일 자체를 비워두지 않고 블록 주석으로 보존하는 이유:
+--   1) PZ는 media/lua/client 하위 .lua를 전부 자동 로드하므로, 코드를 남겨두면
+--      top-level의 Events.OnTick.Add(onTickRecovery) 같은 등록이 계속 살아난다.
+--      require 를 지우는 것만으로는 비활성화되지 않는다.
+--   2) 재활성화 시 아래 블록 주석만 풀면 그대로 복원된다.
+--
+-- [주의] 재활성화한다면 forceExitVehicle 에 triggerEvent("OnExitVehicle", p) 를
+-- 반드시 추가할 것. 없으면 운전석에서 발동 시 ISVehicleDashboard 가
+-- setVehicle(nil) 을 못 받아 대시보드 UI 가 화면에 남는다.
+
+--[[
 local _a = {}
 local _b = require("config")
 local _c = require("global")
@@ -151,3 +168,4 @@ end
 Events.OnTick.Add(onTickRecovery)
 
 return _a
+]]
