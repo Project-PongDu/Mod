@@ -577,29 +577,30 @@ option PongDu.Delay_medical_box = {
     page = PongDu_Server, translation = PongDu_Delay_medical_box,
 }
 
-/* 주사기 4종 추첨 가중치. 상대값이라 합이 100일 필요는 없고, 0으로 두면 그
-   주사기는 풀에서 완전히 빠진다(전부 0이면 상자를 열어도 아무것도 안 나온다).
+/* 상자에서 나올 수 있는 주사기 종류. 켜진 것들 사이에서 균등 추첨이라
+   확률 조절은 없고, 특정 주사기를 빼고 싶을 때만 끄면 된다.
+   전부 끄면 상자를 열어도 아무것도 나오지 않는다(로그로 경고).
    추첨은 상자를 여는 시점에 클라가 굴리므로, 같은 후원으로 받은 상자라도
    플레이어마다 다른 주사기가 나온다. */
 
-option PongDu.MedBox_Weight_Adrenaline = {
-    type = integer, min = 0, max = 100, default = 35,
-    page = PongDu_Server, translation = PongDu_MedBox_Weight_Adrenaline,
+option PongDu.MedBox_Allow_Adrenaline = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_MedBox_Allow_Adrenaline,
 }
 
-option PongDu.MedBox_Weight_Doxycycline = {
-    type = integer, min = 0, max = 100, default = 30,
-    page = PongDu_Server, translation = PongDu_MedBox_Weight_Doxycycline,
+option PongDu.MedBox_Allow_Doxycycline = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_MedBox_Allow_Doxycycline,
 }
 
-option PongDu.MedBox_Weight_Morphine = {
-    type = integer, min = 0, max = 100, default = 25,
-    page = PongDu_Server, translation = PongDu_MedBox_Weight_Morphine,
+option PongDu.MedBox_Allow_Morphine = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_MedBox_Allow_Morphine,
 }
 
-option PongDu.MedBox_Weight_Emergency = {
-    type = integer, min = 0, max = 100, default = 10,
-    page = PongDu_Server, translation = PongDu_MedBox_Weight_Emergency,
+option PongDu.MedBox_Allow_Emergency = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_MedBox_Allow_Emergency,
 }
 
 /***** PONGDU DEV (dummy / stub features) *****/

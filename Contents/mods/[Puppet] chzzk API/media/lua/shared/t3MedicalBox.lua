@@ -6,9 +6,9 @@
 -- syringes defined in t3_rewards_items.txt.
 --
 -- The roll happens per box, on the opening client, so two players who open
--- their boxes do not necessarily get the same syringe. Weights come from the
--- sandbox options (PongDu.MedBox_Weight_*, read at roll time, never cached);
--- setting a weight to 0 removes that syringe from the pool entirely.
+-- their boxes do not necessarily get the same syringe. All enabled syringes
+-- have the same chance; the sandbox options (PongDu.MedBox_Allow_*, read at
+-- roll time, never cached) only decide which ones are in the pool at all.
 --
 -- Global table (no module return) so the recipe OnCreate can resolve
 -- "t3MedicalBox.OpenBox". Same pattern as t3RandomWeapon / t3VehicleDrop.
@@ -20,12 +20,12 @@ local LOG = "[PongDu][MedicalBox] "
 local MODULE = "t3chzzkDonation."
 
 -- item: script item name (module prefix added at grant time)
--- option: sandbox option suffix under SandboxVars.PongDu
+-- option: sandbox option suffix under SandboxVars.PongDu (boolean toggle)
 t3MedicalBox.SYRINGES = {
-    { item = "Syringe_Adrenaline",  option = "MedBox_Weight_Adrenaline"  },
-    { item = "Syringe_Doxycycline", option = "MedBox_Weight_Doxycycline" },
-    { item = "Syringe_Morphine",    option = "MedBox_Weight_Morphine"    },
-    { item = "Syringe_Emergency",   option = "MedBox_Weight_Emergency"   },
+    { item = "Syringe_Adrenaline",  option = "MedBox_Allow_Adrenaline"  },
+    { item = "Syringe_Doxycycline", option = "MedBox_Allow_Doxycycline" },
+    { item = "Syringe_Morphine",    option = "MedBox_Allow_Morphine"    },
+    { item = "Syringe_Emergency",   option = "MedBox_Allow_Emergency"   },
 }
 
 -- Read the donor name stashed on the box item's modData at grant time.
@@ -42,37 +42,25 @@ local function findDonor(items)
     return ""
 end
 
--- Weighted roll over the four syringes. Sandbox weights are read here (use
--- time), not at file load, so mid-session changes take effect immediately.
--- Returns the bare item name, or nil when every weight is 0.
+-- Uniform roll over the syringes enabled in the sandbox options. The options
+-- are read here (use time), not at file load, so mid-session changes take
+-- effect immediately. Returns the bare item name, or nil when all four are off.
 function t3MedicalBox.roll()
     local pool = {}
-    local total = 0
     for _, entry in ipairs(t3MedicalBox.SYRINGES) do
-        local w = SandboxVars.PongDu[entry.option]
-        if w > 0 then
-            total = total + w
-            table.insert(pool, { item = entry.item, acc = total })
+        if SandboxVars.PongDu[entry.option] then
+            table.insert(pool, entry.item)
         end
     end
 
-    if total <= 0 then
-        print(LOG .. "roll aborted: every syringe weight is 0 in sandbox options")
+    if #pool == 0 then
+        print(LOG .. "roll aborted: every syringe is disabled in sandbox options")
         return nil
     end
 
-    local roll = ZombRand(total)
-    for _, entry in ipairs(pool) do
-        if roll < entry.acc then
-            print(LOG .. "rolled item=" .. entry.item
-                .. " (roll=" .. tostring(roll) .. "/" .. tostring(total)
-                .. ", pool=" .. tostring(#pool) .. ")")
-            return entry.item
-        end
-    end
-
-    -- Safety net. Integer arithmetic guarantees the loop above returns.
-    return pool[#pool].item
+    local itemType = pool[ZombRand(#pool) + 1]
+    print(LOG .. "rolled item=" .. itemType .. " (pool=" .. tostring(#pool) .. ")")
+    return itemType
 end
 
 -- Recipe OnCreate handler --------------------------------------------------

@@ -7,8 +7,8 @@
 -- "사용 후 빈 주사기 반환" 로직도 함께 제외한다(레시피가 없으면 빈 주사기가 아무
 -- 데도 못 쓰이는 죽은 아이템이 되므로).
 --
--- Syringe_Adrenaline(전투자극제) : 피로/지구력 즉시 회복, 배고픔/갈증/패닉 증가.
---                                  빈사(HP<1) 시 소량 회복.
+-- Syringe_Adrenaline(전투자극제) : 피로/지구력 즉시 회복. 빈사(HP<1) 시 소량 회복.
+--                                  FAO 원본의 부작용(배고픔/갈증/패닉)은 주석 처리해뒀다.
 -- Syringe_Doxycycline(광범위 항생제) : 일반 질병(Sickness) + 식중독 + 상처 세균감염 치료.
 --                                      좀비 감염(Knox Infection, bitten/IsInfected 계열)은
 --                                      건드리지 않는다.
@@ -459,7 +459,11 @@ function PongDuSyringeAction:stop()
     ISBaseTimedAction.stop(self)
 end
 
--- FAO 원본 로직 그대로 유지.
+-- 회복 수치는 FAO 원본 그대로이나, 부작용(배고픔 +0.3 / 갈증 +0.5)은
+-- 비활성화했다. 원본은 플레이어가 직접 제작하는 소모품이라 대가가 있었지만, 퐁듀에서는
+-- 시청자가 후원으로 보내주는 보상이라 페널티가 붙을 이유가 없다. 되살릴 때를 대비해
+-- 지우지 않고 주석으로 남겨둔다.
+--
 -- 참고: 아래 getHealth()/setHealth()는 IsoGameCharacter의 레거시 Health 필드(0~1)로,
 -- 플레이어 체력바(BodyDamage.OverallBodyHealth, 0~100)와는 별개이고 플레이어에서는
 -- 사실상 항상 1이다. 즉 이 체력 회복 분기는 실제로는 거의 발동하지 않는다.
@@ -467,8 +471,8 @@ end
 local function applyAdrenaline(playerObj, stats)
     stats:setFatigue(stats:getFatigue() - 0.7)
     stats:setEndurance(stats:getEndurance() + 0.85)
-    stats:setHunger(stats:getHunger() + 0.3)
-    stats:setThirst(stats:getThirst() + 0.5)
+    -- stats:setHunger(stats:getHunger() + 0.3)
+    -- stats:setThirst(stats:getThirst() + 0.5)
     stats:setPanic(stats:getPanic() + 15)
 
     if playerObj:getHealth() < 1 then
