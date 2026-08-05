@@ -68,11 +68,16 @@ end
 -- 차량 탑승 중이면 강제 하차. B41엔 removePassenger가 없고 exit(chr)가 정석:
 -- clearPassenger + setVehicle(nil) + collidable 복구 + MP sendExit 동기화까지 처리
 -- (바닐라 ISExitVehicle:perform 참조).
+-- exit()은 OnExitVehicle을 발화하지 않는다. 이 이벤트를 소비하는 건
+-- ISVehicleDashboard.onExitVehicle 하나뿐이고 거기서 setVehicle(nil) ->
+-- removeFromUIManager 를 하므로, 빠뜨리면 대시보드가 화면에 남는다.
+-- 엔진도 같은 상황(GameClient.receiveTeleport)에서 exit() 다음 줄에 붙여놨다.
 local function forceExitVehicle(p)
     local v = p:getVehicle()
     if not v then return end
     v:exit(p)
     p:PlayAnim("Idle")
+    triggerEvent("OnExitVehicle", p)
     global.b(" random_teleport: forced exit from vehicle before teleport")
 end
 
