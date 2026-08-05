@@ -51,7 +51,7 @@ ItemName_KO = {
     ItemName_t3chzzkDonation.t3DeployedParachute = "펼쳐진 낙하산",
 
     ItemName_t3chzzkDonation.Syringe_Adrenaline = "전투자극제 주사기",
-    ItemName_t3chzzkDonation.Syringe_Doxycycline = "범용 항생제 주사기",
+    ItemName_t3chzzkDonation.Syringe_Doxycycline = "범용 치유제 주사기",
     ItemName_t3chzzkDonation.Syringe_Morphine = "급성 진통제 주사기",
     ItemName_t3chzzkDonation.Syringe_Emergency = "응급 지혈제 주사기",
     ItemName_t3chzzkDonation.medical_box = "의약품 보급상자",

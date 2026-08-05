@@ -9,9 +9,10 @@
 --
 -- Syringe_Adrenaline(전투자극제) : 피로/지구력 즉시 회복. 빈사(HP<1) 시 소량 회복.
 --                                  FAO 원본의 부작용(배고픔/갈증/패닉)은 주석 처리해뒀다.
--- Syringe_Doxycycline(광범위 항생제) : 일반 질병(Sickness) + 식중독 + 상처 세균감염 치료.
---                                      좀비 감염(Knox Infection, bitten/IsInfected 계열)은
---                                      건드리지 않는다.
+-- Syringe_Doxycycline(광범위 항생제) : 감기 + 식중독 + 시체 악취 메스꺼움 +
+--                                      상처 세균감염 치료. 좀비 감염(Knox Infection,
+--                                      bitten/IsInfected 계열)은 건드리지 않는다 --
+--                                      그쪽은 백신(Zomboxivir) 담당.
 --
 -- Syringe_Morphine(모르핀) / Syringe_Emergency(응급 재생)은 신규 추가. 둘 다
 -- "지속시간" 개념이 있는데, 바닐라 PainEffect/PainReduction(BodyDamage.java)은
@@ -482,21 +483,66 @@ local function applyAdrenaline(playerObj, stats)
     print("[PongDu] syringe: Syringe_Adrenaline applied")
 end
 
+-- 광범위 항생제. 좀비 감염(Knox)을 제외한 병증 전부를 즉시 없앤다.
+--
+-- ── 아래 3줄을 비활성화한 이유 (전부 41.78.19 소스 확인) ──
+--
+--  stats:setSickness(0)
+--    Stats.Sickness 는 독립 상태값이 아니라 파생 표시값이다. Moodle.java:236 이
+--    Sick 무들 갱신 때마다 getApparentInfectionLevel()/100 으로 덮어쓴다
+--    (= FakeInfectionLevel / InfectionLevel / FoodSicknessLevel 중 최댓값).
+--    바닐라 전체에 setSickness 호출처가 없다. 근원을 지우면 자동으로 0이 된다.
+--
+--  bodyDamage:setInfected(false) / setInfectionLevel(0)
+--    전신 플래그(BodyDamage.IsInfected)만 끄는 것이라 다음 프레임에 되살아난다.
+--    BodyDamage.Update():2017 이 !isInfected() 일 때 부위별 플래그
+--    (BodyPart.IsInfected -- 별개 필드)를 훑어 즉시 setInfected(true) 하고,
+--    InfectionLevel 도 InfectionTime 기반으로 원래 진행도까지 재계산된다.
+--    제대로 치료하려면 부위별 SetInfected(false) + InfectionTime 리셋까지
+--    필요한데, 그건 백신(Zomboxivir)의 역할이라 항생제에서는 다루지 않는다.
 local function applyDoxycycline(playerObj, stats, bodyDamage)
-    stats:setSickness(0)
-    bodyDamage:setFoodSicknessLevel(0)
-    bodyDamage:setInfected(false)
-    bodyDamage:setInfectionLevel(0)
+    -- stats:setSickness(0)
+    -- bodyDamage:setInfected(false)
+    -- bodyDamage:setInfectionLevel(0)
 
+    -- 감기. ColdStrength 는 UpdateCold() 에서 자연 감소로만 0 이 되는 값이라
+    -- (BodyDamage.java:891) 아이템으로 끝내려면 두 필드를 같이 눌러야 한다.
+    -- getColdStrength() 가 HasACold 를 먼저 보고 분기하므로 순서는 무관.
+    bodyDamage:setHasACold(false)
+    bodyDamage:setColdStrength(0)
+
+    -- 진행 중이던 재채기/기침도 즉시 끊는다. 감기가 나은 뒤에도 카운터가 남아
+    -- 몇 초 더 기침하는 게 어색해서 함께 정리한다.
+    bodyDamage:setSneezeCoughActive(0)
+    bodyDamage:setSneezeCoughTime(0)
+
+    -- 식중독. 상한 음식/날음식 섭취로 쌓이는 진짜 식중독은 PoisonLevel 이다
+    -- (JustAteFood(): PoisonPower / isTaintedWater / bDangerousUncooked 경로).
+    bodyDamage:setPoisonLevel(0)
+
+    -- 시체 악취로 인한 메스꺼움. 이름과 달리 음식과 무관하며, 주변 시체 수로만
+    -- 올라간다(UpdateIllness() -> FliesSound.getCorpseCount()). PoisonLevel 이
+    -- 0 이 아니면 자연 감소가 막혀 있어(:2011) 위 줄보다 뒤에 두는 편이 안전하다.
+    bodyDamage:setFoodSicknessLevel(0)
+
+    -- 상처 세균감염. isInfectedWound() 만 끄면 woundInfectionLevel 이 남아 곧
+    -- 재발하므로(BodyPart.DamageUpdate():293 이 확률로 다시 true) 근원값을
+    -- 0 으로 내린다. setWoundInfectionLevel() 이 0 이하일 때 setInfectedWound(false)
+    -- 까지 알아서 처리한다(BodyPart.java:1285).
     local bodyParts = bodyDamage:getBodyParts()
+    local cured = 0
     for i = 0, BodyPartType.MAX:index() - 1 do
         local bodyPart = bodyParts:get(i)
-        if bodyPart:isInfectedWound() then
+        if bodyPart:getWoundInfectionLevel() > 0 then
+            bodyPart:setWoundInfectionLevel(0)
+            cured = cured + 1
+        elseif bodyPart:isInfectedWound() then
             bodyPart:setInfectedWound(false)
+            cured = cured + 1
         end
     end
 
-    print("[PongDu] syringe: Syringe_Doxycycline applied")
+    print("[PongDu] syringe: Syringe_Doxycycline applied, curedWounds=" .. tostring(cured))
 end
 
 -- 모르핀: 통증 억제는 바닐라 진통제와 같은 painEffect 메커니즘을 쓴다.
