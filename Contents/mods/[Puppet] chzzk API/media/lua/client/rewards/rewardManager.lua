@@ -18,6 +18,7 @@ local randomteleport = require("features/randomteleport")
 local firesupport = require("features/firesupport")
 local serum      = require("features/skillpotion")
 local hordenight = require("features/hordenight")
+local medicalbox = require("features/medicalbox")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -275,6 +276,16 @@ local rewardHandlers = {
         fn = function(sender)
             -- TODO: 호드나이트
             hordenight.a(sender)
+            global.processingEvent = false
+        end,
+    },
+    ["medical_box"] = {
+        -- 서버 후원. 서버장 판정과 전원 지급은 전부 서버가 처리한다
+        -- (features/medicalbox.lua -> server/PongDuMedBoxServer.lua).
+        -- 아이템 지급 계열이라 안전지대와 무관하게 즉시 발동한다.
+        immediate = true,
+        fn = function(sender)
+            medicalbox.a(sender)
             global.processingEvent = false
         end,
     },

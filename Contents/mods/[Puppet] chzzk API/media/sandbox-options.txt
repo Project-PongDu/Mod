@@ -567,6 +567,41 @@ option PongDu.Horde_ShowIndicator = {
     page = PongDu_Server, translation = PongDu_Horde_ShowIndicator,
 }
 
+option PongDu.Divider_MedicalBox = {
+    type = boolean, default = false,
+    page = PongDu_Server, translation = PongDu_Divider_MedicalBox,
+}
+
+option PongDu.Delay_medical_box = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Server, translation = PongDu_Delay_medical_box,
+}
+
+/* 주사기 4종 추첨 가중치. 상대값이라 합이 100일 필요는 없고, 0으로 두면 그
+   주사기는 풀에서 완전히 빠진다(전부 0이면 상자를 열어도 아무것도 안 나온다).
+   추첨은 상자를 여는 시점에 클라가 굴리므로, 같은 후원으로 받은 상자라도
+   플레이어마다 다른 주사기가 나온다. */
+
+option PongDu.MedBox_Weight_Adrenaline = {
+    type = integer, min = 0, max = 100, default = 35,
+    page = PongDu_Server, translation = PongDu_MedBox_Weight_Adrenaline,
+}
+
+option PongDu.MedBox_Weight_Doxycycline = {
+    type = integer, min = 0, max = 100, default = 30,
+    page = PongDu_Server, translation = PongDu_MedBox_Weight_Doxycycline,
+}
+
+option PongDu.MedBox_Weight_Morphine = {
+    type = integer, min = 0, max = 100, default = 25,
+    page = PongDu_Server, translation = PongDu_MedBox_Weight_Morphine,
+}
+
+option PongDu.MedBox_Weight_Emergency = {
+    type = integer, min = 0, max = 100, default = 10,
+    page = PongDu_Server, translation = PongDu_MedBox_Weight_Emergency,
+}
+
 /***** PONGDU DEV (dummy / stub features) *****/
 
 option PongDu.Divider_Bandit = {

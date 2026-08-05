@@ -964,6 +964,33 @@ item Syringe_Emergency
     WorldStaticModel    = PongDuSyringe,
 }
 
+/* medical_box donation (server tier): 서버장 후원 시 접속자 전원에게 1개씩 지급.
+   개봉하면 위 주사기 4종 중 하나가 샌드박스 가중치(PongDu.MedBox_Weight_*)에
+   따라 뽑힌다 (t3MedicalBox.lua). 아이콘/월드모델은 바닐라 FirstAidKit 것을
+   그대로 재사용한다 -- 전용 아트를 뽑으면 Icon 과 WorldStaticModel 만 교체하면 된다. */
+item medical_box
+{
+    DisplayCategory     = FirstAid,
+    Weight              = 0.3,
+    Type                = Normal,
+    DisplayName         = Medical Supply Box,
+    Icon                = FirstAid,
+    Tooltip             = Tooltip_medical_box,
+    Medical             = TRUE,
+    WorldStaticModel    = LunchBoxMedic_Ground,
+}
+
+recipe Open Medical Box
+{
+    medical_box,
+    Result:medical_box,
+    RemoveResultItem:true,
+    OnCreate:t3MedicalBox.OpenBox,
+    CanBeDoneFromFloor:true,
+    Time:150.0,
+    Sound:PutItemInBag,
+}
+
 /* zRe Vaccin("They Knew") 모드의 TheyKnew.Zomboxivir 이식. vaccine 후원(rewardManager.lua)이
    원래 그 모드가 로드돼 있어야만 지급 가능했던 걸, 퐁듀 전용 아이템으로 빼서 외부
    모드 의존성을 제거함. WorldStaticModel은 바닐라 Tweezers 재사용(원본도 동일). */

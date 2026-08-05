@@ -3,5 +3,6 @@ Recipe_KO = {
 
 	Recipe_Open_Weapon_Box = "보급상자 열기",
 	Recipe_Open_Vehicle_Drop_Kit = "차량 공중보급 요청하기",
+	Recipe_Open_Medical_Box = "의약품 보급상자 열기",
 
 }

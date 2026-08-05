@@ -112,6 +112,7 @@ local labelKey = {
     ["mutant_spawn"]         = "IGUI_donation_mutant_spawn",
     ["secret_passage_kit"]   = "IGUI_donation_secret_passage_kit",
     ["horde_night"]          = "IGUI_donation_horde_night",
+    ["medical_box"]          = "IGUI_donation_medical_box",
     ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
     ["zombie_rain"]          = "IGUI_donation_zombie_rain",
     ["fire_support"]         = "IGUI_donation_fire_support",
@@ -149,6 +150,7 @@ local iconTexPath = {
     
     
     
+    -- ["medical_box"]          = "media/textures/donation/medical_box.png",
     -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     

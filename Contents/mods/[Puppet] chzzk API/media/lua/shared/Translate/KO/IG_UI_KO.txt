@@ -132,6 +132,7 @@ IGUI_KO = {
 
 
     IGUI_donation_horde_night = "호드나이트",
+    IGUI_donation_medical_box = "의약품 랜덤박스",
 
 
     IGUI_donation_horde_night_reserve1 = "재수 옴 붙은 날이군...",
