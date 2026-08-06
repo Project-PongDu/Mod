@@ -145,7 +145,7 @@ local function killZombiesAround(cx, cy, radius)
             if dist < radius then
                 z:setCrawler(true)
                 z:setHealth(0)
-                z:clearAttachedItems()
+                -- z:clearAttachedItems()
                 z:changeState(ZombieOnGroundState.instance())
                 z:setAttackedBy(cell:getFakeZombieForHit())
                 z:becomeCorpse()
