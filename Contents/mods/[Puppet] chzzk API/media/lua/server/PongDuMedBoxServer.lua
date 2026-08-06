@@ -18,6 +18,12 @@ local function mlog(msg)
     print(LOG .. msg)
 end
 
+-- isAuthority() 는 B41 바닐라 전역이 아니다. PongDuHordeServer 와 동일하게
+-- 로컬로 정의한다. SP 는 isClient()/isServer() 둘 다 false 이므로 not isClient().
+local function isAuthority()
+    return not isClient()
+end
+
 Events.OnClientCommand.Add(function(module, command, player, data)
     if module ~= "PongDuMedBox" then return end
     if not isAuthority() then return end
