@@ -158,8 +158,8 @@ IGUI_KO = {
     IGUI_donation_horde_night_over4 = "이번엔 거의 끝났다!",
     IGUI_donation_horde_night_over5 = "더는 몰려오지 않는다! 이놈들이 다야!",
 
-    IGUI_donation_horde_night_tip_start = "호드나이트 시작까지: %1",
-    IGUI_donation_horde_night_tip_end = "호드나이트 종료까지: %1",
+    IGUI_donation_horde_night_tip_start = "시작까지: %1",
+    IGUI_donation_horde_night_tip_end = "종료까지: %1",
     IGUI_donation_horde_night_tip_hm = "%1시간 %2분",
     IGUI_donation_horde_night_tip_m = "%1분",
 

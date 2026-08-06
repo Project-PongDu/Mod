@@ -9,63 +9,55 @@ local textOutline = require("utils/textOutline")
 --     발동 판정은 전부 서버(server/PongDuHordeServer.lua)에 있다.
 --  ② 심박음: 서버 Reserved 브로드캐스트 수신 시 1회 재생. 발동음이 아니라
 --     "오늘 밤 온다"는 예고음이라, 발동 시점(22시)이 아니라 후원 시점에 울린다.
---  ③ 인디케이터: 예약이 하나라도 걸려 있거나 스폰이 진행 중이면 화면 우상단에
---     상시 표시. 기본 위치/크기/텍스처는 원본 모드(HordeNightIndicator.lua,
---     Moodle_HNzombie.png) 그대로 이식. 예약이 2건 이상이면 개수를 겹쳐 그린다.
---     드래그로 위치 이동 가능(DonationReceiver.lua 큐박스와 동일 UX), 이동한
---     좌표는 HordeIndicatorUI.ini에 영속화된다.
+--  ③ 인디케이터: 예약이 하나라도 걸려 있거나 스폰이 진행 중이면 바닐라 무들
+--     스택에 실제로 슬롯 하나를 끼워넣는다. 무들박스 전체를 한 칸 아래로
+--     밀어서 다른 무들들을 밀어내고, 비워진 최상단 슬롯을 차지한다. 배경/
+--     툴팁/슬라이드 애니메이션 전부 바닐라 무들과 동일하게 맞춘다.
+--     예약이 2건 이상이면 개수를 겹쳐 그린다.
 --
 -- 스폰/유인 사운드는 전부 서버가 처리한다. 클라가 하는 일은 없다.
 
--- 원본 무들 기본 위치/크기/텍스처는 그대로다(HordeNightIndicator.lua:
--- screenW-210, 12, 32, 32, Moodle_HNzombie.png). 다만 원본과 달리 이 위치는
--- 드래그로 옮길 수 있고(아래 uiSettings), 옮긴 적 없을 때만 이 기본값을 쓴다.
--- 텍스처 원본 해상도가 도네 큐박스용 horde_night.png(1024x1024)와 다를 수
--- 있어 ISUIElement:drawTextureScaledAspect로 종횡비 유지한 채 IND_SIZE에
--- 맞춰 그린다.
-local IND_RIGHT_PAD = 210
-local IND_TOP       = 44
+-- ── 바닐라 무들 스택에 슬롯 끼워넣기 (MoodlesUI.java / UIManager.java) ──────
+-- MoodlesUI는 Java UIElement고 슬롯이 MoodleType enum으로 고정돼 있어서
+-- Lua에서 항목을 추가할 수 없다. 대신 이렇게 한다:
+--   1) UIManager.getMoodleUI(0) 으로 무들박스 Java 객체를 잡는다
+--      (MoodlesUI/UIManager 둘 다 LuaManager.java:1494,1508 에서 노출됨.
+--       setX/setY 는 double 인자, getX/getY 는 Double 반환이라 Kahlua 안전)
+--   2) 우리 인디케이터가 떠 있는 동안 무들박스 전체를 MoodleDistY(36)만큼
+--      아래로 민다 -> 바닐라 무들 전부가 한 칸씩 밀려난다
+--   3) 그렇게 비워진 원래 슬롯 0 자리에 우리 아이콘을 놓는다
+--      -> 결과적으로 우리가 항상 최상단 무들이 된다
+-- 무들끼리의 압축/슬라이드 애니메이션은 MoodlesUI 내부(MoodleSlotsPos)에서
+-- 그대로 돌아가므로 건드릴 필요가 없다.
+--
+-- 주의: UIManager.resize()는 MoodleUI[0]의 X만 screenW-50으로 덮어쓰고,
+-- Y는 스플릿스크린(numPlayers>1)이나 인덱스 2/3일 때만 건드린다. 즉 일반
+-- 싱글/멀티 클라에서는 우리가 세팅한 Y가 유지된다. X는 하드코딩하지 말고
+-- 매번 getX()로 읽는다(위 -50 때문에 무들 폭 상수와 어긋난다).
+local MOODLE_DIST_Y = 36    -- MoodlesUI.MoodleDistY (private 필드라 값만 복제)
+local SLIDE_LERP    = 0.15  -- MoodlesUI.update()의 슬롯 보간 계수와 동일
+local SLIDE_SNAP    = 0.8   -- 같은 함수의 스냅 임계값
+local SLIDE_IN_FROM = 500   -- 신규 무들이 아래에서 올라오는 거리(바닐라와 동일)
 local IND_SIZE      = 32
 local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
+-- 바닐라 무들 배경. 호드나이트는 악재라 Bad 계열을 쓰고, 심각도(1~4)는
+-- 예약 수에 맞춰 올린다 -- 바닐라가 MoodleLevel로 Bkg_Bad_1..4를 고르는 것과
+-- 같은 방식이다(MoodlesUI.render).
+local BKG_PATHS = {
+    "media/ui/Moodles/Moodle_Bkg_Bad_1.png",
+    "media/ui/Moodles/Moodle_Bkg_Bad_2.png",
+    "media/ui/Moodles/Moodle_Bkg_Bad_3.png",
+    "media/ui/Moodles/Moodle_Bkg_Bad_4.png",
+}
 
--- 호버 툴팁 레이아웃. 인디케이터가 화면 최상단이라 툴팁은 아래로 깐다.
--- 오른쪽 끝을 아이콘 오른쪽 끝에 맞춰 왼쪽으로 늘린다(화면 밖 잘림 방지).
-local TIP_PAD_X   = 7
-local TIP_PAD_Y   = 3
-local TIP_LINE_H  = 16
-local TIP_GAP     = 4
+-- 바닐라 무들 툴팁 레이아웃 (MoodlesUI.render의 MouseOver 분기 그대로).
+-- 아이콘 왼쪽에 검은 반투명 박스를 깔고, 이름(흰색)/설명(회색) 2줄을
+-- 우측 정렬로 그린다. 좌표는 전부 슬롯 좌상단 기준.
+local TIP_RIGHT   = -10   -- 텍스트 우측 정렬 기준 x
+local TIP_BOX_PAD = 6     -- 박스가 텍스트보다 왼쪽으로 더 나가는 양
+local TIP_TOP     = 1     -- Java의 MoodleSlotsPos + 1
 
 local SYNC_DELAY_TICKS = 300   -- 접속 직후 서버 상태 요청까지 대기 (~5초)
-
--- ── 인디케이터 위치 (드래그로 이동 가능) ────────────────────────────────────
--- DonationReceiver.lua의 uiSettings/saveUISettings 패턴과 동일. anchorX/anchorY
--- 가 nil이면 기본 위치(screenW - IND_RIGHT_PAD, IND_TOP)를 계속 따라간다.
--- 드래그로 한 번이라도 옮기면 그 좌표가 고정되고 파일로 영속화된다.
-local uiSettings = { anchorX = nil, anchorY = nil }
-
-local function saveUISettings()
-    local w = getFileWriter("HordeIndicatorUI.ini", true, false)
-    if not w then return end
-    if uiSettings.anchorX ~= nil then
-        w:write("anchorX=" .. tostring(uiSettings.anchorX) .. "\n")
-        w:write("anchorY=" .. tostring(uiSettings.anchorY) .. "\n")
-    end
-    w:close()
-end
-
-local function loadUISettings()
-    if not fileExists("HordeIndicatorUI.ini") then return end
-    local r = getFileReader("HordeIndicatorUI.ini", true)
-    if not r then return end
-    local line = r:readLine()
-    while line do
-        local k, v = line:match("^(%w+)=(.+)$")
-        if k == "anchorX" then uiSettings.anchorX = tonumber(v) end
-        if k == "anchorY" then uiSettings.anchorY = tonumber(v) end
-        line = r:readLine()
-    end
-    r:close()
-end
 
 -- ── 발동/종료 연출 ───────────────────────────────────────────────────────────
 -- 원본 모드는 HN_StartHordeNight 에서 IGUI_PlayerText_HNWarning00~09 중 1개를
@@ -126,21 +118,26 @@ local function fmtGameMinutes(totalMin)
     return getText("IGUI_donation_horde_night_tip_m", tostring(m))
 end
 
--- 툴팁 줄 구성. 한 줄만 보여준다 -- 진행 중인 이벤트가 최우선, 없으면 다음 예약.
+-- 툴팁 내용. 바닐라 무들과 같은 2줄 구조 -- 1줄은 무들 이름, 2줄은 설명.
+-- 설명은 진행 중인 이벤트가 최우선, 없으면 다음 예약까지 남은 시간.
 -- (스택 예약이 여러 건이어도 "다음 1건까지 남은 시간"만 표시한다. 각 스택별
 -- 개별 시각까지 보여주려면 별도 요청 시 확장.)
-local function tooltipLines()
+local function tooltipTitle()
+    return getText("IGUI_donation_horde_night")
+end
+
+local function tooltipDesc()
     if _active and _activeEndHours then
         local remain = (_activeEndHours - getGameTime():getWorldAgeHours()) * 60
         if remain < 0 then remain = 0 end
         if remain > _activeTotalMin then remain = _activeTotalMin end
-        return { getText("IGUI_donation_horde_night_tip_end", fmtGameMinutes(remain)) }
+        return getText("IGUI_donation_horde_night_tip_end", fmtGameMinutes(remain))
     end
     if _pending > 0 then
-        return { getText("IGUI_donation_horde_night_tip_start",
-            fmtGameMinutes(gameMinutesUntilHour(SandboxVars.PongDu.Horde_Hour))) }
+        return getText("IGUI_donation_horde_night_tip_start",
+            fmtGameMinutes(gameMinutesUntilHour(SandboxVars.PongDu.Horde_Hour)))
     end
-    return {}
+    return nil
 end
 
 local function indicatorEnabled()
@@ -150,94 +147,141 @@ end
 -- ── 인디케이터 패널 ──────────────────────────────────────────────────────────
 local HordeIndicator = ISPanel:derive("HordeIndicator")
 
+-- 위치는 생성 시점에 정하지 않는다. 무들박스(MoodlesUI) 좌표를 매 틱 읽어서
+-- syncMoodleStack()이 갱신한다.
 function HordeIndicator:new()
-    local x = uiSettings.anchorX or (getCore():getScreenWidth() - IND_RIGHT_PAD)
-    local y = uiSettings.anchorY or IND_TOP
-    local o = ISPanel:new(x, y, IND_SIZE, IND_SIZE)
+    local o = ISPanel:new(0, 0, IND_SIZE, IND_SIZE)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
     o.tex = getTexture(TEX_PATH)
+    o.bkg = {}
+    for i = 1, #BKG_PATHS do
+        o.bkg[i] = getTexture(BKG_PATHS[i])
+    end
     return o
 end
 
+-- 배경 심각도. 진행 중이면 최대(4), 아니면 예약 수를 1~4로 클램프.
+local function bkgLevel()
+    if _active then return 4 end
+    local n = _pending
+    if n < 1 then n = 1 end
+    if n > 4 then n = 4 end
+    return n
+end
+
 function HordeIndicator:render()
+    -- 바닐라 무들과 동일하게 배경 -> 아이콘 순으로 겹쳐 그린다(MoodlesUI.render).
+    local bkg = self.bkg and self.bkg[bkgLevel()]
+    if bkg then
+        self:drawTextureScaledAspect(bkg, 0, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
+    end
     if self.tex then
         self:drawTextureScaledAspect(self.tex, 0, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
     end
-    -- 예약이 2건 이상이면 우하단에 개수 표시 (큐박스 스택 카운트와 같은 기법)
+    -- 예약이 2건 이상이면 우하단에 개수 표시 (큐박스 스택 카운트와 같은 기법).
+    -- 배경 심각도는 4에서 포화되므로 그 이상은 이 숫자로만 구분된다.
     if _pending > 1 then
         local col = colorMap.get("horde_night")
         textOutline.draw(self, "x" .. tostring(_pending),
             IND_SIZE - 12, IND_SIZE - 14, col[1], col[2], col[3], 1, UIFont.Small)
     end
 
-    -- 호버 툴팁: 발동까지/종료까지 남은 인게임 시간. isMouseOver()는 UIElement의
-    -- 순수 좌표 판정(UIElement.java:1833)이라 마우스 이벤트 등록이 필요 없다.
-    -- 드래그 중엔 안 띄운다 (옮기는 도중 툴팁이 같이 따라다니면 거슬림).
-    if self:isMouseOver() and not self.dragging then
-        local lines = tooltipLines()
-        if #lines > 0 then
-            -- 테두리/글자는 흰색 고정 (효과색 틴트 안 함)
-            local br = {1.0, 1.0, 1.0}
-            local tw = 0
-            for i = 1, #lines do
-                local w = getTextManager():MeasureStringX(UIFont.Small, lines[i])
-                if w > tw then tw = w end
-            end
-            local boxW = tw + TIP_PAD_X * 2
-            local boxH = #lines * TIP_LINE_H + TIP_PAD_Y * 2
-            local tx = IND_SIZE - boxW
-            local ty = IND_SIZE + TIP_GAP
-            self:drawRect(tx, ty, boxW, boxH, 0.9, 0.05, 0.05, 0.05)
-            self:drawRectBorder(tx, ty, boxW, boxH, 0.8, br[1], br[2], br[3])
-            for i = 1, #lines do
-                self:drawText(lines[i], tx + TIP_PAD_X,
-                    ty + TIP_PAD_Y + (i - 1) * TIP_LINE_H,
-                    br[1], br[2], br[3], 1, UIFont.Small)
-            end
+    -- 호버 툴팁: 바닐라 무들 툴팁과 동일한 형태/좌표(MoodlesUI.render).
+    -- isMouseOver()는 UIElement의 순수 좌표 판정(UIElement.java:1833)이라
+    -- 마우스 이벤트 등록이 필요 없다.
+    if self:isMouseOver() then
+        local desc = tooltipDesc()
+        if desc then
+            local title = tooltipTitle()
+            local lineH = getTextManager():getFontHeight(UIFont.Small)
+            local w = getTextManager():MeasureStringX(UIFont.Small, title)
+            local w2 = getTextManager():MeasureStringX(UIFont.Small, desc)
+            if w2 > w then w = w2 end
+            -- 박스: 텍스트 우측 기준선(-10)에서 왼쪽으로 폭 + 여백만큼.
+            self:drawRect(TIP_RIGHT - w - TIP_BOX_PAD, TIP_TOP - 2,
+                w + 12, (2 + lineH) * 2, 0.6, 0.0, 0.0, 0.0)
+            self:drawTextRight(title, TIP_RIGHT, TIP_TOP,
+                1.0, 1.0, 1.0, 1.0, UIFont.Small)
+            self:drawTextRight(desc, TIP_RIGHT, TIP_TOP + lineH,
+                0.8, 0.8, 0.8, 1.0, UIFont.Small)
         end
     end
 end
 
--- 드래그: DonationReceiver.lua의 DonationEntryPanel과 동일 패턴. 놓을 때
--- anchorX/anchorY로 영속화.
-function HordeIndicator:onMouseDown(x, y)
-    if not self:getIsVisible() then return end
-    self.dragging = true
-    self:bringToTop()
-    return true
+-- ── 무들 스택 동기화 ────────────────────────────────────────────────────────
+-- _baseY   : 우리가 밀기 전 무들박스의 원래 Y. 밀지 않은 상태에서만 캡처한다.
+-- _shift   : 무들박스에 현재 적용 중인 밀림량. 목표는 인디케이터가 떠 있으면
+--            MOODLE_DIST_Y, 아니면 0. 바닐라와 같은 계수로 보간해서 다른
+--            무들들이 스르륵 밀려나고 스르륵 돌아오게 한다.
+-- _ownSlide: 우리 아이콘이 등장할 때 아래에서 올라오는 오프셋. 바닐라 신규
+--            무들이 desired+500 에서 시작하는 것과 같은 연출.
+local _baseY    = nil
+local _shift    = 0
+local _ownSlide = 0
+
+-- 스플릿스크린은 대상 아님 -- 항상 인덱스 0. UIManager가 아직 초기화되기
+-- 전이거나 배열이 비어 있을 수 있어 pcall로 감싼다. 매 틱 호출되므로
+-- 클로저를 새로 만들지 않도록 함수를 밖으로 뺀다.
+local function fetchMoodleUI()
+    return UIManager.getMoodleUI(0)
 end
 
-function HordeIndicator:onMouseMove(dx, dy)
-    if not self.dragging then return end
-    uiSettings.anchorX = self:getX() + dx
-    uiSettings.anchorY = self:getY() + dy
-    self:setX(uiSettings.anchorX)
-    self:setY(uiSettings.anchorY)
+local function moodleUI()
+    local ok, ui = pcall(fetchMoodleUI)
+    if ok and ui then return ui end
+    return nil
 end
 
-HordeIndicator.onMouseMoveOutside = HordeIndicator.onMouseMove
+-- 바닐라 MoodlesUI.update()의 슬롯 보간과 동일: 차이가 임계값보다 크면
+-- 비율 보간, 아니면 스냅.
+local function approach(cur, target)
+    local d = target - cur
+    if d < 0 then d = -d end
+    if d > SLIDE_SNAP then
+        return cur + (target - cur) * SLIDE_LERP
+    end
+    return target
+end
 
-function HordeIndicator:onMouseUp(x, y)
-    if self.dragging then
-        self.dragging = false
-        saveUISettings()
+local function syncMoodleStack()
+    local mui = moodleUI()
+    if not mui then return end
+
+    -- 아직 밀지 않은 상태의 Y를 기준값으로 한 번만 캡처한다. 이미 밀어둔
+    -- 값을 다시 캡처하면 밀림량이 누적되므로 nil일 때만 잡는다.
+    -- (해상도 변경 시엔 restoreMoodleStack이 _baseY를 nil로 되돌려 재캡처)
+    if _baseY == nil then
+        _baseY = mui:getY()
+    end
+
+    local want = (_panel ~= nil) and MOODLE_DIST_Y or 0
+    _shift = approach(_shift, want)
+    mui:setY(_baseY + _shift)
+
+    if _panel then
+        _ownSlide = approach(_ownSlide, 0)
+        -- X는 UIManager.resize()가 screenW-50으로 덮어쓰므로 매번 읽어온다.
+        _panel:setX(mui:getX())
+        _panel:setY(_baseY + _ownSlide)
+        -- 무들박스가 숨겨져 있으면(VisibleAllUI off) 우리도 같이 숨는다.
+        _panel:setVisible(mui:isVisible() == true)
     end
 end
 
-HordeIndicator.onMouseUpOutside = HordeIndicator.onMouseUp
-
--- 드래그로 옮긴 적 없을 때(anchorX == nil)만 해상도 변화에 맞춰 기본 위치를
--- 다시 잡는다. 커스텀 위치가 있으면 화면 크기가 바뀌어도 그대로 둔다
--- (DonationReceiver.lua의 anchor 취급과 동일).
-local function relayout()
-    if _panel and uiSettings.anchorX == nil then
-        _panel:setX(getCore():getScreenWidth() - IND_RIGHT_PAD)
-        _panel:setY(IND_TOP)
+-- 무들박스를 원위치로 되돌린다. 해상도 변경 등으로 바닐라가 좌표를 다시
+-- 잡기 전에 우리 밀림량을 먼저 빼줘야 기준값이 오염되지 않는다.
+local function restoreMoodleStack()
+    local mui = moodleUI()
+    if mui and _baseY ~= nil then
+        mui:setY(_baseY)
     end
+    _baseY = nil
+    _shift = 0
 end
-Events.OnResolutionChange.Add(relayout)
+
+Events.OnResolutionChange.Add(restoreMoodleStack)
 
 local function refreshIndicator()
     local want = indicatorEnabled() and (_pending > 0 or _active)
@@ -245,6 +289,8 @@ local function refreshIndicator()
         if not _panel then
             _panel = HordeIndicator:new()
             _panel:addToUIManager()
+            -- 바닐라 신규 무들과 동일하게 아래에서 슬라이드해 올라온다.
+            _ownSlide = SLIDE_IN_FROM
         end
         _panel:setVisible(true)
     elseif _panel then
@@ -252,6 +298,8 @@ local function refreshIndicator()
         _panel:removeFromUIManager()
         _panel = nil
     end
+    -- 패널 유무가 바뀌면 밀림 목표도 바뀌므로 곧바로 한 번 돌려준다.
+    syncMoodleStack()
 end
 
 -- ── 서버 커맨드 수신 ─────────────────────────────────────────────────────────
@@ -333,9 +381,12 @@ end)
 Events.OnGameStart.Add(function()
     _syncTicks = SYNC_DELAY_TICKS
 end)
-Events.OnGameStart.Add(loadUISettings)
 
 Events.OnTick.Add(function()
+    -- 무들박스 밀림/복귀와 우리 아이콘 슬라이드는 패널이 없어도 계속 돌아야
+    -- 한다(사라진 뒤 다른 무들들이 스르륵 올라오는 구간).
+    syncMoodleStack()
+
     if _syncTicks < 0 then return end
     _syncTicks = _syncTicks - 1
     if _syncTicks == 0 then
