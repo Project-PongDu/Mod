@@ -15,8 +15,9 @@
 -- 샌드박스 옵션의 PongDu_Buff / PongDu_Debuff / PongDu_Server / PongDu_Dev
 -- 4개 탭과 featureId 묶음이 그대로 1:1 대응한다.
 --
--- exile / backroom은 rewardManager에서 발동을 완전히 죽인 더미 핸들러라
--- (rewardManager.lua의 HIDDEN_FROM_TEST_MENU 참조) 네 목록 어디에도 넣지 않는다.
+-- exile(산타마을 유배) / backroom(백룸 탈출)은 rewardManager에서 발동을 완전히
+-- 죽인 더미 핸들러지만, featureId 자체는 getFeatureIds()에 남아있어 미분류로
+-- 새는 걸 막기 위해 dev에 명시적으로 묶어둔다.
 --
 -- CATEGORY에 없는데 rewardManager.getFeatureIds()에 새로 나타나는 featureId가
 -- 있으면(= 신규 기능 추가하고 여기 분류를 깜빡한 경우) dev로 폴백시키고
@@ -43,6 +44,7 @@ local SERVER = {
 
 local DEV = {
     "bandit_melee", "bandit_ranged", "revive_ticket", "secret_passage_kit",
+    "exile", "backroom",
 }
 
 -- 카테고리 라벨은 전부 getText()로 뽑는다. ContextMenu_KO.txt에 실제 한글이
