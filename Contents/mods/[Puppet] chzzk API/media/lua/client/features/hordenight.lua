@@ -38,6 +38,16 @@ local MOODLE_DIST_Y = 36    -- MoodlesUI.MoodleDistY (private 필드라 값만 �
 local SLIDE_LERP    = 0.15  -- MoodlesUI.update()의 슬롯 보간 계수와 동일
 local SLIDE_SNAP    = 0.8   -- 같은 함수의 스냅 임계값
 local SLIDE_IN_FROM = 500   -- 신규 무들이 아래에서 올라오는 거리(바닐라와 동일)
+-- 심각도가 바뀔 때 아이콘이 좌우로 떨리는 연출. 값은 전부 MoodlesUI.java의
+-- Oscilator* 필드에서 그대로 복제했다(private이라 읽을 수 없어 값만 옮김).
+--   render(): OscilatorStep += OscilatorRate * (ms/33.3) * 0.5
+--             xOffset = sin(OscilatorStep) * OscilatorScalar * OscilationLevel
+--   update(): OscilationLevel -= OscilationLevel * (1 - OscilatorDecelerator)
+--                                 / (lockFPS / 30);  0.01 미만이면 0으로 스냅
+local OSC_RATE        = 0.8
+local OSC_SCALAR      = 15.6
+local OSC_DECELERATOR = 0.96
+local OSC_START_LEVEL = 1.0
 local IND_SIZE      = 32
 local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
 -- 바닐라 무들 배경. 호드나이트는 악재라 Bad 계열을 쓰고, 심각도(1~4)는
@@ -171,21 +181,55 @@ local function bkgLevel()
     return n
 end
 
+-- ── 심각도 변화 진동 (바닐라 MoodlesUI의 Oscilator 이식) ────────────────────
+-- 바닐라는 MoodleLevel이 바뀔 때 wiggle()로 OscilationLevel을 1.0으로 올리고,
+-- 매 프레임 감쇠시키면서 sin 파형만큼 아이콘을 좌우로 흔든다. 여기서도 배경
+-- 심각도(bkgLevel)가 바뀌는 순간을 그 트리거로 삼는다.
+local _oscLevel = 0
+local _oscStep  = 0
+local _lastLevel = nil
+
+local function updateOscillation()
+    local lvl = bkgLevel()
+    if _lastLevel ~= nil and lvl ~= _lastLevel then
+        _oscLevel = OSC_START_LEVEL
+    end
+    _lastLevel = lvl
+
+    if _oscLevel <= 0 then return end
+    -- 감쇠는 바닐라 update()와 동일하게 프레임레이트로 정규화한다.
+    local fps = PerformanceSettings.getLockFPS() / 30.0
+    if fps <= 0 then fps = 1 end
+    _oscLevel = _oscLevel - _oscLevel * (1.0 - OSC_DECELERATOR) / fps
+    if _oscLevel < 0.01 then _oscLevel = 0 end
+end
+
+-- 현재 프레임의 X 흔들림 오프셋. 바닐라와 동일하게 렌더 시점의 경과 ms로
+-- 위상을 진행시킨다(고정 틱이 아니라 실제 렌더 간격 기준).
+local function oscOffset()
+    if _oscLevel <= 0 then return 0 end
+    _oscStep = _oscStep + OSC_RATE * (UIManager.getMillisSinceLastRender() / 33.3) * 0.5
+    return math.sin(_oscStep) * OSC_SCALAR * _oscLevel
+end
+
 function HordeIndicator:render()
-    -- 바닐라 무들과 동일하게 배경 -> 아이콘 순으로 겹쳐 그린다(MoodlesUI.render).
+    -- 바닐라와 동일하게 흔들림은 요소 위치가 아니라 "그리는 좌표"에만 먹인다
+    -- (MoodlesUI.render의 float1과 같은 역할). 툴팁은 흔들지 않는다.
+    local ox = oscOffset()
+    -- 배경 -> 아이콘 순으로 겹쳐 그린다(MoodlesUI.render).
     local bkg = self.bkg and self.bkg[bkgLevel()]
     if bkg then
-        self:drawTextureScaledAspect(bkg, 0, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
+        self:drawTextureScaledAspect(bkg, ox, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
     end
     if self.tex then
-        self:drawTextureScaledAspect(self.tex, 0, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
+        self:drawTextureScaledAspect(self.tex, ox, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
     end
     -- 예약이 2건 이상이면 우하단에 개수 표시 (큐박스 스택 카운트와 같은 기법).
     -- 배경 심각도는 4에서 포화되므로 그 이상은 이 숫자로만 구분된다.
     if _pending > 1 then
         local col = colorMap.get("horde_night")
         textOutline.draw(self, "x" .. tostring(_pending),
-            IND_SIZE - 12, IND_SIZE - 14, col[1], col[2], col[3], 1, UIFont.Small)
+            ox + IND_SIZE - 12, IND_SIZE - 14, col[1], col[2], col[3], 1, UIFont.Small)
     end
 
     -- 호버 툴팁: 바닐라 무들 툴팁과 동일한 형태/좌표(MoodlesUI.render).
@@ -211,13 +255,13 @@ function HordeIndicator:render()
 end
 
 -- ── 무들 스택 동기화 ────────────────────────────────────────────────────────
--- _baseY   : 우리가 밀기 전 무들박스의 원래 Y. 밀지 않은 상태에서만 캡처한다.
--- _shift   : 무들박스에 현재 적용 중인 밀림량. 목표는 인디케이터가 떠 있으면
---            MOODLE_DIST_Y, 아니면 0. 바닐라와 같은 계수로 보간해서 다른
---            무들들이 스르륵 밀려나고 스르륵 돌아오게 한다.
+-- _shift   : 무들박스에 현재 우리가 넣고 있는 밀림량. 목표는 인디케이터가
+--            떠 있으면 MOODLE_DIST_Y, 아니면 0. 바닐라와 같은 계수로 보간해서
+--            다른 무들들이 스르륵 밀려나고 스르륵 돌아오게 한다. 절대 좌표를
+--            기억하지 않고 "가산 오프셋"으로만 다루는 게 핵심 -- 무들박스를
+--            같이 건드리는 다른 모드와 싸우지 않기 위해서다(syncMoodleStack 참조).
 -- _ownSlide: 우리 아이콘이 등장할 때 아래에서 올라오는 오프셋. 바닐라 신규
 --            무들이 desired+500 에서 시작하는 것과 같은 연출.
-local _baseY    = nil
 local _shift    = 0
 local _ownSlide = 0
 
@@ -246,38 +290,40 @@ local function approach(cur, target)
 end
 
 local function syncMoodleStack()
+    updateOscillation()
+
     local mui = moodleUI()
     if not mui then return end
 
-    -- 아직 밀지 않은 상태의 Y를 기준값으로 한 번만 캡처한다. 이미 밀어둔
-    -- 값을 다시 캡처하면 밀림량이 누적되므로 nil일 때만 잡는다.
-    -- (해상도 변경 시엔 restoreMoodleStack이 _baseY를 nil로 되돌려 재캡처)
-    if _baseY == nil then
-        _baseY = mui:getY()
-    end
+    -- 무들박스의 절대 Y를 한 번 캐시해두면, 박스를 함께 건드리는 다른 모드가
+    -- 있을 때 우리가 그 모드의 이동을 매 틱 되돌려버린다(서로 싸움).
+    -- 그래서 캐시하지 않고, 매 틱 "현재 Y에서 우리가 지난 틱에 넣은 밀림량을
+    -- 뺀 값"을 기준으로 다시 잡는다. 이러면 우리는 남이 정한 Y 위에 얹히는
+    -- 순수 가산 오프셋이 되고, 다른 모드가 박스를 어디로 옮기든 그대로 따라간다.
+    local base = mui:getY() - _shift
 
     local want = (_panel ~= nil) and MOODLE_DIST_Y or 0
     _shift = approach(_shift, want)
-    mui:setY(_baseY + _shift)
+    mui:setY(base + _shift)
 
     if _panel then
         _ownSlide = approach(_ownSlide, 0)
         -- X는 UIManager.resize()가 screenW-50으로 덮어쓰므로 매번 읽어온다.
         _panel:setX(mui:getX())
-        _panel:setY(_baseY + _ownSlide)
+        _panel:setY(base + _ownSlide)
         -- 무들박스가 숨겨져 있으면(VisibleAllUI off) 우리도 같이 숨는다.
         _panel:setVisible(mui:isVisible() == true)
     end
 end
 
--- 무들박스를 원위치로 되돌린다. 해상도 변경 등으로 바닐라가 좌표를 다시
--- 잡기 전에 우리 밀림량을 먼저 빼줘야 기준값이 오염되지 않는다.
+-- 우리가 넣은 밀림량만 즉시 빼서 무들박스를 남에게 온전히 돌려준다.
+-- 절대 좌표를 복원하는 게 아니라 우리 기여분만 반납하는 것이라, 그 사이
+-- 다른 모드가 박스를 옮겨놨어도 그 위치를 망가뜨리지 않는다.
 local function restoreMoodleStack()
     local mui = moodleUI()
-    if mui and _baseY ~= nil then
-        mui:setY(_baseY)
+    if mui and _shift ~= 0 then
+        mui:setY(mui:getY() - _shift)
     end
-    _baseY = nil
     _shift = 0
 end
 
