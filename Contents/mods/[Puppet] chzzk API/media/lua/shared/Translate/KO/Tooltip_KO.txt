@@ -46,8 +46,8 @@ Tooltip_KO = {
 	Tooltip_inv_save_ticket = "소지한 채 사망하면 자동으로 사용. 죽는 순간의 소지품 전부를 부활 후 그대로 돌려받을 수 있다.",
 	Tooltip_JohnWickPencil = "물론 당신은 존 윅이 아닙니다",
 
-	Tooltip_Syringe_Adrenaline = "지침과 피로를 즉시 회복시키지만, 배고픔과 갈증이 늘고 긴장 수치가 오릅니다.",
-	Tooltip_Syringe_Doxycycline = "감기, 식중독, 메스꺼움을 즉시 치유하고 오염된 상처를 소독합니다. 좀비 감염은 치료할 수 없습니다.",
+	Tooltip_Syringe_Adrenaline = "지침과 피로를 회복합니다. 패닉 수치가 상승합니다.",
+	Tooltip_Syringe_Doxycycline = "감기, 식중독, 오염된 상처를 치료합니다. 좀비 감염은 치료할 수 없습니다.",
 	Tooltip_Syringe_Morphine = "통증을 즉시 없애고, 일정 시간 동안 통증과 부상으로 인한 공격 속도 저하를 무시합니다.",
 	Tooltip_Syringe_Emergency = "체력 감소를 즉시 멈춥니다. 시간내에 지혈하지 않으면 다시 체력이 감소합니다.",
 	Tooltip_medical_box = "주사기 네 종류 중 하나가 들어있다. 열어보기 전까지는 무엇이 들었는지 알 수 없다. 우클릭으로 개봉.",
