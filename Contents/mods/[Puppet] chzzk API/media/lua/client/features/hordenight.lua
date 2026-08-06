@@ -48,7 +48,14 @@ local OSC_RATE        = 0.8
 local OSC_SCALAR      = 15.6
 local OSC_DECELERATOR = 0.96
 local OSC_START_LEVEL = 1.0
-local IND_SIZE      = 32
+-- 아이콘 크기는 상수로 박지 않는다. 바닐라 MoodlesUI는
+-- UIElement.DrawTexture(tex, x, y, alpha)로 그리는데, 이 메서드가
+-- tex.getWidth()/getHeight() 즉 "텍스처 네이티브 크기"로 렌더한다
+-- (UIElement.java:282). 그래서 B41엔 무들 크기 옵션이 따로 없고(Core.java에
+-- getOptionClockSize 같은 대응물이 없음), 크기는 전적으로 텍스처 해상도가
+-- 정한다. 텍스처팩 모드가 무들 아트를 교체하면 바닐라가 자동으로 그 크기를
+-- 따르므로, 우리도 매 프레임 텍스처에서 크기를 읽어 그대로 맞춘다.
+local IND_SIZE_FALLBACK = 32  -- 텍스처 로드 실패 시에만 쓰는 값
 local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
 -- 바닐라 무들 배경. 호드나이트는 악재라 Bad 계열을 쓰고, 심각도(1~4)는
 -- 예약 수에 맞춰 올린다 -- 바닐라가 MoodleLevel로 Bkg_Bad_1..4를 고르는 것과
@@ -154,13 +161,22 @@ local function indicatorEnabled()
     return SandboxVars.PongDu.Horde_ShowIndicator
 end
 
+-- 배경 심각도. 진행 중이면 최대(4), 아니면 예약 수를 1~4로 클램프.
+local function bkgLevel()
+    if _active then return 4 end
+    local n = _pending
+    if n < 1 then n = 1 end
+    if n > 4 then n = 4 end
+    return n
+end
+
 -- ── 인디케이터 패널 ──────────────────────────────────────────────────────────
 local HordeIndicator = ISPanel:derive("HordeIndicator")
 
 -- 위치는 생성 시점에 정하지 않는다. 무들박스(MoodlesUI) 좌표를 매 틱 읽어서
 -- syncMoodleStack()이 갱신한다.
 function HordeIndicator:new()
-    local o = ISPanel:new(0, 0, IND_SIZE, IND_SIZE)
+    local o = ISPanel:new(0, 0, IND_SIZE_FALLBACK, IND_SIZE_FALLBACK)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -172,13 +188,15 @@ function HordeIndicator:new()
     return o
 end
 
--- 배경 심각도. 진행 중이면 최대(4), 아니면 예약 수를 1~4로 클램프.
-local function bkgLevel()
-    if _active then return 4 end
-    local n = _pending
-    if n < 1 then n = 1 end
-    if n > 4 then n = 4 end
-    return n
+-- 현재 프레임에 쓸 아이콘 크기. 배경 텍스처 기준으로 잡고(바닐라도 배경과
+-- 아이콘을 같은 좌표에 겹쳐 그린다), 없으면 아이콘 텍스처, 그것도 없으면 폴백.
+function HordeIndicator:iconSize()
+    local t = (self.bkg and self.bkg[bkgLevel()]) or self.tex
+    if t then
+        local w, h = t:getWidth(), t:getHeight()
+        if w and h and w > 0 and h > 0 then return w, h end
+    end
+    return IND_SIZE_FALLBACK, IND_SIZE_FALLBACK
 end
 
 -- ── 심각도 변화 진동 (바닐라 MoodlesUI의 Oscilator 이식) ────────────────────
@@ -216,20 +234,24 @@ function HordeIndicator:render()
     -- 바닐라와 동일하게 흔들림은 요소 위치가 아니라 "그리는 좌표"에만 먹인다
     -- (MoodlesUI.render의 float1과 같은 역할). 툴팁은 흔들지 않는다.
     local ox = oscOffset()
-    -- 배경 -> 아이콘 순으로 겹쳐 그린다(MoodlesUI.render).
+    local w, h = self:iconSize()
+
+    -- drawTexture는 바닐라 MoodlesUI와 같은 UIElement.DrawTexture 경로라
+    -- 텍스처 네이티브 크기 + tex.offsetX/Y 보정까지 동일하게 적용된다.
+    -- 스케일링(drawTextureScaledAspect)을 쓰면 바닐라 무들과 크기가 어긋난다.
     local bkg = self.bkg and self.bkg[bkgLevel()]
     if bkg then
-        self:drawTextureScaledAspect(bkg, ox, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
+        self:drawTexture(bkg, ox, 0, 1)
     end
     if self.tex then
-        self:drawTextureScaledAspect(self.tex, ox, 0, IND_SIZE, IND_SIZE, 1, 1, 1, 1)
+        self:drawTexture(self.tex, ox, 0, 1)
     end
     -- 예약이 2건 이상이면 우하단에 개수 표시 (큐박스 스택 카운트와 같은 기법).
     -- 배경 심각도는 4에서 포화되므로 그 이상은 이 숫자로만 구분된다.
     if _pending > 1 then
         local col = colorMap.get("horde_night")
         textOutline.draw(self, "x" .. tostring(_pending),
-            ox + IND_SIZE - 12, IND_SIZE - 14, col[1], col[2], col[3], 1, UIFont.Small)
+            ox + w - 12, h - 14, col[1], col[2], col[3], 1, UIFont.Small)
     end
 
     -- 호버 툴팁: 바닐라 무들 툴팁과 동일한 형태/좌표(MoodlesUI.render).
@@ -308,6 +330,11 @@ local function syncMoodleStack()
 
     if _panel then
         _ownSlide = approach(_ownSlide, 0)
+        -- 히트박스(마우스오버 판정)도 텍스처 크기를 따라가야 툴팁이 정확히
+        -- 아이콘 위에서만 뜬다. 텍스처팩 모드로 크기가 바뀌어도 자동 추종.
+        local w, h = _panel:iconSize()
+        if _panel:getWidth() ~= w then _panel:setWidth(w) end
+        if _panel:getHeight() ~= h then _panel:setHeight(h) end
         -- X는 UIManager.resize()가 screenW-50으로 덮어쓰므로 매번 읽어온다.
         _panel:setX(mui:getX())
         _panel:setY(base + _ownSlide)
