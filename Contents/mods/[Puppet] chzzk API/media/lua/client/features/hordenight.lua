@@ -10,17 +10,21 @@ local textOutline = require("utils/textOutline")
 --  ② 심박음: 서버 Reserved 브로드캐스트 수신 시 1회 재생. 발동음이 아니라
 --     "오늘 밤 온다"는 예고음이라, 발동 시점(22시)이 아니라 후원 시점에 울린다.
 --  ③ 인디케이터: 예약이 하나라도 걸려 있거나 스폰이 진행 중이면 화면 우상단에
---     상시 표시. 위치/크기/텍스처 전부 원본 모드(HordeNightIndicator.lua,
+--     상시 표시. 기본 위치/크기/텍스처는 원본 모드(HordeNightIndicator.lua,
 --     Moodle_HNzombie.png) 그대로 이식. 예약이 2건 이상이면 개수를 겹쳐 그린다.
+--     드래그로 위치 이동 가능(DonationReceiver.lua 큐박스와 동일 UX), 이동한
+--     좌표는 HordeIndicatorUI.ini에 영속화된다.
 --
 -- 스폰/유인 사운드는 전부 서버가 처리한다. 클라가 하는 일은 없다.
 
--- 원본 무들 위치/크기/텍스처 전부 그대로 (HordeNightIndicator.lua: screenW-210,
--- 12, 32, 32, Moodle_HNzombie.png). 텍스처 원본 해상도가 도네 큐박스용
--- horde_night.png(1024x1024)와 다를 수 있어 ISUIElement:drawTextureScaledAspect
--- 로 종횡비 유지한 채 IND_SIZE에 맞춰 그린다.
+-- 원본 무들 기본 위치/크기/텍스처는 그대로다(HordeNightIndicator.lua:
+-- screenW-210, 12, 32, 32, Moodle_HNzombie.png). 다만 원본과 달리 이 위치는
+-- 드래그로 옮길 수 있고(아래 uiSettings), 옮긴 적 없을 때만 이 기본값을 쓴다.
+-- 텍스처 원본 해상도가 도네 큐박스용 horde_night.png(1024x1024)와 다를 수
+-- 있어 ISUIElement:drawTextureScaledAspect로 종횡비 유지한 채 IND_SIZE에
+-- 맞춰 그린다.
 local IND_RIGHT_PAD = 210
-local IND_TOP       = 12
+local IND_TOP       = 44
 local IND_SIZE      = 32
 local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
 
@@ -32,6 +36,36 @@ local TIP_LINE_H  = 16
 local TIP_GAP     = 4
 
 local SYNC_DELAY_TICKS = 300   -- 접속 직후 서버 상태 요청까지 대기 (~5초)
+
+-- ── 인디케이터 위치 (드래그로 이동 가능) ────────────────────────────────────
+-- DonationReceiver.lua의 uiSettings/saveUISettings 패턴과 동일. anchorX/anchorY
+-- 가 nil이면 기본 위치(screenW - IND_RIGHT_PAD, IND_TOP)를 계속 따라간다.
+-- 드래그로 한 번이라도 옮기면 그 좌표가 고정되고 파일로 영속화된다.
+local uiSettings = { anchorX = nil, anchorY = nil }
+
+local function saveUISettings()
+    local w = getFileWriter("HordeIndicatorUI.ini", true, false)
+    if not w then return end
+    if uiSettings.anchorX ~= nil then
+        w:write("anchorX=" .. tostring(uiSettings.anchorX) .. "\n")
+        w:write("anchorY=" .. tostring(uiSettings.anchorY) .. "\n")
+    end
+    w:close()
+end
+
+local function loadUISettings()
+    if not fileExists("HordeIndicatorUI.ini") then return end
+    local r = getFileReader("HordeIndicatorUI.ini", true)
+    if not r then return end
+    local line = r:readLine()
+    while line do
+        local k, v = line:match("^(%w+)=(.+)$")
+        if k == "anchorX" then uiSettings.anchorX = tonumber(v) end
+        if k == "anchorY" then uiSettings.anchorY = tonumber(v) end
+        line = r:readLine()
+    end
+    r:close()
+end
 
 -- ── 발동/종료 연출 ───────────────────────────────────────────────────────────
 -- 원본 모드는 HN_StartHordeNight 에서 IGUI_PlayerText_HNWarning00~09 중 1개를
@@ -117,8 +151,9 @@ end
 local HordeIndicator = ISPanel:derive("HordeIndicator")
 
 function HordeIndicator:new()
-    local o = ISPanel:new(getCore():getScreenWidth() - IND_RIGHT_PAD, IND_TOP,
-        IND_SIZE, IND_SIZE)
+    local x = uiSettings.anchorX or (getCore():getScreenWidth() - IND_RIGHT_PAD)
+    local y = uiSettings.anchorY or IND_TOP
+    local o = ISPanel:new(x, y, IND_SIZE, IND_SIZE)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -139,7 +174,8 @@ function HordeIndicator:render()
 
     -- 호버 툴팁: 발동까지/종료까지 남은 인게임 시간. isMouseOver()는 UIElement의
     -- 순수 좌표 판정(UIElement.java:1833)이라 마우스 이벤트 등록이 필요 없다.
-    if self:isMouseOver() then
+    -- 드래그 중엔 안 띄운다 (옮기는 도중 툴팁이 같이 따라다니면 거슬림).
+    if self:isMouseOver() and not self.dragging then
         local lines = tooltipLines()
         if #lines > 0 then
             -- 테두리/글자는 흰색 고정 (효과색 틴트 안 함)
@@ -164,8 +200,39 @@ function HordeIndicator:render()
     end
 end
 
+-- 드래그: DonationReceiver.lua의 DonationEntryPanel과 동일 패턴. 놓을 때
+-- anchorX/anchorY로 영속화.
+function HordeIndicator:onMouseDown(x, y)
+    if not self:getIsVisible() then return end
+    self.dragging = true
+    self:bringToTop()
+    return true
+end
+
+function HordeIndicator:onMouseMove(dx, dy)
+    if not self.dragging then return end
+    uiSettings.anchorX = self:getX() + dx
+    uiSettings.anchorY = self:getY() + dy
+    self:setX(uiSettings.anchorX)
+    self:setY(uiSettings.anchorY)
+end
+
+HordeIndicator.onMouseMoveOutside = HordeIndicator.onMouseMove
+
+function HordeIndicator:onMouseUp(x, y)
+    if self.dragging then
+        self.dragging = false
+        saveUISettings()
+    end
+end
+
+HordeIndicator.onMouseUpOutside = HordeIndicator.onMouseUp
+
+-- 드래그로 옮긴 적 없을 때(anchorX == nil)만 해상도 변화에 맞춰 기본 위치를
+-- 다시 잡는다. 커스텀 위치가 있으면 화면 크기가 바뀌어도 그대로 둔다
+-- (DonationReceiver.lua의 anchor 취급과 동일).
 local function relayout()
-    if _panel then
+    if _panel and uiSettings.anchorX == nil then
         _panel:setX(getCore():getScreenWidth() - IND_RIGHT_PAD)
         _panel:setY(IND_TOP)
     end
@@ -266,6 +333,7 @@ end)
 Events.OnGameStart.Add(function()
     _syncTicks = SYNC_DELAY_TICKS
 end)
+Events.OnGameStart.Add(loadUISettings)
 
 Events.OnTick.Add(function()
     if _syncTicks < 0 then return end
