@@ -2,4 +2,10 @@ ContextMenu_KO = {
 	ContextMenu_serum_useInjector = "각성제 주입하기",
 	ContextMenu_InjectSyringe = "약물 주사하기",
 	ContextMenu_Break_Ampule = "앰퓰 깨기",
+	ContextMenu_PongDu_Root = "[PongDu] 도네이션",
+	ContextMenu_PongDu_Buff = "긍정효과",
+	ContextMenu_PongDu_Debuff = "부정효과",
+	ContextMenu_PongDu_Server = "서버",
+	ContextMenu_PongDu_Dev = "dev",
+	ContextMenu_PongDu_Misc = "(미분류)",
 }
