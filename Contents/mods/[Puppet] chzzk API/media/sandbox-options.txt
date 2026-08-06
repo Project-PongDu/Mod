@@ -177,6 +177,12 @@ option PongDu.VehicleDrop_Pool = {
     page = PongDu_Buff, translation = PongDu_VehicleDrop_Pool,
 }
 
+option PongDu.VehicleDrop_ExcludePool = {
+    type = string,
+    default = Base.PongDuDrone;Base.PongDuHeli,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_ExcludePool,
+}
+
 option PongDu.VehicleDrop_MinDistance = {
     type = integer, min = 0, max = 300, default = 30,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,

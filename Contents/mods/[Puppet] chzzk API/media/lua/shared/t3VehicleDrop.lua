@@ -166,6 +166,24 @@ local function collectPoolVehicles()
     return list
 end
 
+-- VehicleDrop_ExcludePool ("Base.A;Base.B") 파싱 -> lookup set.
+-- 존재하지 않는 fullType을 적어도 에러 없이 무시(오타 방어 목적이 아니라
+-- 순수 차단 목록이므로 getVehicleScript/hasDriverSeat 검증은 하지 않는다).
+local function collectExcludePool()
+    local pool = SandboxVars.PongDu.VehicleDrop_ExcludePool
+
+    local set = {}
+    if pool ~= "" then
+        for token in string.gmatch(pool, "[^;]+") do
+            local trimmed = token:match("^%s*(.-)%s*$")
+            if trimmed ~= "" then
+                set[trimmed] = true
+            end
+        end
+    end
+    return set
+end
+
 -- 바닐라 B41 차량 화이트리스트 (media/scripts/vehicles 전수 기준, burnt/smashed 변형 제외 45종).
 -- 모드 차량 판별은 "이 목록에 없으면 모드차"라는 소거법이라 목록이 완전해야 성립한다.
 -- VehicleZoneDistribution 기반 수집은 존 미등록 차량(ModernCar_ez 등 3종)을 놓치므로
@@ -273,9 +291,12 @@ local function buildSourcePool(source)
     return list
 end
 
--- 차종 선택: 드롭다운 풀 + 수동 입력 풀의 합집합에서 무작위.
+-- 차종 선택: 드롭다운 풀 + 수동 입력 풀의 합집합에서, 제외 목록을 뺀 뒤 무작위.
 -- 수동 입력(VehicleDrop_Pool)은 드롭다운 필터를 타지 않는다 -- "큰 범위는 드롭다운으로
 -- 정하고, 거기 없는 특정 차를 손으로 더 얹는다"가 이 옵션의 용도이기 때문.
+-- 제외 목록(VehicleDrop_ExcludePool)은 반대로 드롭다운/수동 입력 둘 다보다 우선한다 --
+-- 화력 지원용 드론/헬기 차량(PongDuDrone/PongDuHeli)처럼 "모드 차량만"에 걸려도
+-- 절대 일반 소환 풀에 섞이면 안 되는 항목을 막기 위한 안전장치이기 때문.
 -- 후보가 0개면 nil을 반환하고, 호출부(OpenKit)가 소환을 취소한다.
 local function pickVehicleType()
     local source = SandboxVars.PongDu.VehicleDrop_Source
@@ -288,14 +309,25 @@ local function pickVehicleType()
         if not seen[fullType] then seen[fullType] = true; merged[#merged + 1] = fullType end
     end
 
-    if #merged == 0 then
+    local exclude = collectExcludePool()
+    local filtered = {}
+    for _, fullType in ipairs(merged) do
+        if exclude[fullType] then
+            print("[t3VehicleDrop] Candidate excluded (ExcludePool): " .. fullType)
+        else
+            filtered[#filtered + 1] = fullType
+        end
+    end
+
+    if #filtered == 0 then
         print("[t3VehicleDrop] No candidate vehicles for source=" .. tostring(source)
-            .. " (manual pool empty too), spawn cancelled")
+            .. " (manual pool empty too, or all excluded), spawn cancelled")
         return nil
     end
 
-    print("[t3VehicleDrop] Candidate pool size=" .. #merged .. " (source=" .. tostring(source) .. ")")
-    return merged[ZombRand(#merged) + 1]
+    print("[t3VehicleDrop] Candidate pool size=" .. #filtered
+        .. " (source=" .. tostring(source) .. ", excluded=" .. (#merged - #filtered) .. ")")
+    return filtered[ZombRand(#filtered) + 1]
 end
 
 -- 월드맵(M키)에 투하 지점 심볼을 그린다. (BATMAN_EHE_MILITARY_DROP의 drawSymbol 패턴)
