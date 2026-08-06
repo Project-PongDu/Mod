@@ -405,7 +405,7 @@ option PongDu.Bombard_Radius = {
 }
 
 option PongDu.Bombard_Injure = {
-    type = boolean, default = false,
+    type = boolean, default = true,
     page = PongDu_Debuff, translation = PongDu_Bombard_Injure,
 }
 

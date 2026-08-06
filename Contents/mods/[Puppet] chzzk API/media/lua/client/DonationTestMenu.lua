@@ -35,8 +35,15 @@ local BUFF = {
 
 local DEBUFF = {
     "debuff_roulette", "zombie_roulette", "sprinter5", "random_teleport",
-    "missile", "mutant_spawn", "rise_up_dead_man", "zombie_rain",
+    "mutant_spawn", "rise_up_dead_man", "zombie_rain",
 }
+
+-- missile(폭격)은 고정 카테고리가 아니다. DonationReceiver.lua의
+-- resolveLabelKey()와 같은 기준(SandboxVars.PongDu.Bombard_Injure)으로
+-- 큐박스 UI가 "지원 폭격"/"유도 폭격"으로 갈리는 것과 맞춰, 이 메뉴에서도
+-- 꺼짐(플레이어 안 맞음) -> buff, 켜짐(플레이어도 맞음) -> debuff로 배치한다.
+-- SandboxVars는 파일 로드 시점이 아니라 메뉴를 여는 시점에 읽어야 하므로
+-- BUFF/DEBUFF 정적 배열에는 넣지 않고 WorldContextMenuPre에서 직접 꽂는다.
 
 local SERVER = {
     "horde_night", "medical_box",
@@ -66,7 +73,17 @@ end
 -- featureId의 한글 표시 라벨. IG_UI_KO.txt에 번역이 있으면 그걸 쓰고, 없으면
 -- (아직 번역이 안 붙은 신규 기능) featureId 원문을 그대로 보여준다 -- 메뉴
 -- 항목이 통째로 사라지는 것보다 영문 featureId가 보이는 편이 디버깅에 낫다.
+--
+-- missile은 DonationReceiver.lua의 resolveLabelKey()와 동일 기준
+-- (SandboxVars.PongDu.Bombard_Injure)으로 큐박스 UI와 같은 문구
+-- ("지원 폭격"/"유도 폭격")를 쓴다.
 local function displayLabel(featureId)
+    if featureId == "missile" then
+        if SandboxVars.PongDu.Bombard_Injure then
+            return getText("IGUI_donation_bombard_guided")
+        end
+        return getText("IGUI_donation_bombard_support")
+    end
     local key = labelKey[featureId]
     if key then return getText(key) end
     return featureId
@@ -89,10 +106,15 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
     local rootMenu = context:getNew(context)
     context:addSubMenu(rootOption, rootMenu)
 
+    -- buff/debuff catMenu 참조를 key로 잡아둔다. missile을 루프 밖에서
+    -- 동적으로 꽂아넣어야 해서(아래 참조).
+    local catMenusByKey = {}
+
     for _, category in ipairs(CATEGORY_LIST) do
         local catOption = rootMenu:addOption(category.label)
         local catMenu = rootMenu:getNew(rootMenu)
         rootMenu:addSubMenu(catOption, catMenu)
+        catMenusByKey[category.key] = catMenu
 
         for _, featureId in ipairs(category.ids) do
             if uncategorized[featureId] then
@@ -100,6 +122,15 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
                 uncategorized[featureId] = nil
             end
         end
+    end
+
+    -- missile: 큐박스 UI(DonationReceiver.resolveLabelKey)와 동일 기준으로
+    -- 사용 시점에 SandboxVars를 읽어 buff/debuff 중 하나에 꽂는다.
+    if uncategorized["missile"] then
+        local missileCatMenu = SandboxVars.PongDu.Bombard_Injure
+            and catMenusByKey["debuff"] or catMenusByKey["buff"]
+        missileCatMenu:addOption(displayLabel("missile"), player, DonationTestMenu.Fire, "missile")
+        uncategorized["missile"] = nil
     end
 
     -- 분류를 깜빡한 신규 featureId는 dev 서브메뉴에 있던 catMenu 참조가
