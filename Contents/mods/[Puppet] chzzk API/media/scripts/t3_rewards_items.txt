@@ -911,7 +911,7 @@ item Syringe_Adrenaline
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
-    Weight              = 0.1,
+    Weight              = 0.01,
     Type                = Normal,
     DisplayName         = Adrenaline Syringe,
     Icon                = SyringeAdrenline,
@@ -923,7 +923,7 @@ item Syringe_Doxycycline
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
-    Weight              = 0.1,
+    Weight              = 0.01,
     Type                = Normal,
     DisplayName         = Doxycycline Syringe,
     Icon                = DoxycyclineSyringe,
@@ -944,7 +944,7 @@ item Syringe_Morphine
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
-    Weight              = 0.1,
+    Weight              = 0.01,
     Type                = Normal,
     DisplayName         = Morphine Syringe,
     Icon                = MorphineSyringe,
@@ -956,7 +956,7 @@ item Syringe_Emergency
 {
     DisplayCategory     = FirstAid,
     Count               = 1,
-    Weight              = 0.1,
+    Weight              = 0.01,
     Type                = Normal,
     DisplayName         = Emergency Regen Syringe,
     Icon                = EmergencyRegenSyringe,

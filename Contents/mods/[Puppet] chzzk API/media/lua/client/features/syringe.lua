@@ -766,8 +766,9 @@ function PongDuSyringeAction:new(playerObj, syringeItem)
     local action = ISBaseTimedAction.new(self, playerObj)
     action.character = playerObj
     action.syringeItem = syringeItem
-    action.stopOnWalk = true
-    action.stopOnRun = true
+    -- 이동하면서도 주사를 놓을 수 있어야 해서 걷기/뛰기로 액션이 취소되지 않게 한다.
+    action.stopOnWalk = false
+    action.stopOnRun = false
     -- ISBaseTimedAction:adjustMaxTime()은 ignoreHandsWounds가 꺼져 있으면
     -- Hand_L ~ ForeArm_R 4부위의 getPain()을 maxTime에 그대로 더한다(부위당 최대
     -- 100, 합쳐서 최대 +400). 그래서 maxTime을 아무리 줄여도 팔을 다치면
@@ -775,7 +776,13 @@ function PongDuSyringeAction:new(playerObj, syringeItem)
     -- (바닐라도 ISEatFoodAction, ISDrinkFromBottle, ISEquipWeaponAction 등에서
     --  같은 플래그를 쓴다)
     action.ignoreHandsWounds = true
-    action.maxTime = 10
+    -- 응급 지혈제(Syringe_Emergency)는 즉효성이 생명이라 기존 시간(10) 유지.
+    -- 나머지 3종(Adrenaline/Doxycycline/Morphine)은 시전시간을 10배(100)로 늘린다.
+    if syringeItem:getFullType() == "t3chzzkDonation.Syringe_Emergency" then
+        action.maxTime = 10
+    else
+        action.maxTime = 100
+    end
     if action.character:isTimedActionInstant() then action.maxTime = 1 end
     return action
 end
