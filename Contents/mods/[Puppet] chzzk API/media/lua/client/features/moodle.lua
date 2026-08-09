@@ -9,6 +9,28 @@ local _a = {moodleMap = {
 local _b = require("constants")
 local _c = require("global")
 
+-- 모든 버프/디버프의 증감폭은 "해당 스탯 전체 범위의 20%"로 통일한다.
+local DELTA_PERCENT = 20
+
+-- 스탯별 실제 스케일. 바닐라 소스 기준이며 스케일이 제각각이라 상수로 못 박아둔다.
+--   Stress / Endurance : 0~1   (IsoGameCharacter.java:9138-9141 에서 엔진이 clamp)
+--   Panic / Drunkenness: 0~100 (엔진의 중앙 clamp 대상이 아님 -> 아래 shiftStat이 직접 처리)
+local SCALE_UNIT    = 1
+local SCALE_PERCENT = 100
+
+-- Panic/Drunkenness는 calculateStats()의 clamp 목록에 없다. 바닐라는 값을 바꾸는
+-- 지점마다 개별적으로 0~100 경계를 강제하는 방식이라(BodyDamage.java:374-376,
+-- 429-431, 474-475, 2055-2057 / IsoGameCharacter.java:8212-8214), Lua의
+-- setPanic()/setDrunkenness()로 직접 쓰면 그 경계가 통째로 우회된다.
+-- 그래서 여기서 직접 clamp한다. Stress/Endurance는 엔진이 다음 tick에 잘라주지만,
+-- 그 사이 한 tick 동안 범위 밖 값이 노출되므로 동일하게 처리한다.
+local function shiftStat(current, deltaPercent, scaleMax)
+    local v = current + (deltaPercent / 100) * scaleMax
+    if v < 0 then return 0 end
+    if v > scaleMax then return scaleMax end
+    return v
+end
+
 -- 배고픔(Stats.hunger, 0~1)과 포만감(BodyDamage.HealthFromFoodTimer, 0~11000)은
 -- 원래 서로 별개인 값이라 하나만 조작하면 "배고픈데 포만감은 맥스" 같은 모순이
 -- 생길 수 있었다. 여기서는 둘을 백분율(-100~100)의 한 축으로 합쳐서 다룬다:
@@ -55,23 +77,22 @@ function _a.a(a, b)
             e:setBleeding(true)
         end,
         [MoodleType.Drunk] = function()
-            local e = c:getDrunkenness() + 30
-            c:setDrunkenness(e)
+            c:setDrunkenness(shiftStat(c:getDrunkenness(), DELTA_PERCENT, SCALE_PERCENT))
         end,
         [MoodleType.Endurance] = function()
-            c:setEndurance(c:getEndurance() - 0.3)
+            c:setEndurance(shiftStat(c:getEndurance(), -DELTA_PERCENT, SCALE_UNIT))
         end,
         [MoodleType.Panic] = function()
-            c:setPanic(c:getPanic() + 30)
+            c:setPanic(shiftStat(c:getPanic(), DELTA_PERCENT, SCALE_PERCENT))
         end,
         [MoodleType.Stress] = function()
-            c:setStress(c:getStress() + 0.3)
+            c:setStress(shiftStat(c:getStress(), DELTA_PERCENT, SCALE_UNIT))
         end,
     }
     local e = _a.moodleMap[b]
     if e then
         if e.type == "food" then
-            applyFoodDelta(a, -20)
+            applyFoodDelta(a, -DELTA_PERCENT)
         else
             local f = d[e.type]
             if f then f() end
@@ -92,27 +113,23 @@ function _a.b(a, b)
     }
     local d = a:getStats()
     local e = {
-        [MoodleType.Bleeding] = function()
-            local f = a:getBodyDamage():getBodyPart(BodyPartType.ForeArm_L)
-            f:setBleeding(true)
-        end,
         [MoodleType.Drunk] = function()
-            d:setDrunkenness(d:getDrunkenness() - 30)
+            d:setDrunkenness(shiftStat(d:getDrunkenness(), -DELTA_PERCENT, SCALE_PERCENT))
         end,
         [MoodleType.Endurance] = function()
-            d:setEndurance(d:getEndurance() + 0.3)
+            d:setEndurance(shiftStat(d:getEndurance(), DELTA_PERCENT, SCALE_UNIT))
         end,
         [MoodleType.Panic] = function()
-            d:setPanic(d:getPanic() - 30)
+            d:setPanic(shiftStat(d:getPanic(), -DELTA_PERCENT, SCALE_PERCENT))
         end,
         [MoodleType.Stress] = function()
-            d:setStress(d:getStress() - 0.3)
+            d:setStress(shiftStat(d:getStress(), -DELTA_PERCENT, SCALE_UNIT))
         end,
     }
     local f = c[b]
     if f then
         if f.type == "food" then
-            applyFoodDelta(a, 20)
+            applyFoodDelta(a, DELTA_PERCENT)
         else
             local g = e[f.type]
             if g then g() end
