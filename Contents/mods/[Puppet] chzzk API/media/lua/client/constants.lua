@@ -1,11 +1,12 @@
 local constants = {
     IGUI_moodle_Types = {
-        "IGUI_moodle_Bleeding",
         "IGUI_moodle_Drunk",
         "IGUI_moodle_Endurance",
         "IGUI_moodle_Food",
         "IGUI_moodle_Panic",
         "IGUI_moodle_Stress",
+        "IGUI_moodle_Tired",
+        "IGUI_moodle_Unhappy",
     },
     IGUI_buff_moodle_Types = {
         "IGUI_buff_moodle_Drunk",
@@ -13,6 +14,8 @@ local constants = {
         "IGUI_buff_moodle_Food",
         "IGUI_buff_moodle_Panic",
         "IGUI_buff_moodle_Stress",
+        "IGUI_buff_moodle_Tired",
+        "IGUI_buff_moodle_Unhappy",
     },
 }
 

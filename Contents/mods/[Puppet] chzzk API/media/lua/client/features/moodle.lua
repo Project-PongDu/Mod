@@ -1,10 +1,11 @@
 local _a = {moodleMap = {
-    ["IGUI_moodle_Bleeding"]  = {type = MoodleType.Bleeding},
     ["IGUI_moodle_Drunk"]     = {type = MoodleType.Drunk},
     ["IGUI_moodle_Endurance"] = {type = MoodleType.Endurance},
     ["IGUI_moodle_Food"]      = {type = "food"},
     ["IGUI_moodle_Panic"]     = {type = MoodleType.Panic},
     ["IGUI_moodle_Stress"]    = {type = MoodleType.Stress},
+    ["IGUI_moodle_Tired"]     = {type = MoodleType.Tired},
+    ["IGUI_moodle_Unhappy"]   = {type = MoodleType.Unhappy},
 }}
 local _b = require("constants")
 local _c = require("global")
@@ -13,8 +14,9 @@ local _c = require("global")
 local DELTA_PERCENT = 20
 
 -- 스탯별 실제 스케일. 바닐라 소스 기준이며 스케일이 제각각이라 상수로 못 박아둔다.
---   Stress / Endurance : 0~1   (IsoGameCharacter.java:9138-9141 에서 엔진이 clamp)
---   Panic / Drunkenness: 0~100 (엔진의 중앙 clamp 대상이 아님 -> 아래 shiftStat이 직접 처리)
+--   Stress / Endurance / Fatigue : 0~1   (IsoGameCharacter.java:9138-9141 에서 엔진이 clamp)
+--   Panic / Drunkenness         : 0~100 (엔진의 중앙 clamp 대상이 아님 -> 아래 shiftStat이 직접 처리)
+--   Unhappyness (BodyDamage)    : 0~100 (UpdateBoredom() 조건부 clamp라 매 틱 보장 안 됨 -> 동일하게 shiftStat이 처리)
 local SCALE_UNIT    = 1
 local SCALE_PERCENT = 100
 
@@ -72,10 +74,6 @@ function _a.a(a, b)
     _c.b("applyMoodleEffect FUNCTION START")
     local c = a:getStats()
     local d = {
-        [MoodleType.Bleeding] = function()
-            local e = a:getBodyDamage():getBodyPart(BodyPartType.ForeArm_L)
-            e:setBleeding(true)
-        end,
         [MoodleType.Drunk] = function()
             c:setDrunkenness(shiftStat(c:getDrunkenness(), DELTA_PERCENT, SCALE_PERCENT))
         end,
@@ -87,6 +85,13 @@ function _a.a(a, b)
         end,
         [MoodleType.Stress] = function()
             c:setStress(shiftStat(c:getStress(), DELTA_PERCENT, SCALE_UNIT))
+        end,
+        [MoodleType.Tired] = function()
+            c:setFatigue(shiftStat(c:getFatigue(), DELTA_PERCENT, SCALE_UNIT))
+        end,
+        [MoodleType.Unhappy] = function()
+            local bd = a:getBodyDamage()
+            bd:setUnhappynessLevel(shiftStat(bd:getUnhappynessLevel(), DELTA_PERCENT, SCALE_PERCENT))
         end,
     }
     local e = _a.moodleMap[b]
@@ -110,6 +115,8 @@ function _a.b(a, b)
         ["IGUI_buff_moodle_Food"]      = {type = "food"},
         ["IGUI_buff_moodle_Panic"]     = {type = MoodleType.Panic},
         ["IGUI_buff_moodle_Stress"]    = {type = MoodleType.Stress},
+        ["IGUI_buff_moodle_Tired"]     = {type = MoodleType.Tired},
+        ["IGUI_buff_moodle_Unhappy"]   = {type = MoodleType.Unhappy},
     }
     local d = a:getStats()
     local e = {
@@ -124,6 +131,13 @@ function _a.b(a, b)
         end,
         [MoodleType.Stress] = function()
             d:setStress(shiftStat(d:getStress(), -DELTA_PERCENT, SCALE_UNIT))
+        end,
+        [MoodleType.Tired] = function()
+            d:setFatigue(shiftStat(d:getFatigue(), -DELTA_PERCENT, SCALE_UNIT))
+        end,
+        [MoodleType.Unhappy] = function()
+            local bd = a:getBodyDamage()
+            bd:setUnhappynessLevel(shiftStat(bd:getUnhappynessLevel(), -DELTA_PERCENT, SCALE_PERCENT))
         end,
     }
     local f = c[b]
