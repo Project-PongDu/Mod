@@ -1,10 +1,10 @@
 local _a = {moodleMap = {
-    ["IGUI_moodle_Type2"]  = {type = MoodleType.Bleeding},
-    ["IGUI_moodle_Type6"]  = {type = MoodleType.Drunk},
-    ["IGUI_moodle_Type7"]  = {type = MoodleType.Endurance},
-    ["IGUI_moodle_Food"]   = {type = "food"},
-    ["IGUI_moodle_Type17"] = {type = MoodleType.Panic},
-    ["IGUI_moodle_Type19"] = {type = MoodleType.Stress},
+    ["IGUI_moodle_Bleeding"]  = {type = MoodleType.Bleeding},
+    ["IGUI_moodle_Drunk"]     = {type = MoodleType.Drunk},
+    ["IGUI_moodle_Endurance"] = {type = MoodleType.Endurance},
+    ["IGUI_moodle_Food"]      = {type = "food"},
+    ["IGUI_moodle_Panic"]     = {type = MoodleType.Panic},
+    ["IGUI_moodle_Stress"]    = {type = MoodleType.Stress},
 }}
 local _b = require("constants")
 local _c = require("global")
@@ -105,11 +105,11 @@ function _a.b(a, b)
     if not a then return end
     _c.b("applyMoodleBuffEffect FUNCTION START")
     local c = {
-        ["IGUI_buff_moodle_Type6"]  = {type = MoodleType.Drunk},
-        ["IGUI_buff_moodle_Type7"]  = {type = MoodleType.Endurance},
-        ["IGUI_buff_moodle_Food"]   = {type = "food"},
-        ["IGUI_buff_moodle_Type17"] = {type = MoodleType.Panic},
-        ["IGUI_buff_moodle_Type19"] = {type = MoodleType.Stress},
+        ["IGUI_buff_moodle_Drunk"]     = {type = MoodleType.Drunk},
+        ["IGUI_buff_moodle_Endurance"] = {type = MoodleType.Endurance},
+        ["IGUI_buff_moodle_Food"]      = {type = "food"},
+        ["IGUI_buff_moodle_Panic"]     = {type = MoodleType.Panic},
+        ["IGUI_buff_moodle_Stress"]    = {type = MoodleType.Stress},
     }
     local d = a:getStats()
     local e = {

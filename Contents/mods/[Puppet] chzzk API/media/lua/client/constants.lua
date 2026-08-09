@@ -1,18 +1,18 @@
 local constants = {
     IGUI_moodle_Types = {
-        "IGUI_moodle_Type2",
-        "IGUI_moodle_Type6",
-        "IGUI_moodle_Type7",
+        "IGUI_moodle_Bleeding",
+        "IGUI_moodle_Drunk",
+        "IGUI_moodle_Endurance",
         "IGUI_moodle_Food",
-        "IGUI_moodle_Type17",
-        "IGUI_moodle_Type19",
+        "IGUI_moodle_Panic",
+        "IGUI_moodle_Stress",
     },
     IGUI_buff_moodle_Types = {
-        "IGUI_buff_moodle_Type6",
-        "IGUI_buff_moodle_Type7",
+        "IGUI_buff_moodle_Drunk",
+        "IGUI_buff_moodle_Endurance",
         "IGUI_buff_moodle_Food",
-        "IGUI_buff_moodle_Type17",
-        "IGUI_buff_moodle_Type19",
+        "IGUI_buff_moodle_Panic",
+        "IGUI_buff_moodle_Stress",
     },
 }
 

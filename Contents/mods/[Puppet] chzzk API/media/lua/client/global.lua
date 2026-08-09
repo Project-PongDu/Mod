@@ -16,8 +16,6 @@ function _a.a()
     return os.date("%Y-%m-%d %H:%M:%S")
 end
 function _a.b(a)
-    local b = getFileWriter("log.txt", true, true)
-    b:write(_a.a() .. " - " .. a .. "\n")
-    b:close()
+    print("[PongDu] " .. _a.a() .. " - " .. tostring(a))
 end
 return _a

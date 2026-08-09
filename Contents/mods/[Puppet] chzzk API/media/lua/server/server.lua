@@ -197,8 +197,7 @@ end)
 
 -- Handle "PongDuZombie / ZedSpawn" client command.
 local function srvlog(msg)
-    local w = getFileWriter("server_log.txt", true, true)
-    if w then w:write(os.date("%Y-%m-%d %H:%M:%S") .. " - " .. tostring(msg) .. "\n") w:close() end
+    print("[PongDuServer] " .. os.date("%Y-%m-%d %H:%M:%S") .. " - " .. tostring(msg))
 end
 
 -- 소환 좀비 플레이어 어그로 창 브로드캐스트 (v4: zid 화이트리스트 스코프).

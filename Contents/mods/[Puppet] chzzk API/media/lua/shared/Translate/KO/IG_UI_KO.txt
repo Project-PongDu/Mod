@@ -8,25 +8,25 @@ IGUI_KO = {
 
     IGUI_donation_debuff_roulette = "디버프 룰렛",
 
-	IGUI_moodle_Type2 = "출혈 증가",
-	IGUI_moodle_Type6 = "취함 증가",
-	IGUI_moodle_Type7 = "지구력 감소",
+	IGUI_moodle_Bleeding = "출혈 증가",
+	IGUI_moodle_Drunk = "취함 증가",
+	IGUI_moodle_Endurance = "지구력 감소",
 	IGUI_moodle_Food = "배고픔 증가",
-	IGUI_moodle_Type17 = "공황 장애",
-	IGUI_moodle_Type19 = "스트레스 증가",
-	IGUI_moodle_Type21 = "피곤함 증가",
+	IGUI_moodle_Panic = "공황 장애",
+	IGUI_moodle_Stress = "스트레스 증가",
+	IGUI_moodle_Tired = "피곤함 증가",
  
 	
     
 	IGUI_donation_buff_roulette = "버프 룰렛",
 
-    IGUI_buff_moodle_Type2 = "출혈 감소",
-	IGUI_buff_moodle_Type6 = "취함 감소",
-	IGUI_buff_moodle_Type7 = "지구력 증가",
+    IGUI_buff_moodle_Bleeding = "출혈 감소",
+	IGUI_buff_moodle_Drunk = "취함 감소",
+	IGUI_buff_moodle_Endurance = "지구력 증가",
 	IGUI_buff_moodle_Food = "포만감 증가",
-	IGUI_buff_moodle_Type17 = "공황 감소",
-	IGUI_buff_moodle_Type19 = "스트레스 감소",
-	IGUI_buff_moodle_Type21 = "피곤함 감소",
+	IGUI_buff_moodle_Panic = "공황 감소",
+	IGUI_buff_moodle_Stress = "스트레스 감소",
+	IGUI_buff_moodle_Tired = "피곤함 감소",
 
 
 
