@@ -2,13 +2,13 @@
 --
 -- The donation itself grants one box to EVERY connected player (see
 -- server/PongDuMedBoxServer.lua + client/features/medicalbox.lua). This file
--- only handles what happens when a box is opened: roll one of the four
--- syringes defined in t3_rewards_items.txt.
+-- only handles what happens when a box is opened: grant every enabled
+-- syringe from t3_rewards_items.txt at once (no random pick anymore).
 --
--- The roll happens per box, on the opening client, so two players who open
--- their boxes do not necessarily get the same syringe. All enabled syringes
--- have the same chance; the sandbox options (PongDu.MedBox_Allow_*, read at
--- roll time, never cached) only decide which ones are in the pool at all.
+-- The grant happens per box, on the opening client. The sandbox options
+-- (PongDu.MedBox_Allow_*, read at open time, never cached) decide which
+-- syringes are included; toggling one off in-session takes effect on the
+-- next box opened.
 --
 -- Global table (no module return) so the recipe OnCreate can resolve
 -- "t3MedicalBox.OpenBox". Same pattern as t3RandomWeapon / t3VehicleDrop.
@@ -42,10 +42,10 @@ local function findDonor(items)
     return ""
 end
 
--- Uniform roll over the syringes enabled in the sandbox options. The options
--- are read here (use time), not at file load, so mid-session changes take
--- effect immediately. Returns the bare item name, or nil when all four are off.
-function t3MedicalBox.roll()
+-- Every syringe enabled in the sandbox options. Read here (use time), not at
+-- file load, so mid-session changes take effect immediately. Returns a list
+-- of bare item names (empty when all four are off).
+function t3MedicalBox.rollAll()
     local pool = {}
     for _, entry in ipairs(t3MedicalBox.SYRINGES) do
         if SandboxVars.PongDu[entry.option] then
@@ -54,36 +54,44 @@ function t3MedicalBox.roll()
     end
 
     if #pool == 0 then
-        print(LOG .. "roll aborted: every syringe is disabled in sandbox options")
-        return nil
+        print(LOG .. "open aborted: every syringe is disabled in sandbox options")
     end
 
-    local itemType = pool[ZombRand(#pool) + 1]
-    print(LOG .. "rolled item=" .. itemType .. " (pool=" .. tostring(#pool) .. ")")
-    return itemType
+    return pool
 end
 
 -- Recipe OnCreate handler --------------------------------------------------
+-- Grants every currently-enabled syringe at once (no longer a random pick).
 function t3MedicalBox.OpenBox(items, result, player)
     if not player then
         print(LOG .. "OpenBox aborted: player is nil")
         return
     end
 
-    local itemType = t3MedicalBox.roll()
-    if not itemType then return end
-
-    local syringe = player:getInventory():AddItem(MODULE .. itemType)
-    if not syringe then
-        print(LOG .. "ERROR: AddItem failed for " .. MODULE .. itemType)
-        return
-    end
+    local pool = t3MedicalBox.rollAll()
+    if #pool == 0 then return end
 
     local donor = findDonor(items)
-    if donor ~= "" then
-        syringe:setName(donor .. "'s " .. syringe:getDisplayName())
-    end
-    player:Say(syringe:getDisplayName() .. "!")
+    local inv = player:getInventory()
+    local grantedNames = {}
+    local grantedTypes = {}
 
-    print(LOG .. "box opened: item=" .. itemType .. ", donor=" .. tostring(donor))
+    for _, itemType in ipairs(pool) do
+        local syringe = inv:AddItem(MODULE .. itemType)
+        if not syringe then
+            print(LOG .. "ERROR: AddItem failed for " .. MODULE .. itemType)
+        else
+            if donor ~= "" then
+                syringe:setName(donor .. "'s " .. syringe:getDisplayName())
+            end
+            table.insert(grantedNames, syringe:getDisplayName())
+            table.insert(grantedTypes, itemType)
+        end
+    end
+
+    if #grantedNames > 0 then
+        player:Say(table.concat(grantedNames, ", ") .. "!")
+    end
+
+    print(LOG .. "box opened: items=" .. table.concat(grantedTypes, ",") .. ", donor=" .. tostring(donor))
 end
