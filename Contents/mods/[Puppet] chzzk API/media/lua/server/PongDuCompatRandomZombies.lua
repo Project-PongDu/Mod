@@ -36,17 +36,30 @@ PongDuCompat = PongDuCompat or {}
 --   isSprinter    : server.lua makeSprinter 경로
 --   hitmanBrain   : 히트맨 NPC (좀비 객체를 NPC로 쓰므로 체력/크롤 개입 시 파손)
 --   Hitman 변수   : 브레인 부착 전/후 과도 구간 방어
-function PongDuCompat.isOwnedZombie(zombie)
+-- 영구 소유(개체 정체성 자체가 퐁듀 것). 블러드문처럼 "한시적으로 스탯만
+-- 빌려 쓰는" 마커는 여기 포함하지 않는다 -- 블러드문이 매 스윕 재변환 대상을
+-- 고를 때 이 함수를 쓰기 때문에, 자기 마커까지 여기서 걸리면 한 번 변환된
+-- 좀비를 두 번 다시 못 건드린다(스트리밍 아웃/인으로 speedType 이 리셋돼도
+-- 복구 불가).
+function PongDuCompat.isSpecialZombie(zombie)
     if not zombie then return false end
     local md = zombie:getModData()
     if md then
         if md["PuppetMutant"] then return true end
         if md["isSprinter"] then return true end
-        -- 블러드문 변환 좀비. 이벤트 종료 시 마커가 지워지면 RZ 가 회수해간다.
-        if md["PongDuBloodMoon"] then return true end
         if md["hitmanBrain"] then return true end
     end
     if zombie:getVariableBoolean("Hitman") then return true end
+    return false
+end
+
+-- RZ 제외 판정용. 영구 소유 + 한시적 스탯 점유(블러드문)를 모두 포함한다.
+-- 블러드문 마커는 이벤트 종료 시 지워지고, 그때부터 RZ 가 회수해간다.
+function PongDuCompat.isOwnedZombie(zombie)
+    if PongDuCompat.isSpecialZombie(zombie) then return true end
+    if not zombie then return false end
+    local md = zombie:getModData()
+    if md and md["PongDuBloodMoon"] then return true end
     return false
 end
 

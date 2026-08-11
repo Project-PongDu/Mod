@@ -59,6 +59,75 @@ local _panel       = nil
 -- DoZombieStats() 를 따로 한 번 더 부르지 않는다. makeInactive(false) 안에서
 -- 이미 호출되며, 중복 호출하면 speedMod/bLunger/walkVariant 가 한 번 더
 -- 재굴림되어 좀비 걸음걸이가 불필요하게 흔들린다.
+
+-- ── IsoZombie 필드 리플렉션 ─────────────────────────────────────────────────
+-- Kahlua 의 LuaJavaClassExposer 는 인스턴스 public 필드를 Lua 에 노출하지
+-- 않는다 -- exposeLikeJava() 가 메서드(exposeMethods)와 static 필드
+-- (exposeStatics)만 테이블에 얹는다. 즉 zed.speedType / zed.inactive 는
+-- 항상 nil 이고, 이걸 그대로 쓰면 조건문이 통째로 죽는다(이번 버그의 절반).
+-- PZ 가 전역으로 뚫어둔 리플렉션 API(getNumClassFields / getClassField /
+-- getClassFieldVal, LuaManager.java:5597-5766)로 읽어야 한다.
+-- RandomZombies 가 같은 이유로 같은 방식을 쓴다.
+--
+-- Field 객체는 클래스 단위라 한 번만 찾아 캐싱한다. 실패하면 nil 을 캐싱해
+-- 매 스윕 재시도하지 않는다(마커 전용 폴백 모드로 내려간다).
+local FIELD_SPEED    = "public int zombie.characters.IsoZombie.speedType"
+local FIELD_INACTIVE = "public boolean zombie.characters.IsoZombie.inactive"
+
+local _fields      = nil
+local _fieldsTried = false
+
+local function fields(zed)
+    if _fieldsTried then return _fields end
+    _fieldsTried = true
+
+    local found = {}
+    local ok, err = pcall(function()
+        for i = 0, getNumClassFields(zed) - 1 do
+            local f = getClassField(zed, i)
+            local n = tostring(f)
+            if n == FIELD_SPEED then
+                found.speed = f
+            elseif n == FIELD_INACTIVE then
+                found.inactive = f
+            end
+        end
+    end)
+
+    if not ok then
+        log("field reflection failed: " .. tostring(err) .. " (marker-only fallback)")
+        return nil
+    end
+    if not found.speed then
+        log("speedType field not found (marker-only fallback)")
+        return nil
+    end
+
+    _fields = found
+    log("field reflection ready (inactive="
+        .. tostring(found.inactive ~= nil) .. ")")
+    return _fields
+end
+
+-- 현재 speedType. 1/2/3 이 정상값이고, 아직 DoZombieStats 를 한 번도 타지
+-- 않은 개체는 -1 이다(IsoZombie.java:200). -1 도 그대로 돌려준다 -- "읽지
+-- 못함(nil)"과 "아직 미배정(-1)"은 처리가 다르기 때문이다.
+local function readSpeed(zed)
+    local f = fields(zed)
+    if not f then return nil end
+    local ok, v = pcall(getClassFieldVal, zed, f.speed)
+    if not ok then return nil end
+    return tonumber(v)
+end
+
+-- 휴면(가상) 좀비 여부. 읽지 못하면 false 로 보수적으로 처리한다.
+local function isInactive(zed)
+    local f = fields(zed)
+    if not f or not f.inactive then return false end
+    local ok, v = pcall(getClassFieldVal, zed, f.inactive)
+    return ok and v == true
+end
+
 local function setZombieSpeed(zed, target)
     local so = getSandboxOptions()
     local prev = so:getOptionByName("ZombieLore.Speed"):getValue()
@@ -69,17 +138,21 @@ local function setZombieSpeed(zed, target)
 end
 
 -- 변환 제외 대상 판정.
---   PongDuCompat.isOwnedZombie : 뮤턴트 4종(screamer/brute/roach/tracer) +
+--   PongDuCompat.isSpecialZombie : 뮤턴트 4종(screamer/brute/roach/tracer) +
 --     뮤턴트 스프린터(PuppetMutant="sprinter") + 일반 스프린터(isSprinter) +
 --     히트맨 NPC. server/PongDuCompatRandomZombies.lua 에 정의돼 있고
 --     media/lua/server/ 는 클라에서도 로드되므로 여기서 그대로 쓸 수 있다.
+--     블러드문 마커까지 포함하는 isOwnedZombie 가 아님에 주의(아래 주석 참조).
 --   inactive : 휴면(가상) 좀비. makeInactive(true) 가 "이미 inactive 면 no-op"
 --     이라(IsoZombie.java:4080) 토글하면 깨워버리는 부작용이 있어 건너뛴다.
 --     RandomZombies 모드는 이 가드가 없어서 대규모 휴면 무리를 깨운다.
 local function isConvertible(zed)
     if not zed then return false end
-    if zed.inactive == true then return false end
-    if PongDuCompat and PongDuCompat.isOwnedZombie and PongDuCompat.isOwnedZombie(zed) then
+    if isInactive(zed) then return false end
+    -- isOwnedZombie 가 아니라 isSpecialZombie 를 쓴다. 전자는 블러드문 마커까지
+    -- 포함하므로(RZ 제외용) 여기서 쓰면 한 번 변환된 좀비가 영구히 재변환
+    -- 대상에서 빠진다 -- 스트리밍 아웃/인으로 speedType 이 리셋되면 복구 불가.
+    if PongDuCompat and PongDuCompat.isSpecialZombie and PongDuCompat.isSpecialZombie(zed) then
         return false
     end
     return true
@@ -107,14 +180,45 @@ local function resolveOrigSpeed(md)
     return getSandboxOptions():getOptionByName("ZombieLore.Speed"):getValue()
 end
 
+-- 마커가 아니라 "지금 실제 speedType 이 뭔가"로 판정한다.
+--
+-- 마커 기준 1회 변환이 실패하는 이유:
+-- 좀비가 스트리밍 아웃되면 makeInactive(true) 로 speedType = 3 이 되고,
+-- 다시 들어올 때 makeInactive(false) -> speedType = -1 -> DoZombieStats() 가
+-- 서버 샌드박스 Lore.Speed 로 재배정한다(IsoZombie.java:4079-4093). 리사이클
+-- 경로(resetForReuse, 3327줄)도 speedType 을 -1 로 되돌린다. 마커는 ModData 라
+-- 살아남으므로, 마커만 보면 "이미 변환됨"으로 판단해 영영 다시 안 건드린다.
+-- 실제로 겪은 증상이 정확히 이것이다 -- 멀리 갔다 오면 다시 걷는다.
+--
+-- 그래서 RandomZombies 와 같은 구조를 택한다: 목표 속도와 실제 속도를 매 스윕
+-- 비교하고 다르면 덮어쓴다. 마커는 "변환 판정"이 아니라 "종료 시 복원 대상
+-- 표시 + RZ 제외 표시" 용도로만 남는다.
 local function convertZombie(zed)
     if isForeign(zed) then return false end
-    local md = zed:getModData()
-    if md[MD_MARK] then return false end
     if not isConvertible(zed) then return false end
 
-    local cur = tonumber(zed.speedType)
-    md[MD_ORIG] = (cur == 1 or cur == 2 or cur == 3) and cur or nil
+    local md  = zed:getModData()
+    local cur = readSpeed(zed)
+
+    -- 리플렉션 폴백. 실제 속도를 못 읽으면 매 스윕 makeInactive 토글이 무한
+    -- 반복되므로(걸음걸이가 계속 재굴림된다) 마커 기준 1회 변환으로 물러선다.
+    if cur == nil then
+        if md[MD_MARK] then return false end
+        md[MD_MARK] = true
+        setZombieSpeed(zed, SPEED_SPRINTER)
+        return true
+    end
+
+    if cur == SPEED_SPRINTER then
+        -- 이미 스프린터. 마커만 채워둔다(종료 시 복원 대상 + RZ 제외).
+        md[MD_MARK] = true
+        return false
+    end
+
+    -- 원본 속도는 최초 1회만 기록한다. 두 번째부터는 우리가 넣은 값(1)을
+    -- 원본으로 덮어쓸 위험이 있어 조건을 건다. -1(미배정)은 기록하지 않고
+    -- 복원 시 서버 기본값으로 떨어지게 둔다(resolveOrigSpeed).
+    if md[MD_ORIG] == nil and (cur == 2 or cur == 3) then md[MD_ORIG] = cur end
     md[MD_MARK] = true
     setZombieSpeed(zed, SPEED_SPRINTER)
     return true
@@ -130,12 +234,16 @@ local function revertZombie(zed)
     md[MD_MARK] = nil
     md[MD_ORIG] = nil
 
-    -- 변환 후에 휴면 상태로 넘어간 좀비는 이미 엔진이 speedType 을 3 으로
-    -- 강제해둔 상태다(IsoZombie.java:4086). 여기서 makeInactive 를 토글하면
-    -- 되돌리는 게 아니라 잠든 좀비를 깨우는 꼴이 된다. 마커만 지우면 되고,
-    -- 엔진이 나중에 이 좀비를 깨울 때 speedType 이 -1 로 리셋되며 서버 기본
-    -- 속도로 자동 재배정된다(4088-4090).
-    if zed.inactive == true then return true end
+    -- 휴면 상태로 넘어간 좀비는 이미 엔진이 speedType 을 3 으로 강제해둔
+    -- 상태다(IsoZombie.java:4086). 여기서 makeInactive 를 토글하면 되돌리는 게
+    -- 아니라 잠든 좀비를 깨우는 꼴이 된다. 마커만 지우면 되고, 엔진이 나중에
+    -- 이 좀비를 깨울 때 speedType 이 -1 로 리셋되며 서버 기본 속도로 자동
+    -- 재배정된다(4088-4090).
+    if isInactive(zed) then return true end
+
+    -- 이미 원래 속도면(스트리밍 재진입으로 엔진이 먼저 되돌려놓은 경우)
+    -- 불필요한 DoZombieStats 재굴림을 피한다.
+    if readSpeed(zed) == orig then return true end
 
     setZombieSpeed(zed, orig)
     return true
