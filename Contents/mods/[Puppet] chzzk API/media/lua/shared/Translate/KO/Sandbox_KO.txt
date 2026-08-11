@@ -1,5 +1,6 @@
 Sandbox_KO = {
 
+	Sandbox_PongDu_Main = "퐁듀 - 메인",
 	Sandbox_PongDu_Buff = "퐁듀 - 도움 효과",
 	Sandbox_PongDu_Debuff = "퐁듀 - 방해 효과",
 	Sandbox_PongDu_Server = "퐁듀 - 서버 후원",

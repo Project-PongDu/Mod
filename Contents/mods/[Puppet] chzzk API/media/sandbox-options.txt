@@ -1,16 +1,30 @@
 VERSION = 1,
 
-/***** PONGDU - BUFF (도움 효과) *****/
 
-option PongDu.Divider_General = {
-    type = boolean, default = false,
-    page = PongDu_Buff, translation = PongDu_Divider_General,
-}
+
+
+
+/**************************************************
+            PONGDU - MAIN (메인)
+**************************************************/
 
 option PongDu.Donation_ShowPanel = {
     type = boolean, default = true,
-    page = PongDu_Buff, translation = PongDu_Donation_ShowPanel,
+    page = PongDu_Main, translation = PongDu_Donation_ShowPanel,
 }
+
+option PongDu.Host_SteamID = {
+    type = string, default = ,
+    page = PongDu_Main, translation = PongDu_Host_SteamID,
+}
+
+
+
+
+
+/**************************************************
+            PONGDU - BUFF (도움 효과)
+**************************************************/
 
 option PongDu.Divider_BuffRoulette = {
     type = boolean, default = false,
@@ -313,7 +327,13 @@ option PongDu.Drone_OrbitPeriod = {
     page = PongDu_Buff, translation = PongDu_Drone_OrbitPeriod,
 }
 
-/***** PONGDU - DEBUFF (방해 효과) *****/
+
+
+
+
+/**************************************************
+            PONGDU - DEBUFF (방해 효과)
+**************************************************/
 
 option PongDu.Divider_Roulette = {
     type = boolean, default = false,
@@ -520,23 +540,13 @@ option PongDu.Rain_SafeZoneBlock = {
     page = PongDu_Debuff, translation = PongDu_Rain_SafeZoneBlock,
 }
 
-/***** PONGDU SERVER (서버 전체 대상 후원 효과) *****/
-/* 접속자 전원에게 동시에 걸리는 기능만 이 페이지에 둔다.
-   ※ 페이지 탭 순서는 sandbox-options.txt 안에서 그 페이지의 옵션이 처음
-      등장하는 위치로 결정된다(ServerSettingsScreen.lua:4294 -- getOptionByIndex
-      순회 중 처음 보는 pageName마다 페이지를 만든다). 이 블록이 PongDu_Debuff
-      마지막 옵션과 PongDu_Dev 첫 옵션 사이에 있어야 방해/Dev 사이에 탭이 뜬다.
-      블록을 옮기면 탭 위치도 같이 움직인다. */
 
-/* 서버장 판정 기준. 이 탭의 모든 기능이 이 값 하나에 걸려 있으므로 최상단에 둔다.
-   type = integer 는 백킹 필드가 Java int(상한 21억)라 SteamID64 가 애초에 안 들어간다.
-   default 를 비우면 CustomStringSandboxOption.parse 가 null 을 반환해 옵션 자체가
-   등록되지 않을 수 있어 'none' 센티널을 쓴다. */
 
-option PongDu.Host_SteamID = {
-    type = string, default = ,
-    page = PongDu_Server, translation = PongDu_Host_SteamID,
-}
+
+
+/**************************************************
+            PONGDU SERVER (서버 전체 대상 후원 효과)
+**************************************************/
 
 option PongDu.Divider_HordeNight = {
     type = boolean, default = false,
@@ -614,7 +624,12 @@ option PongDu.MedBox_Allow_Vaccine = {
     page = PongDu_Server, translation = PongDu_MedBox_Allow_Vaccine,
 }
 
-/***** PONGDU DEV (dummy / stub features) *****/
+
+
+
+/**************************************************
+            PONGDU - DEV (dummy / stub features)
+**************************************************/
 
 option PongDu.Divider_Bandit = {
     type = boolean, default = false,
@@ -680,6 +695,10 @@ option PongDu.FireSupport_Airborne = {
     type = boolean, default = false,
     page = PongDu_Dev, translation = PongDu_FireSupport_Airborne,
 }
+
+
+
+
 
 /***** GENERAL *****/
 
