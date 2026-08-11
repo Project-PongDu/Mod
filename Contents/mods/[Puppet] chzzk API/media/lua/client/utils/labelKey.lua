@@ -29,6 +29,7 @@ return {
     ["mutant_spawn"]         = "IGUI_donation_mutant_spawn",
     ["secret_passage_kit"]   = "IGUI_donation_secret_passage_kit",
     ["horde_night"]          = "IGUI_donation_horde_night",
+    ["blood_moon"]           = "IGUI_donation_blood_moon",
     ["medical_box"]          = "IGUI_donation_medical_box",
     ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
     ["zombie_rain"]          = "IGUI_donation_zombie_rain",

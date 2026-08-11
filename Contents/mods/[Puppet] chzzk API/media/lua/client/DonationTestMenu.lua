@@ -46,7 +46,7 @@ local DEBUFF = {
 -- BUFF/DEBUFF 정적 배열에는 넣지 않고 WorldContextMenuPre에서 직접 꽂는다.
 
 local SERVER = {
-    "horde_night", "medical_box",
+    "horde_night", "medical_box", "blood_moon",
 }
 
 local DEV = {

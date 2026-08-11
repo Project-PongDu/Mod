@@ -34,6 +34,7 @@ local map = {
     ["mutant_spawn"]         = {0.8, 0.05, 0.05},
     ["secret_passage_kit"]   = {0.65, 0.35, 0.05},
     ["horde_night"]          = {0.95, 0.0, 0.0},
+    ["blood_moon"]           = {0.85, 0.1, 0.15},
     ["medical_box"]          = {0.0, 0.75, 0.55},
     ["rise_up_dead_man"]     = {0.45, 0.0, 0.6},
     ["zombie_rain"]          = {0.15, 0.4, 0.95},

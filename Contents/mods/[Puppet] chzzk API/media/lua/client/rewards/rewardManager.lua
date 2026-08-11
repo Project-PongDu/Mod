@@ -19,6 +19,7 @@ local firesupport = require("features/firesupport")
 local serum      = require("features/skillpotion")
 local hordenight = require("features/hordenight")
 local medicalbox = require("features/medicalbox")
+local bloodmoon  = require("features/bloodmoon")
 local global     = require("global")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
@@ -276,6 +277,16 @@ local rewardHandlers = {
         fn = function(sender)
             -- TODO: 호드나이트
             hordenight.a(sender)
+            global.processingEvent = false
+        end,
+    },
+    ["blood_moon"] = {
+        -- 서버 후원. 서버장 판정과 전원 적용은 서버가 처리한다
+        -- (features/bloodmoon.lua -> server/PongDuBloodMoonServer.lua).
+        -- 환경 조명 + 좀비 속도 변경이라 세이프하우스 안에서도 그대로 발동한다.
+        immediate = true,
+        fn = function(sender)
+            bloodmoon.a(sender)
             global.processingEvent = false
         end,
     },
