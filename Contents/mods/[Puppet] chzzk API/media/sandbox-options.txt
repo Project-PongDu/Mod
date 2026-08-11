@@ -583,11 +583,11 @@ option PongDu.Delay_medical_box = {
     page = PongDu_Server, translation = PongDu_Delay_medical_box,
 }
 
-/* 상자에서 나올 수 있는 주사기 종류. 켜진 것들 사이에서 균등 추첨이라
-   확률 조절은 없고, 특정 주사기를 빼고 싶을 때만 끄면 된다.
+/* 상자에서 나올 수 있는 품목(주사기 4종 + 백신). 추첨이 아니라 켜져 있는
+   항목이 상자 하나당 전부 지급되며, 특정 품목을 빼고 싶을 때만 끄면 된다.
    전부 끄면 상자를 열어도 아무것도 나오지 않는다(로그로 경고).
-   추첨은 상자를 여는 시점에 클라가 굴리므로, 같은 후원으로 받은 상자라도
-   플레이어마다 다른 주사기가 나온다. */
+   판정은 상자를 여는 시점에 클라가 하므로, 같은 후원으로 받은 상자라도
+   그 사이에 옵션을 바꾸면 플레이어마다 다른 구성이 나올 수 있다. */
 
 option PongDu.MedBox_Allow_Adrenaline = {
     type = boolean, default = true,
@@ -607,6 +607,11 @@ option PongDu.MedBox_Allow_Morphine = {
 option PongDu.MedBox_Allow_Emergency = {
     type = boolean, default = true,
     page = PongDu_Server, translation = PongDu_MedBox_Allow_Emergency,
+}
+
+option PongDu.MedBox_Allow_Vaccine = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_MedBox_Allow_Vaccine,
 }
 
 /***** PONGDU DEV (dummy / stub features) *****/
