@@ -708,8 +708,13 @@ option PongDu.BloodMoon_ConvertZombies = {
     page = PongDu_Server, translation = PongDu_BloodMoon_ConvertZombies,
 }
 
-option PongDu.BloodMoon_TintStrength = {
+option PongDu.BloodMoon_LightStrength = {
     type = integer, min = 0, max = 100, default = 100,
+    page = PongDu_Server, translation = PongDu_BloodMoon_LightStrength,
+}
+
+option PongDu.BloodMoon_TintStrength = {
+    type = integer, min = 0, max = 100, default = 0,
     page = PongDu_Server, translation = PongDu_BloodMoon_TintStrength,
 }
 

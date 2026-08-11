@@ -37,16 +37,37 @@ local textOutline = require("utils/textOutline")
 local BLOOD_EXTERIOR = { 0.72, 0.09, 0.11, 0.52 }
 local BLOOD_INTERIOR = { 0.42, 0.06, 0.09, 0.30 }
 
+-- ── 강도 엔벨로프 ───────────────────────────────────────────────────────────
+-- 조명과 틴트는 같은 계수 p(0..1)를 공유한다. p 는 실시간 페이드가 아니라
+-- 이벤트 시간축 위의 삼각 엔벨로프다:
+--
+--     p 1 |        /\
+--         |       /  \
+--       0 |______/____\______
+--         t0   peak   end
+--
+--   peak = t0 + (end - t0) / 2
+--   상승 구간: p0 -> 1 를 (peak - t0) 동안 리니어
+--   하강 구간: 1 -> 0 를 (end - peak) 동안 리니어
+--
+-- 중복 후원(연장)이 들어오면 그 시점의 p 를 새 p0 로 삼고 t0 = now,
+-- peak = now + (newEnd - now)/2 로 다시 잡는다. 그래서 연장 순간에 값이
+-- 튀지 않고 현재 밝기에서 이어서 다시 차오른다.
+--
+-- 시간축은 getWorldAgeHours() -- 배속/DayLength 를 자동으로 따라간다.
+-- 프레임 기반 페이드(구 FADE_SPEED)를 쓰지 않는 이유가 이것이다. 프레임
+-- 페이드는 이벤트 길이와 무관하게 항상 2~3초 만에 최대치에 도달해서,
+-- 120분짜리 이벤트든 10분짜리든 똑같이 "켜짐/꺼짐"으로만 보였다.
+
 -- ── 화면 틴트 ───────────────────────────────────────────────────────────────
 -- 조명은 nightStrength 로 블렌딩되므로 낮(nightStrength≈0)에는 아무 효과가 없다.
 -- 그 구간을 화면 오버레이가 메운다. 반대로 밤에는 조명이 이미 화면 전체를
 -- 붉게 만들고 있어 틴트까지 겹치면 시야가 죽으므로 강도를 낮춘다.
---     alpha = fade * (NIGHT + (DAY - NIGHT) * (1 - nightStrength)) * 샌박배율
+--     alpha = p * (NIGHT + (DAY - NIGHT) * (1 - nightStrength)) * 샌박배율
 -- 낮/밤 전환 구간에서 자동으로 크로스페이드되므로 별도 분기가 필요 없다.
 local TINT_PATH     = "media/textures/bloodmoon_tint.png"   
 local TINT_DAY      = 1.00   -- nightStrength = 0 (한낮)
 local TINT_NIGHT    = 0.28   -- nightStrength = 1 (한밤)
-local FADE_SPEED    = 0.012  -- 시작/종료 페이드 (getGameSpeed 배율 적용)
 
 -- ── 좀비 변환 ───────────────────────────────────────────────────────────────
 local SPEED_SPRINTER = 1     -- ZombieLore.Speed 값 (1=스프린터 2=속보 3=완보)
@@ -67,8 +88,14 @@ end
 local _active      = false
 local _endHours    = nil   -- getWorldAgeHours() 기준 종료 예정 시각
 local _totalMin    = 0     -- 이번 이벤트 총 길이 (인게임 분) -- 툴팁 클램프용
-local _fade        = 0     -- 틴트 페이드 계수 0..1
 local _sweepTick   = 0
+
+-- 엔벨로프 상태 (위 "강도 엔벨로프" 주석 참조)
+local _rampT0      = 0     -- 현재 상승 구간의 시작 시각 (worldAgeHours)
+local _rampP0      = 0     -- t0 시점의 강도
+local _peakHours   = 0     -- 피크 시각
+local _env         = 0     -- 이번 틱의 p. 렌더에서 재계산하지 않으려고 캐싱한다
+local _lastLightP  = nil   -- 조명에 마지막으로 반영한 p (중복 세팅 컷)
 local _panel       = nil
 local _tintTex     = nil
 local _tintTexTried = false
@@ -111,23 +138,60 @@ local function restoreColor(colorInfo, snap)
     colorInfo:setInterior(snap.inr[1], snap.inr[2], snap.inr[3], snap.inr[4])
 end
 
-local function applyLight()
+local function snapshotLight()
     if _lightSaved then return end   -- 중복 후원으로 재진입해도 스냅샷은 1회만
     local cm = getClimateManager()
     if not cm then
-        log("applyLight aborted: climate manager is nil")
+        log("snapshotLight aborted: climate manager is nil")
         return
     end
 
-    local moon, noMoon = cm:getColNightMoon(), cm:getColNightNoMoon()
-    _lightSaved = { moon = snapColor(moon), noMoon = snapColor(noMoon) }
+    _lightSaved = {
+        moon   = snapColor(cm:getColNightMoon()),
+        noMoon = snapColor(cm:getColNightNoMoon()),
+    }
+    log("light snapshot taken")
+end
 
-    for _, ci in ipairs({ moon, noMoon }) do
-        ci:setExterior(BLOOD_EXTERIOR[1], BLOOD_EXTERIOR[2], BLOOD_EXTERIOR[3], BLOOD_EXTERIOR[4])
-        ci:setInterior(BLOOD_INTERIOR[1], BLOOD_INTERIOR[2], BLOOD_INTERIOR[3], BLOOD_INTERIOR[4])
+-- 바닐라 원본(snap)에서 핏빛(BLOOD_*)까지를 p 로 선형 보간해서 써넣는다.
+-- p = 0 이면 원본과 정확히 같은 값이 들어가므로 이벤트 시작/종료 시점에
+-- 조명이 튀지 않는다 -- 별도의 페이드 인/아웃 처리가 필요 없는 이유다.
+local function blendColor(colorInfo, snap, p)
+    colorInfo:setExterior(
+        lerp(snap.ex[1], BLOOD_EXTERIOR[1], p),
+        lerp(snap.ex[2], BLOOD_EXTERIOR[2], p),
+        lerp(snap.ex[3], BLOOD_EXTERIOR[3], p),
+        lerp(snap.ex[4], BLOOD_EXTERIOR[4], p))
+    colorInfo:setInterior(
+        lerp(snap.inr[1], BLOOD_INTERIOR[1], p),
+        lerp(snap.inr[2], BLOOD_INTERIOR[2], p),
+        lerp(snap.inr[3], BLOOD_INTERIOR[3], p),
+        lerp(snap.inr[4], BLOOD_INTERIOR[4], p))
+end
+
+-- 매 틱 호출되지만 실제 세팅은 p 가 유의미하게 변했을 때만 한다.
+-- 120분짜리 이벤트면 p 는 인게임 1분당 약 0.017 씩 움직이므로 실제 세팅
+-- 횟수는 초당 수십 번이 아니라 이벤트 전체에서 수백 번 수준이다.
+--
+-- ClimateManager 가 colNight* 를 소비하는 시점(updateValues)은 인게임 1분에
+-- 한 번뿐이라 그보다 촘촘히 써넣어봐야 화면에 반영되지 않는다. 즉 여기서
+-- 얻는 최대 해상도는 "인게임 1분당 1스텝"이고, 그게 이 레버의 물리적 한계다.
+local LIGHT_EPSILON = 0.002
+
+local function updateLight(p)
+    if not _lightSaved then return end
+    if _lastLightP then
+        local d = p - _lastLightP
+        if d < 0 then d = -d end
+        if d < LIGHT_EPSILON then return end
     end
-    log("light applied ext=" .. tostring(BLOOD_EXTERIOR[1]) .. "," .. tostring(BLOOD_EXTERIOR[2])
-        .. "," .. tostring(BLOOD_EXTERIOR[3]) .. " a=" .. tostring(BLOOD_EXTERIOR[4]))
+
+    local cm = getClimateManager()
+    if not cm then return end
+
+    blendColor(cm:getColNightMoon(),   _lightSaved.moon,   p)
+    blendColor(cm:getColNightNoMoon(), _lightSaved.noMoon, p)
+    _lastLightP = p
 end
 
 local function restoreLight()
@@ -141,6 +205,7 @@ local function restoreLight()
         log("restoreLight skipped: climate manager is nil")
     end
     _lightSaved = nil
+    _lastLightP = nil
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -168,7 +233,7 @@ end
 
 local function drawTint()
     if not isIngameState() then return end
-    if _fade <= 0 then return end
+    if _env <= 0 then return end
 
     local tex = tintTexture()
     if not tex then return end
@@ -178,22 +243,43 @@ local function drawTint()
 
     -- nightStrength: 0(한낮) ~ 1(한밤). ClimateManager.java:454
     local ns = clamp01(cm:getNightStrength())
-    local a = _fade * (TINT_NIGHT + (TINT_DAY - TINT_NIGHT) * (1.0 - ns)) * tintScale()
+    local a = _env * (TINT_NIGHT + (TINT_DAY - TINT_NIGHT) * (1.0 - ns)) * tintScale()
     if a <= 0 then return end
     if a > 1 then a = 1 end
 
     UIManager.DrawTexture(tex, 0, 0, screenW(), screenH(), a)
 end
 
--- 페이드는 렌더가 아니라 틱에서 진행시킨다 (프레임레이트 독립).
--- getGameSpeed() 배율을 곱해 배속 중에도 연출 길이가 체감상 유지되게 한다.
-local function stepFade()
-    local target = _active and 1.0 or 0.0
-    if _fade == target then return end
-    local speed = FADE_SPEED * getGameSpeed()
-    _fade = lerp(_fade, target, speed)
-    if target == 0 and _fade < 0.002 then _fade = 0 end
-    if target == 1 and _fade > 0.998 then _fade = 1 end
+-- ── 엔벨로프 ────────────────────────────────────────────────────────────────
+-- 현재 시각의 강도. 상태(_rampT0/_rampP0/_peakHours/_endHours)만 보고 계산하는
+-- 순수 함수라 어느 시점에 불러도 같은 값이 나온다 -- 연장 시 "지금 값"을 그대로
+-- 새 시작점으로 물려받을 수 있는 근거다.
+local function envelope()
+    if not _active or not _endHours then return 0 end
+
+    local now = getGameTime():getWorldAgeHours()
+    if now >= _endHours then return 0 end
+    if now <= _rampT0 then return clamp01(_rampP0) end
+
+    if now < _peakHours then
+        local span = _peakHours - _rampT0
+        if span <= 0 then return 1 end
+        return clamp01(_rampP0 + (1.0 - _rampP0) * ((now - _rampT0) / span))
+    end
+
+    local span = _endHours - _peakHours
+    if span <= 0 then return 0 end
+    return clamp01((_endHours - now) / span)
+end
+
+-- 남은 시간의 절반 지점을 피크로 잡고, 지금 강도에서 이어서 올라가게 한다.
+-- 시작이든 연장이든 동일한 경로를 탄다 -- 시작은 그냥 p0 = 0 인 연장이다.
+local function rearm(remainHours, p0)
+    local now = getGameTime():getWorldAgeHours()
+    _rampT0    = now
+    _rampP0    = clamp01(p0)
+    _endHours  = now + remainHours
+    _peakHours = now + remainHours * 0.5
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -499,17 +585,24 @@ function _a.startLocal(remainMin, totalMin, sender)
     end
 
     local wasActive = _active
-    _endHours = getGameTime():getWorldAgeHours() + remainMin / 60
+
+    -- 상태를 갱신하기 전에 현재 강도를 먼저 읽는다. 이 값이 새 상승 구간의
+    -- 시작점이 되어 연장 순간에 밝기가 튀지 않는다.
+    local p0 = 0
+    if wasActive then p0 = envelope() end
+
     _totalMin = math.max(tonumber(totalMin) or remainMin, remainMin)
+    _active   = true
+    rearm(remainMin / 60, p0)
 
     if wasActive then
         log("EXTENDED remainGameMin=" .. tostring(remainMin)
+            .. " resumeFrom=" .. tostring(p0)
             .. " sender=" .. tostring(sender))
         return
     end
 
-    _active = true
-    applyLight()
+    snapshotLight()
     showTimer()
     sayRandomLine("start", START_LINE_COUNT)
 
@@ -530,6 +623,10 @@ function _a.stopLocal()
     _active   = false
     _endHours = nil
     _totalMin = 0
+    _env      = 0
+    _rampP0   = 0
+    -- 정상 종료면 이 시점의 조명은 이미 p=0(원본값)까지 내려와 있다. 서버
+    -- End 브로드캐스트로 조기 종료된 경우에만 여기서 눈에 띄게 끊긴다.
     restoreLight()
     hideTimer()
     sayRandomLine("end", END_LINE_COUNT)
@@ -544,7 +641,10 @@ end
 -- 종료 판정을 클라도 자체적으로 한다. 서버 End 브로드캐스트가 유실되거나
 -- 서버가 죽어도 조명/좀비가 영구히 남지 않게 하기 위한 안전망이다.
 local function onTick()
-    stepFade()
+    -- 렌더(drawTint)는 이 값을 그대로 읽는다. 프레임마다 게임시각을 다시
+    -- 조회하지 않게 여기서 한 번만 계산해 캐싱한다.
+    _env = envelope()
+    updateLight(_env)
 
     -- 무들박스 밀림/복귀와 아이콘 슬라이드는 패널이 없어도 계속 돌아야 한다
     -- (사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 호드나이트가 같은 틱에
@@ -572,7 +672,8 @@ Events.OnDisconnect.Add(function()
     restoreLight()
     hideTimer()
     _active = false
-    _fade   = 0
+    _env    = 0
+    _rampP0 = 0
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
