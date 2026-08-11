@@ -108,6 +108,11 @@ option PongDu.Tier_horde_night = {
     page = PongDu_Main, translation = PongDu_Tier_horde_night,
 }
 
+option PongDu.Tier_blood_moon = {
+    type = integer, min = 0, max = 1000000, default = 150000,
+    page = PongDu_Main, translation = PongDu_Tier_blood_moon,
+}
+
 option PongDu.Tier_bandit_melee = {
     type = integer, min = 0, max = 1000000, default = 0,
     page = PongDu_Main, translation = PongDu_Tier_bandit_melee,
@@ -681,6 +686,31 @@ option PongDu.Horde_Distance = {
 option PongDu.Horde_ShowIndicator = {
     type = boolean, default = true,
     page = PongDu_Server, translation = PongDu_Horde_ShowIndicator,
+}
+
+option PongDu.Divider_BloodMoon = {
+    type = boolean, default = false,
+    page = PongDu_Server, translation = PongDu_Divider_BloodMoon,
+}
+
+option PongDu.Delay_blood_moon = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Server, translation = PongDu_Delay_blood_moon,
+}
+
+option PongDu.BloodMoon_DurationMin = {
+    type = integer, min = 10, max = 1440, default = 120,
+    page = PongDu_Server, translation = PongDu_BloodMoon_DurationMin,
+}
+
+option PongDu.BloodMoon_ConvertZombies = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_BloodMoon_ConvertZombies,
+}
+
+option PongDu.BloodMoon_ShowIndicator = {
+    type = boolean, default = true,
+    page = PongDu_Server, translation = PongDu_BloodMoon_ShowIndicator,
 }
 
 option PongDu.Divider_MedicalBox = {

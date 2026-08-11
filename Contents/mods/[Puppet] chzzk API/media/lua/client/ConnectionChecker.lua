@@ -53,6 +53,7 @@ local FEATURE_IDS = {
     "zombie_rain",
     "rise_up_dead_man",
     "horde_night",
+    "blood_moon",
     "bandit_melee",
     "bandit_ranged",
 }
