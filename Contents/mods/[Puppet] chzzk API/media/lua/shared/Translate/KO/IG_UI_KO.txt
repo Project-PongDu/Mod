@@ -163,7 +163,9 @@ IGUI_KO = {
     IGUI_donation_horde_night_tip_m = "%1분",
 
 
-    IGUI_donation_blood_moon_timer = "블러드문",
+    IGUI_donation_blood_moon_tip_end = "종료까지: %1",
+    IGUI_donation_blood_moon_tip_hm = "%1시간 %2분",
+    IGUI_donation_blood_moon_tip_m = "%1분",
 
     IGUI_donation_blood_moon_start1 = "달이... 피처럼 붉어지고 있어.",
     IGUI_donation_blood_moon_start2 = "하늘이 이상해. 놈들이 날뛰기 시작했다!",

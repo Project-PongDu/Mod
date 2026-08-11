@@ -1,6 +1,6 @@
 local _a = {}
 require("ISUI/ISPanel")
-local timerStack  = require("utils/timerStack")
+local moodleStack = require("utils/moodleStack")
 local colorMap    = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
 
@@ -336,19 +336,20 @@ local function sweep()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  카운트다운 패널 (timerStack 공용 배치)
+--  무들 인디케이터
 -- ═══════════════════════════════════════════════════════════════════════════
--- 폭/높이는 bombard·zombierain·firesupport 패널과 동일 규격이어야 timerStack
--- 의 ROW_HEIGHT(34) 계산과 맞는다.
-local BloodMoonTimer = ISPanel:derive("BloodMoonTimer")
+-- 호드 나이트와 같은 방식으로 바닐라 무들 스택 위에 슬롯 하나를 끼워넣는다.
+-- 밀어내기/슬롯 좌표/등장 슬라이드/해상도 복원은 utils/moodleStack 담당이고,
+-- 여기서는 우선순위와 그리기만 정한다.
+--
+-- 퐁듀 인디케이터 우선순위 (작을수록 화면 위):
+--   10 = 호드 나이트      20 = 블러드문
+-- 즉 호드 나이트 아래, 바닐라 무들 위에 놓인다.
+local SLOT_PRIORITY = 20
 
-function BloodMoonTimer:new()
-    local o = ISPanel:new(getCore():getScreenWidth() / 2 - 120, 0, 240, 30)
-    setmetatable(o, self)
-    self.__index = self
-    o:noBackground()
-    return o
-end
+local TEX_PATH          = "media/ui/Moodle_BloodMoon.png"
+local IND_SIZE_FALLBACK = 32   -- 텍스처 로드 실패 시에만 쓰는 값
+local BKG_PATHS         = moodleStack.BKG_BAD
 
 -- 남은 인게임 분. 서버 시계와 클라 시계를 비교하지 않고 "받은 시점 + 잔여"만
 -- 쓰므로 시계 오차 영향이 없다. 현실 ms 가 아니라 게임 시간을 쓰는 이유는
@@ -363,31 +364,114 @@ local function remainGameMin()
     return r
 end
 
-function BloodMoonTimer:render()
-    local m = math.floor(remainGameMin() + 0.5)
+-- 배경 심각도 1~4. 호드나이트는 예약이 쌓일수록 올라가지만(고조형), 블러드문은
+-- 지속형 이벤트라 "얼마나 남았나"를 그대로 단계로 쓴다 -- 남을수록 높고,
+-- 끝나갈수록 낮아진다.
+--   잔여 <= 1/4 -> 1    1/4~2/4 -> 2    2/4~3/4 -> 3    3/4 초과 -> 4
+-- 분모는 누적 총량이 아니라 샌드박스 기본 지속시간이다. 중복 후원으로 연장돼
+-- 기본값을 넘어가면 그냥 4 에서 포화된다(비율로 잡으면 연장 직후 단계가 도로
+-- 내려가 표시가 거꾸로 움직인다).
+local function bkgLevel()
+    local dur = SandboxVars.PongDu.BloodMoon_DurationMin
+    if dur <= 0 then return 4 end
+    local n = math.ceil(remainGameMin() / dur * 4)
+    if n < 1 then n = 1 end
+    if n > 4 then n = 4 end
+    return n
+end
+
+local _osc = moodleStack.newOscillator()
+
+local BloodMoonIndicator = ISPanel:derive("BloodMoonIndicator")
+
+-- 위치는 생성 시점에 정하지 않는다. moodleStack.sync() 가 매 틱 갱신한다.
+function BloodMoonIndicator:new()
+    local o = ISPanel:new(0, 0, IND_SIZE_FALLBACK, IND_SIZE_FALLBACK)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    o.tex = getTexture(TEX_PATH)
+    o.bkg = {}
+    for i = 1, #BKG_PATHS do
+        o.bkg[i] = getTexture(BKG_PATHS[i])
+    end
+    return o
+end
+
+-- 현재 프레임에 쓸 아이콘 크기. 바닐라 MoodlesUI 는 UIElement.DrawTexture 로
+-- "텍스처 네이티브 크기"에 그리므로(UIElement.java:282) 상수로 박지 않고 매
+-- 프레임 텍스처에서 읽는다. 텍스처팩 모드가 무들 아트를 바꿔도 자동 추종.
+function BloodMoonIndicator:iconSize()
+    local t = (self.bkg and self.bkg[bkgLevel()]) or self.tex
+    if t then
+        local w, h = t:getWidth(), t:getHeight()
+        if w and h and w > 0 and h > 0 then return w, h end
+    end
+    return IND_SIZE_FALLBACK, IND_SIZE_FALLBACK
+end
+
+local function fmtGameMinutes(totalMin)
+    local m = math.floor(totalMin + 0.5)
+    if m < 1 then m = 1 end
     local h = math.floor(m / 60)
     m = m - h * 60
-    local col = colorMap.get("blood_moon")
-    textOutline.drawCentre(self,
-        getText("IGUI_donation_blood_moon_timer") .. " "
-            .. string.format("%02d:%02d", h, m),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    if h > 0 then
+        return getText("IGUI_donation_blood_moon_tip_hm", tostring(h), tostring(m))
+    end
+    return getText("IGUI_donation_blood_moon_tip_m", tostring(m))
+end
+
+function BloodMoonIndicator:render()
+    -- 바닐라와 동일하게 흔들림은 요소 위치가 아니라 "그리는 좌표"에만 먹인다
+    -- (MoodlesUI.render 의 float1 과 같은 역할). 툴팁은 흔들지 않는다.
+    local ox = _osc:offset()
+
+    local bkg = self.bkg and self.bkg[bkgLevel()]
+    if bkg then
+        self:drawTexture(bkg, ox, 0, 1)
+    end
+    if self.tex then
+        self:drawTexture(self.tex, ox, 0, 1)
+    else
+        -- 아이콘 에셋 미배치 폴백. 배경만 뜨면 무슨 무들인지 알 수 없으므로
+        -- 최소한 식별 가능한 글자를 얹는다.
+        local w, h = self:iconSize()
+        local col = colorMap.get("blood_moon")
+        textOutline.drawCentre(self, "BM", w / 2 + ox, h / 2 - 8,
+            col[1], col[2], col[3], 1, UIFont.Small)
+    end
+
+    -- 호버 툴팁: 바닐라 무들 툴팁과 동일한 형태/좌표(MoodlesUI.render).
+    -- isMouseOver() 는 UIElement 의 순수 좌표 판정(UIElement.java:1833)이라
+    -- 마우스 이벤트 등록이 필요 없다.
+    if self:isMouseOver() then
+        moodleStack.drawTooltip(self,
+            getText("IGUI_donation_blood_moon"),
+            getText("IGUI_donation_blood_moon_tip_end", fmtGameMinutes(remainGameMin())))
+    end
+end
+
+local function indicatorEnabled()
+    return SandboxVars.PongDu.BloodMoon_ShowIndicator
 end
 
 local function showTimer()
     if _panel then return end
-    if not SandboxVars.PongDu.BloodMoon_ShowTimer then return end
-    _panel = BloodMoonTimer:new()
+    if not indicatorEnabled() then return end
+    _panel = BloodMoonIndicator:new()
     _panel:addToUIManager()
     _panel:setVisible(true)
-    timerStack.register(_panel)
+    moodleStack.register(_panel, SLOT_PRIORITY)
+    moodleStack.sync()
 end
 
 local function hideTimer()
     if not _panel then return end
-    timerStack.unregister(_panel)
+    moodleStack.unregister(_panel)
+    _panel:setVisible(false)
     _panel:removeFromUIManager()
     _panel = nil
+    moodleStack.sync()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -461,6 +545,12 @@ end
 -- 서버가 죽어도 조명/좀비가 영구히 남지 않게 하기 위한 안전망이다.
 local function onTick()
     stepFade()
+
+    -- 무들박스 밀림/복귀와 아이콘 슬라이드는 패널이 없어도 계속 돌아야 한다
+    -- (사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 호드나이트가 같은 틱에
+    -- 또 호출해도 멱등이다.
+    moodleStack.sync()
+    if _panel then _osc:update(bkgLevel()) end
 
     if _active and _endHours and getGameTime():getWorldAgeHours() >= _endHours then
         log("local timeout reached, ending")

@@ -2,6 +2,7 @@ local _a = {}
 require("ISUI/ISPanel")
 local colorMap    = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local moodleStack = require("utils/moodleStack")
 
 -- ── 호드 나이트 (horde_night) 클라이언트 ─────────────────────────────────────
 -- 역할 3가지:
@@ -17,37 +18,14 @@ local textOutline = require("utils/textOutline")
 --
 -- 스폰/유인 사운드는 전부 서버가 처리한다. 클라가 하는 일은 없다.
 
--- ── 바닐라 무들 스택에 슬롯 끼워넣기 (MoodlesUI.java / UIManager.java) ──────
--- MoodlesUI는 Java UIElement고 슬롯이 MoodleType enum으로 고정돼 있어서
--- Lua에서 항목을 추가할 수 없다. 대신 이렇게 한다:
---   1) UIManager.getMoodleUI(0) 으로 무들박스 Java 객체를 잡는다
---      (MoodlesUI/UIManager 둘 다 LuaManager.java:1494,1508 에서 노출됨.
---       setX/setY 는 double 인자, getX/getY 는 Double 반환이라 Kahlua 안전)
---   2) 우리 인디케이터가 떠 있는 동안 무들박스 전체를 MoodleDistY(36)만큼
---      아래로 민다 -> 바닐라 무들 전부가 한 칸씩 밀려난다
---   3) 그렇게 비워진 원래 슬롯 0 자리에 우리 아이콘을 놓는다
---      -> 결과적으로 우리가 항상 최상단 무들이 된다
--- 무들끼리의 압축/슬라이드 애니메이션은 MoodlesUI 내부(MoodleSlotsPos)에서
--- 그대로 돌아가므로 건드릴 필요가 없다.
+-- ── 무들 스택 슬롯 ──────────────────────────────────────────────────────────
+-- 무들박스를 밀어내고 그 위 슬롯을 차지하는 로직은 utils/moodleStack 으로
+-- 옮겼다(블러드문이 두 번째 소비처가 되면서 슬롯 인덱스 배정이 필요해졌다).
+-- 여기서는 슬롯 우선순위와 그리기만 담당한다.
 --
--- 주의: UIManager.resize()는 MoodleUI[0]의 X만 screenW-50으로 덮어쓰고,
--- Y는 스플릿스크린(numPlayers>1)이나 인덱스 2/3일 때만 건드린다. 즉 일반
--- 싱글/멀티 클라에서는 우리가 세팅한 Y가 유지된다. X는 하드코딩하지 말고
--- 매번 getX()로 읽는다(위 -50 때문에 무들 폭 상수와 어긋난다).
-local MOODLE_DIST_Y = 36    -- MoodlesUI.MoodleDistY (private 필드라 값만 복제)
-local SLIDE_LERP    = 0.15  -- MoodlesUI.update()의 슬롯 보간 계수와 동일
-local SLIDE_SNAP    = 0.8   -- 같은 함수의 스냅 임계값
-local SLIDE_IN_FROM = 500   -- 신규 무들이 아래에서 올라오는 거리(바닐라와 동일)
--- 심각도가 바뀔 때 아이콘이 좌우로 떨리는 연출. 값은 전부 MoodlesUI.java의
--- Oscilator* 필드에서 그대로 복제했다(private이라 읽을 수 없어 값만 옮김).
---   render(): OscilatorStep += OscilatorRate * (ms/33.3) * 0.5
---             xOffset = sin(OscilatorStep) * OscilatorScalar * OscilationLevel
---   update(): OscilationLevel -= OscilationLevel * (1 - OscilatorDecelerator)
---                                 / (lockFPS / 30);  0.01 미만이면 0으로 스냅
-local OSC_RATE        = 0.8
-local OSC_SCALAR      = 15.6
-local OSC_DECELERATOR = 0.96
-local OSC_START_LEVEL = 1.0
+-- 퐁듀 인디케이터 우선순위 (작을수록 화면 위):
+--   10 = 호드 나이트      20 = 블러드문
+local SLOT_PRIORITY = 10
 -- 아이콘 크기는 상수로 박지 않는다. 바닐라 MoodlesUI는
 -- UIElement.DrawTexture(tex, x, y, alpha)로 그리는데, 이 메서드가
 -- tex.getWidth()/getHeight() 즉 "텍스처 네이티브 크기"로 렌더한다
@@ -57,22 +35,10 @@ local OSC_START_LEVEL = 1.0
 -- 따르므로, 우리도 매 프레임 텍스처에서 크기를 읽어 그대로 맞춘다.
 local IND_SIZE_FALLBACK = 32  -- 텍스처 로드 실패 시에만 쓰는 값
 local TEX_PATH      = "media/ui/Moodle_HNzombie.png"
--- 바닐라 무들 배경. 호드나이트는 악재라 Bad 계열을 쓰고, 심각도(1~4)는
--- 예약 수에 맞춰 올린다 -- 바닐라가 MoodleLevel로 Bkg_Bad_1..4를 고르는 것과
--- 같은 방식이다(MoodlesUI.render).
-local BKG_PATHS = {
-    "media/ui/Moodles/Moodle_Bkg_Bad_1.png",
-    "media/ui/Moodles/Moodle_Bkg_Bad_2.png",
-    "media/ui/Moodles/Moodle_Bkg_Bad_3.png",
-    "media/ui/Moodles/Moodle_Bkg_Bad_4.png",
-}
-
--- 바닐라 무들 툴팁 레이아웃 (MoodlesUI.render의 MouseOver 분기 그대로).
--- 아이콘 왼쪽에 검은 반투명 박스를 깔고, 이름(흰색)/설명(회색) 2줄을
--- 우측 정렬로 그린다. 좌표는 전부 슬롯 좌상단 기준.
-local TIP_RIGHT   = -10   -- 텍스트 우측 정렬 기준 x
-local TIP_BOX_PAD = 6     -- 박스가 텍스트보다 왼쪽으로 더 나가는 양
-local TIP_TOP     = 1     -- Java의 MoodleSlotsPos + 1
+-- 배경(Bkg_Bad_1..4)과 툴팁 레이아웃은 moodleStack 이 공용으로 들고 있다.
+-- 호드나이트는 악재라 Bad 계열을 쓰고, 심각도(1~4)는 예약 수에 맞춰 올린다 --
+-- 바닐라가 MoodleLevel로 Bkg_Bad_1..4를 고르는 것과 같은 방식이다.
+local BKG_PATHS = moodleStack.BKG_BAD
 
 local SYNC_DELAY_TICKS = 300   -- 접속 직후 서버 상태 요청까지 대기 (~5초)
 
@@ -174,7 +140,7 @@ end
 local HordeIndicator = ISPanel:derive("HordeIndicator")
 
 -- 위치는 생성 시점에 정하지 않는다. 무들박스(MoodlesUI) 좌표를 매 틱 읽어서
--- syncMoodleStack()이 갱신한다.
+-- moodleStack.sync()가 갱신한다.
 function HordeIndicator:new()
     local o = ISPanel:new(0, 0, IND_SIZE_FALLBACK, IND_SIZE_FALLBACK)
     setmetatable(o, self)
@@ -199,41 +165,16 @@ function HordeIndicator:iconSize()
     return IND_SIZE_FALLBACK, IND_SIZE_FALLBACK
 end
 
--- ── 심각도 변화 진동 (바닐라 MoodlesUI의 Oscilator 이식) ────────────────────
--- 바닐라는 MoodleLevel이 바뀔 때 wiggle()로 OscilationLevel을 1.0으로 올리고,
--- 매 프레임 감쇠시키면서 sin 파형만큼 아이콘을 좌우로 흔든다. 여기서도 배경
--- 심각도(bkgLevel)가 바뀌는 순간을 그 트리거로 삼는다.
-local _oscLevel = 0
-local _oscStep  = 0
-local _lastLevel = nil
-
-local function updateOscillation()
-    local lvl = bkgLevel()
-    if _lastLevel ~= nil and lvl ~= _lastLevel then
-        _oscLevel = OSC_START_LEVEL
-    end
-    _lastLevel = lvl
-
-    if _oscLevel <= 0 then return end
-    -- 감쇠는 바닐라 update()와 동일하게 프레임레이트로 정규화한다.
-    local fps = PerformanceSettings.getLockFPS() / 30.0
-    if fps <= 0 then fps = 1 end
-    _oscLevel = _oscLevel - _oscLevel * (1.0 - OSC_DECELERATOR) / fps
-    if _oscLevel < 0.01 then _oscLevel = 0 end
-end
-
--- 현재 프레임의 X 흔들림 오프셋. 바닐라와 동일하게 렌더 시점의 경과 ms로
--- 위상을 진행시킨다(고정 틱이 아니라 실제 렌더 간격 기준).
-local function oscOffset()
-    if _oscLevel <= 0 then return 0 end
-    _oscStep = _oscStep + OSC_RATE * (UIManager.getMillisSinceLastRender() / 33.3) * 0.5
-    return math.sin(_oscStep) * OSC_SCALAR * _oscLevel
-end
+-- ── 심각도 변화 진동 ────────────────────────────────────────────────────────
+-- 바닐라는 MoodleLevel이 바뀔 때 wiggle()로 아이콘을 좌우로 흔든다. 여기서도
+-- 배경 심각도(bkgLevel)가 바뀌는 순간을 그 트리거로 삼는다. 구현은
+-- moodleStack.newOscillator() (바닐라 Oscilator* 상수 이식본).
+local _osc = moodleStack.newOscillator()
 
 function HordeIndicator:render()
     -- 바닐라와 동일하게 흔들림은 요소 위치가 아니라 "그리는 좌표"에만 먹인다
     -- (MoodlesUI.render의 float1과 같은 역할). 툴팁은 흔들지 않는다.
-    local ox = oscOffset()
+    local ox = _osc:offset()
     local w, h = self:iconSize()
 
     -- drawTexture는 바닐라 MoodlesUI와 같은 UIElement.DrawTexture 경로라
@@ -258,121 +199,30 @@ function HordeIndicator:render()
     -- isMouseOver()는 UIElement의 순수 좌표 판정(UIElement.java:1833)이라
     -- 마우스 이벤트 등록이 필요 없다.
     if self:isMouseOver() then
-        local desc = tooltipDesc()
-        if desc then
-            local title = tooltipTitle()
-            local lineH = getTextManager():getFontHeight(UIFont.Small)
-            local w = getTextManager():MeasureStringX(UIFont.Small, title)
-            local w2 = getTextManager():MeasureStringX(UIFont.Small, desc)
-            if w2 > w then w = w2 end
-            -- 박스: 텍스트 우측 기준선(-10)에서 왼쪽으로 폭 + 여백만큼.
-            self:drawRect(TIP_RIGHT - w - TIP_BOX_PAD, TIP_TOP - 2,
-                w + 12, (2 + lineH) * 2, 0.6, 0.0, 0.0, 0.0)
-            self:drawTextRight(title, TIP_RIGHT, TIP_TOP,
-                1.0, 1.0, 1.0, 1.0, UIFont.Small)
-            self:drawTextRight(desc, TIP_RIGHT, TIP_TOP + lineH,
-                0.8, 0.8, 0.8, 1.0, UIFont.Small)
-        end
+        moodleStack.drawTooltip(self, tooltipTitle(), tooltipDesc())
     end
 end
 
--- ── 무들 스택 동기화 ────────────────────────────────────────────────────────
--- _shift   : 무들박스에 현재 우리가 넣고 있는 밀림량. 목표는 인디케이터가
---            떠 있으면 MOODLE_DIST_Y, 아니면 0. 바닐라와 같은 계수로 보간해서
---            다른 무들들이 스르륵 밀려나고 스르륵 돌아오게 한다. 절대 좌표를
---            기억하지 않고 "가산 오프셋"으로만 다루는 게 핵심 -- 무들박스를
---            같이 건드리는 다른 모드와 싸우지 않기 위해서다(syncMoodleStack 참조).
--- _ownSlide: 우리 아이콘이 등장할 때 아래에서 올라오는 오프셋. 바닐라 신규
---            무들이 desired+500 에서 시작하는 것과 같은 연출.
-local _shift    = 0
-local _ownSlide = 0
-
--- 스플릿스크린은 대상 아님 -- 항상 인덱스 0. UIManager가 아직 초기화되기
--- 전이거나 배열이 비어 있을 수 있어 pcall로 감싼다. 매 틱 호출되므로
--- 클로저를 새로 만들지 않도록 함수를 밖으로 뺀다.
-local function fetchMoodleUI()
-    return UIManager.getMoodleUI(0)
-end
-
-local function moodleUI()
-    local ok, ui = pcall(fetchMoodleUI)
-    if ok and ui then return ui end
-    return nil
-end
-
--- 바닐라 MoodlesUI.update()의 슬롯 보간과 동일: 차이가 임계값보다 크면
--- 비율 보간, 아니면 스냅.
-local function approach(cur, target)
-    local d = target - cur
-    if d < 0 then d = -d end
-    if d > SLIDE_SNAP then
-        return cur + (target - cur) * SLIDE_LERP
-    end
-    return target
-end
-
-local function syncMoodleStack()
-    updateOscillation()
-
-    local mui = moodleUI()
-    if not mui then return end
-
-    -- 무들박스의 절대 Y를 한 번 캐시해두면, 박스를 함께 건드리는 다른 모드가
-    -- 있을 때 우리가 그 모드의 이동을 매 틱 되돌려버린다(서로 싸움).
-    -- 그래서 캐시하지 않고, 매 틱 "현재 Y에서 우리가 지난 틱에 넣은 밀림량을
-    -- 뺀 값"을 기준으로 다시 잡는다. 이러면 우리는 남이 정한 Y 위에 얹히는
-    -- 순수 가산 오프셋이 되고, 다른 모드가 박스를 어디로 옮기든 그대로 따라간다.
-    local base = mui:getY() - _shift
-
-    local want = (_panel ~= nil) and MOODLE_DIST_Y or 0
-    _shift = approach(_shift, want)
-    mui:setY(base + _shift)
-
-    if _panel then
-        _ownSlide = approach(_ownSlide, 0)
-        -- 히트박스(마우스오버 판정)도 텍스처 크기를 따라가야 툴팁이 정확히
-        -- 아이콘 위에서만 뜬다. 텍스처팩 모드로 크기가 바뀌어도 자동 추종.
-        local w, h = _panel:iconSize()
-        if _panel:getWidth() ~= w then _panel:setWidth(w) end
-        if _panel:getHeight() ~= h then _panel:setHeight(h) end
-        -- X는 UIManager.resize()가 screenW-50으로 덮어쓰므로 매번 읽어온다.
-        _panel:setX(mui:getX())
-        _panel:setY(base + _ownSlide)
-        -- 무들박스가 숨겨져 있으면(VisibleAllUI off) 우리도 같이 숨는다.
-        _panel:setVisible(mui:isVisible() == true)
-    end
-end
-
--- 우리가 넣은 밀림량만 즉시 빼서 무들박스를 남에게 온전히 돌려준다.
--- 절대 좌표를 복원하는 게 아니라 우리 기여분만 반납하는 것이라, 그 사이
--- 다른 모드가 박스를 옮겨놨어도 그 위치를 망가뜨리지 않는다.
-local function restoreMoodleStack()
-    local mui = moodleUI()
-    if mui and _shift ~= 0 then
-        mui:setY(mui:getY() - _shift)
-    end
-    _shift = 0
-end
-
-Events.OnResolutionChange.Add(restoreMoodleStack)
-
+-- ── 슬롯 등록/해제 ──────────────────────────────────────────────────────────
+-- 무들박스 밀어내기, 슬롯 좌표 배정, 등장 슬라이드, 해상도 변경 시 복원은
+-- 전부 moodleStack 이 처리한다. 여기는 "언제 뜨고 언제 사라지는가"만 정한다.
 local function refreshIndicator()
     local want = indicatorEnabled() and (_pending > 0 or _active)
     if want then
         if not _panel then
             _panel = HordeIndicator:new()
             _panel:addToUIManager()
-            -- 바닐라 신규 무들과 동일하게 아래에서 슬라이드해 올라온다.
-            _ownSlide = SLIDE_IN_FROM
+            moodleStack.register(_panel, SLOT_PRIORITY)
         end
         _panel:setVisible(true)
     elseif _panel then
+        moodleStack.unregister(_panel)
         _panel:setVisible(false)
         _panel:removeFromUIManager()
         _panel = nil
     end
     -- 패널 유무가 바뀌면 밀림 목표도 바뀌므로 곧바로 한 번 돌려준다.
-    syncMoodleStack()
+    moodleStack.sync()
 end
 
 -- ── 서버 커맨드 수신 ─────────────────────────────────────────────────────────
@@ -457,8 +307,10 @@ end)
 
 Events.OnTick.Add(function()
     -- 무들박스 밀림/복귀와 우리 아이콘 슬라이드는 패널이 없어도 계속 돌아야
-    -- 한다(사라진 뒤 다른 무들들이 스르륵 올라오는 구간).
-    syncMoodleStack()
+    -- 한다(사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 인디케이터가 여럿일
+    -- 때 중복 호출돼도 멱등이다.
+    moodleStack.sync()
+    _osc:update(bkgLevel())
 
     if _syncTicks < 0 then return end
     _syncTicks = _syncTicks - 1

@@ -713,9 +713,9 @@ option PongDu.BloodMoon_TintStrength = {
     page = PongDu_Server, translation = PongDu_BloodMoon_TintStrength,
 }
 
-option PongDu.BloodMoon_ShowTimer = {
+option PongDu.BloodMoon_ShowIndicator = {
     type = boolean, default = true,
-    page = PongDu_Server, translation = PongDu_BloodMoon_ShowTimer,
+    page = PongDu_Server, translation = PongDu_BloodMoon_ShowIndicator,
 }
 
 option PongDu.Divider_MedicalBox = {
