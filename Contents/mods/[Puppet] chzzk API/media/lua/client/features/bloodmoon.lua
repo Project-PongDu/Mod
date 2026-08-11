@@ -43,7 +43,7 @@ local BLOOD_INTERIOR = { 0.42, 0.06, 0.09, 0.30 }
 -- 붉게 만들고 있어 틴트까지 겹치면 시야가 죽으므로 강도를 낮춘다.
 --     alpha = fade * (NIGHT + (DAY - NIGHT) * (1 - nightStrength)) * 샌박배율
 -- 낮/밤 전환 구간에서 자동으로 크로스페이드되므로 별도 분기가 필요 없다.
-local TINT_PATH     = "media/textures/donation/bloodmoon_tint.png"
+local TINT_PATH     = "media/textures/bloodmoon_tint.png"   
 local TINT_DAY      = 1.00   -- nightStrength = 0 (한낮)
 local TINT_NIGHT    = 0.28   -- nightStrength = 1 (한밤)
 local FADE_SPEED    = 0.012  -- 시작/종료 페이드 (getGameSpeed 배율 적용)
