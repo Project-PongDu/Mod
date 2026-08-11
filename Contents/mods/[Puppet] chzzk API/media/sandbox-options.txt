@@ -18,6 +18,106 @@ option PongDu.Host_SteamID = {
     page = PongDu_Main, translation = PongDu_Host_SteamID,
 }
 
+option PongDu.Divider_Tier = {
+    type = boolean, default = false,
+    page = PongDu_Main, translation = PongDu_Divider_Tier,
+}
+
+option PongDu.Tier_buff_roulette = {
+    type = integer, min = 0, max = 1000000, default = 1000,
+    page = PongDu_Main, translation = PongDu_Tier_buff_roulette,
+}
+
+option PongDu.Tier_debuff_roulette = {
+    type = integer, min = 0, max = 1000000, default = 1100,
+    page = PongDu_Main, translation = PongDu_Tier_debuff_roulette,
+}
+
+option PongDu.Tier_random_weapon = {
+    type = integer, min = 0, max = 1000000, default = 2000,
+    page = PongDu_Main, translation = PongDu_Tier_random_weapon,
+}
+
+option PongDu.Tier_zombie_roulette = {
+    type = integer, min = 0, max = 1000000, default = 3000,
+    page = PongDu_Main, translation = PongDu_Tier_zombie_roulette,
+}
+
+option PongDu.Tier_vaccine = {
+    type = integer, min = 0, max = 1000000, default = 5000,
+    page = PongDu_Main, translation = PongDu_Tier_vaccine,
+}
+
+option PongDu.Tier_medical_box = {
+    type = integer, min = 0, max = 1000000, default = 5500,
+    page = PongDu_Main, translation = PongDu_Tier_medical_box,
+}
+
+option PongDu.Tier_vehicle_drop = {
+    type = integer, min = 0, max = 1000000, default = 7000,
+    page = PongDu_Main, translation = PongDu_Tier_vehicle_drop,
+}
+
+option PongDu.Tier_sprinter5 = {
+    type = integer, min = 0, max = 1000000, default = 10000,
+    page = PongDu_Main, translation = PongDu_Tier_sprinter5,
+}
+
+option PongDu.Tier_random_teleport = {
+    type = integer, min = 0, max = 1000000, default = 15000,
+    page = PongDu_Main, translation = PongDu_Tier_random_teleport,
+}
+
+option PongDu.Tier_random_skill_potion = {
+    type = integer, min = 0, max = 1000000, default = 20000,
+    page = PongDu_Main, translation = PongDu_Tier_random_skill_potion,
+}
+
+option PongDu.Tier_mutant_spawn = {
+    type = integer, min = 0, max = 1000000, default = 30000,
+    page = PongDu_Main, translation = PongDu_Tier_mutant_spawn,
+}
+
+option PongDu.Tier_inv_save_ticket = {
+    type = integer, min = 0, max = 1000000, default = 40000,
+    page = PongDu_Main, translation = PongDu_Tier_inv_save_ticket,
+}
+
+option PongDu.Tier_fire_support = {
+    type = integer, min = 0, max = 1000000, default = 50000,
+    page = PongDu_Main, translation = PongDu_Tier_fire_support,
+}
+
+option PongDu.Tier_missile = {
+    type = integer, min = 0, max = 1000000, default = 60000,
+    page = PongDu_Main, translation = PongDu_Tier_missile,
+}
+
+option PongDu.Tier_zombie_rain = {
+    type = integer, min = 0, max = 1000000, default = 70000,
+    page = PongDu_Main, translation = PongDu_Tier_zombie_rain,
+}
+
+option PongDu.Tier_rise_up_dead_man = {
+    type = integer, min = 0, max = 1000000, default = 80000,
+    page = PongDu_Main, translation = PongDu_Tier_rise_up_dead_man,
+}
+
+option PongDu.Tier_horde_night = {
+    type = integer, min = 0, max = 1000000, default = 100000,
+    page = PongDu_Main, translation = PongDu_Tier_horde_night,
+}
+
+option PongDu.Tier_bandit_melee = {
+    type = integer, min = 0, max = 1000000, default = 0,
+    page = PongDu_Main, translation = PongDu_Tier_bandit_melee,
+}
+
+option PongDu.Tier_bandit_ranged = {
+    type = integer, min = 0, max = 1000000, default = 0,
+    page = PongDu_Main, translation = PongDu_Tier_bandit_ranged,
+}
+
 
 
 
