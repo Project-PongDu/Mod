@@ -19,7 +19,7 @@ end
 -- The amount -> featureId mapping now lives in the server's sandbox
 -- options (PongDu.Tier_<featureId>), so every streamer on the same
 -- server shares one tier table. On connect we dump it to
--- Zomboid/Lua/pongdu_tiers.json; the launcher reads that file and
+-- Zomboid/Lua/pongdu_tiers.txt; the launcher reads that file and
 -- builds its reward list from it instead of a local preset.
 --
 -- Sandbox tables are NOT iterated here: SandboxVars.PongDu is indexed
@@ -27,7 +27,11 @@ end
 -- partial standard library.
 ------------------------------------------------------------
 
-local TIER_FILE = "pongdu_tiers.json"
+-- getFileWriter는 확장자를 ini/cfg/txt/log로만 제한한다 (LuaManager.java의
+-- ALLOWED_FILE_EXTENSIONS). .json은 이 목록에 없어서 getFileWriter가 null을
+-- 반환하고 "relative paths not allowed" 경고만 남긴 채 조용히 실패한다.
+-- 내용은 JSON 문자열 그대로 두고 확장자만 .txt로 맞춘다.
+local TIER_FILE = "pongdu_tiers.txt"
 
 -- Must stay in sync with rewardHandlers in client/rewards/rewardManager.lua.
 -- Order matters: on a duplicate amount the entry listed first wins.
