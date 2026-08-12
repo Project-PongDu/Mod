@@ -62,6 +62,17 @@
 -- 나오므로, finalValue 만 쓰면 안 되고 반드시 override 를 써서 다음 프레임
 -- calculate() 를 거치게 해야 한다.
 --
+-- ═══ 어두움 (DAYLIGHT_STRENGTH) ═══════════════════════════════════════════
+-- 관리자 패널 "기후 조절" 의 "어두움" 슬라이더와 같은 채널(FLOAT_DAYLIGHT_STRENGTH,
+-- id=11). 위 색/안개/포화도는 전부 "무엇을 섞을지"의 문제라 화면이 얼마나
+-- 밝은가와는 별개인데, 이 채널은 RenderSettings.java 에서
+-- darkness = 1 - CM_DayLightStrength 로 변환된 뒤 R/G/B 에 곱해지는 실제 밝기
+-- 배율이다(rmod/gmod/bmod = Lerp(1.0, 0.7, darkness)). 실내 ambient 최소치와
+-- 시야 콘(계산은 LightingJNI.calculateVisionCone)에도 같이 걸려서, 색을
+-- 아무리 붉게/어둡게 잡아도 안 나던 "정말 안 보인다"는 체감을 준다.
+-- 안개/포화도와 곡선 구조는 같지만 방향이 반대다(자연값 -> peak 로 하강,
+-- darkTarget 참조) -- 안개/포화도는 "더한다", 어두움은 "깎는다".
+--
 -- ═══ 패킷 프레임 1프레임 점멸 ══════════════════════════════════════════════
 -- MP 클라에서 기후 패킷이 오는 프레임에 붉은빛이 한 프레임 통째로 빠진다.
 -- 원인은 networkLerp 계산의 float 정밀도 버그다(ClimateManager.java:826-834):
@@ -89,18 +100,16 @@
 -- ═══ UI 틴트 텍스쳐 ═════════════════════════════════════════════════════════
 -- 위 세 채널(조명/안개/포화도)은 전부 ClimateManager 소관이라 "자연값과 섞기"가
 -- 항상 문제였다. 틴트 텍스쳐는 그런 제약이 없다 -- ClimateManager 를 거치지
--- 않고 client/features/bloodmoon.lua 의 BloodMoonTint 패널이 UIManager 위에
--- 직접 그리는 이미지라, 여기서는 "지금 알파가 얼마여야 하나" 숫자 하나만
+-- 않고 client/features/bloodmoon.lua 가 OnPreUIDraw 훅에서 UIManager.DrawTexture
+-- 로 직접 그리는 이미지라, 여기서는 "지금 알파가 얼마여야 하나" 숫자 하나만
 -- 계산해서 _m.getTintAlpha() 로 내주면 끝이다. base 추적도, SP/MP 분기도 없다
 -- -- 같은 사다리꼴 곡선(_intensity)만 공유한다.
 --
--- UIManager 패널이라 다른 UI(인벤토리/체력바/무들)보다 나중에 addToUIManager
--- 되면 그 위에 그려진다 -- sendToBack 같은 API가 ISUIElement 에 없다
--- (bringToTop 만 있다). 즉 이 틴트는 HUD 를 가리는 화면 전체 비네트다.
--- 게임 세계와 HUD 사이에 끼워 넣으려면 OnPreUIDraw + SpriteRenderer 직접
--- 호출이 필요한데, 그 경로(renderi 의 Consumer 인자)는 이 모드는 물론 바닐라
--- Lua 어디에도 쓰인 전례가 없어 검증되지 않았다 -- 검증된 ISPanel 경로를
--- 택했다. TINT_PEAK 을 낮게(0.35) 잡은 이유이기도 하다.
+-- (예전엔 ISPanel + addToUIManager() 로 그렸다. 전체화면 크기의 UI 엘리먼트가
+-- 마우스 히트테스트 최상단을 차지해서 우클릭 등 월드 입력이 막히는 문제가
+-- 있어 순수 렌더 훅 방식으로 교체했다 -- bombard.lua 의 DOTex(kaboom 플래시)와
+-- 동일한 패턴. 자세한 배경은 client/features/bloodmoon.lua 의 BloodMoonTint
+-- 주석 참조.)
 
 PongDuBloodMoonLight = PongDuBloodMoonLight or {}
 local _m = PongDuBloodMoonLight
@@ -109,26 +118,57 @@ local _m = PongDuBloodMoonLight
 local COLOR_GLOBAL_LIGHT = 0   -- ClimateManager.COLOR_GLOBAL_LIGHT (133줄)
 
 -- ClimateManager.FLOAT_* (118-131줄)
-local FLOAT_DESATURATION  = 0
-local FLOAT_FOG_INTENSITY = 5
+local FLOAT_DESATURATION      = 0
+local FLOAT_FOG_INTENSITY     = 5
+-- 관리자 패널 "기후 조절"의 "어두움" 슬라이더가 조작하는 채널이 이거다
+-- (ISAdmPanelClimate.lua 의 DarknessSlider, RenderSettings.java:140의
+-- darkness = 1 - CM_DayLightStrength). globalLight 색 블렌드와 달리 렌더
+-- 단계에서 R/G/B 에 직접 곱해지는 진짜 밝기 배율이다(RenderSettings.java:189-191,
+-- Lerp(1.0, 0.7, darkness)) -- 그래서 색을 아무리 어둡게 잡아도 못 주는
+-- "정말 안 보인다"는 체감을 준다. 실내에서는 ambient 최소치도 같이 낮춰서
+-- (154줄) 실내조차 어두워진다. 시야 콘도 줄인다(LightingJNI.java
+-- calculateVisionCone, 458/460줄).
+local FLOAT_DAYLIGHT_STRENGTH = 11
 
 -- 네 번째 성분은 RGB 가 아니라 블렌드 강도다(ClimateColorInfo).
 -- 실내는 창문 마스크 경로로 따로 칠해지므로 실외보다 약하게 잡는다.
-local BLOOD_EXT = { 0.85, 0.05, 0.06, 0.60 }
-local BLOOD_INT = { 0.55, 0.05, 0.07, 0.45 }
+--
+-- 색 자체를 "핏빛"에서 "핏빛 도는 일식"으로 옮겼다. 기존값(R=0.85 채도 최대)은
+-- 순수 빨강이라 밝기도 높아 낮에는 오히려 화사한 붉은 필터처럼 보였다.
+-- R을 크게 낮추고 G/B와의 격차도 줄여서(고채도 빨강 -> 저채도 어두운 적회색)
+-- "빛이 줄어든 위에 핏빛이 옅게 얹힌" 인상을 준다. 아래 PEAK 상향과 함께
+-- 어두움 쪽에 무게를 싣는 구성이다.
+local BLOOD_EXT = { 0.16, 0.09, 0.10, 0.78 }
+local BLOOD_INT = { 0.10, 0.06, 0.07, 0.60 }
 
 -- 혼합 최대치. 1.0 이면 자연광이 완전히 사라져 낮/밤 명암 자체가 없어진다.
--- 0.7 이면 자연광이 30% 남아 낮은 밝은 핏빛, 밤은 어두운 핏빛으로 구분된다.
-local PEAK = 0.7
+-- 0.88 이면 자연광이 12% 만 남아 대낮에도 확 어두워진다(일식 컨셉의 핵심).
+-- 기존 0.7(자연광 30% 잔존)은 밤은 몰라도 낮에는 어두움이 잘 안 느껴졌다.
+local PEAK = 0.88
 
 -- 안개/포화도저하 피크값. 조명의 PEAK 와 달리 "자연광을 남긴다"는 개념이 없어서
 -- 그대로 목표치다. 자연값이 이미 피크보다 높으면 낮추지 않는다(아래 clamp 참조).
 local FOG_PEAK   = 0.35
 local DESAT_PEAK = 1.0
 
+-- 어두움(DAYLIGHT_STRENGTH) 바닥값. 위 둘과 달리 "낮을수록 어두움"이라 방향이
+-- 반대다 -- 자연값이 이미 이보다 어두우면(깊은 밤 등) 더 밝히지 않는다
+-- (아래 darkTarget 참조). 0.12 면 대낮에도 daylight_strength 가 12% 까지
+-- 떨어져 실내외 모두 확 어두워진다. 0 으로 두면 완전 암전이라 시야 자체가
+-- 안 나올 수 있어 최소한을 남겼다.
+local DARK_PEAK = 0.12
+
 -- UI 틴트 텍스쳐 알파 피크값. 화면 전체를 덮는 연출이라 조명/안개보다 훨씬
 -- 낮게 잡는다 -- 1.0 이면 텍스쳐가 완전 불투명해져 그 아래 게임 화면이 안 보인다.
-local TINT_PEAK = 0.8
+--
+-- media/ui/BloodMoon_Tint.png 는 좌상단 코너에만 알파가 몰린 그라데이션이었던
+-- 걸 화면 네 변 전부에서 번지는 대칭 비네트로 다시 만들었다(중심 35% 반경은
+-- 완전 투명 유지, 그 밖은 가장자리로 갈수록 텍스쳐 알파가 최대 255 까지
+-- 올라간다). 기존 에셋은 텍스쳐 자체의 알파가 화면 대부분에서 0에 가까워서,
+-- 이 상수를 아무리 올려도 코너 밖은 안 보였다 -- "핏빛이 잘 안 보인다"는
+-- 증상의 절반은 이 상수가 아니라 에셋의 커버리지 문제였다.
+-- 0.35 -> 0.45 로 올린 건 나머지 절반(단순히 낮았던 알파) 보정이다.
+local TINT_PEAK = 0.45
 
 -- ── 강도 곡선 ───────────────────────────────────────────────────────────────
 --   0% ~ 25%  : 자연광 -> 블러드문 (상승)
@@ -167,12 +207,15 @@ local _base      = nil   -- MP 경로에서 추적 중인 자연광 { ex = {...}
 local _written   = nil   -- MP 경로에서 마지막으로 써넣은 값 (읽어온 값)
 local _mode      = nil   -- "sp" | "mp" | "admin"
 
--- 안개/포화도 채널. 조명과 구조가 같아 상태만 채널별로 들고 간다.
+-- 안개/포화도/어두움 채널. 조명과 구조가 같아 상태만 채널별로 들고 간다.
 --   base    : 추적 중인 자연값
 --   written : 마지막으로 써넣은 값 (MP 경로의 base 추적용)
+--   dir     : "up" 이면 자연값 -> peak 로 상승(안개/포화도), "down" 이면
+--             자연값 -> peak 로 하강(어두움). fxTarget/darkTarget 선택에 쓴다.
 local _fx = {
-    { id = FLOAT_FOG_INTENSITY, peak = FOG_PEAK,   base = nil, written = nil },
-    { id = FLOAT_DESATURATION,  peak = DESAT_PEAK, base = nil, written = nil },
+    { id = FLOAT_FOG_INTENSITY,     peak = FOG_PEAK,   base = nil, written = nil, dir = "up" },
+    { id = FLOAT_DESATURATION,      peak = DESAT_PEAK, base = nil, written = nil, dir = "up" },
+    { id = FLOAT_DAYLIGHT_STRENGTH, peak = DARK_PEAK,  base = nil, written = nil, dir = "down" },
 }
 
 -- UI 틴트 텍스쳐용 알파. ClimateManager 채널이 아니라 클라이언트가 직접 그리는
@@ -305,6 +348,20 @@ local function fxTarget(base, peak, k)
     return v
 end
 
+-- 어두움(DAYLIGHT_STRENGTH) 전용. peak 가 자연값보다 낮은 게 정상이라 fxTarget
+-- 과 반대 방향으로 clamp 한다 -- k 가 커질수록 값이 내려가야(더 어두워져야)
+-- 한다. 자연값이 이미 peak 보다 어두우면(깊은 밤 등) 억지로 밝히지 않는다.
+local function darkTarget(base, peak, k)
+    local v = base + (peak - base) * k
+    if v > base then return base end
+    return v
+end
+
+local function fxCompute(dir, base, peak, k)
+    if dir == "down" then return darkTarget(base, peak, k) end
+    return fxTarget(base, peak, k)
+end
+
 local function climateFloat(id)
     local cm = getClimateManager()
     if not cm then return nil end
@@ -327,7 +384,7 @@ local function applyFxMP(k)
             if st.written == nil or cur ~= st.written then
                 st.base = cur
             end
-            local target = fxTarget(st.base, st.peak, k)
+            local target = fxCompute(st.dir, st.base, st.peak, k)
             cf:setOverride(target, cf:getOverrideInterpolate())
             st.written = cf:getOverride()
             cf:setFinalValue(target)
@@ -348,7 +405,7 @@ local function applyFxSP(k)
             if k <= 0 then
                 cf:setEnableOverride(false)
             else
-                cf:setOverride(fxTarget(cf:getInternalValue(), _fx[i].peak, k), 1.0)
+                cf:setOverride(fxCompute(_fx[i].dir, cf:getInternalValue(), _fx[i].peak, k), 1.0)
             end
         end
     end
@@ -498,6 +555,10 @@ function _m.arm(endHours)
         .. " peakBlend=" .. tostring(toBlend(1))
         .. " peakFog=" .. tostring(fxTarget(0, FOG_PEAK, toFx(1)))
         .. " peakDesat=" .. tostring(fxTarget(0, DESAT_PEAK, toFx(1)))
+        -- 어두움은 자연값(base)이 시각마다 달라 fxTarget 처럼 0 기준 예시값을
+        -- 못 낸다. DARK_PEAK 는 "자연값이 이보다 밝을 때 내려가는 바닥"이므로
+        -- 그대로 로그에 남긴다 -- 실제 적용치는 자연값에 따라 다를 수 있다.
+        .. " peakDarkFloor=" .. tostring(DARK_PEAK)
         .. " peakTint=" .. tostring(toTint(1)))
 
     applyNow()
