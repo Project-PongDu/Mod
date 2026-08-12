@@ -43,7 +43,6 @@ local _endHours    = nil   -- getWorldAgeHours() 기준 종료 예정 시각
 local _totalMin    = 0     -- 이번 이벤트 총 길이 (인게임 분) -- 툴팁 클램프용
 local _sweepTick   = 0
 local _panel       = nil
-local _tintPanel   = nil   -- BloodMoonTint (화면 틴트 오버레이)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  좀비 변환 / 복원
@@ -434,61 +433,55 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화면 틴트
 -- ═══════════════════════════════════════════════════════════════════════════
--- 화면 전체를 덮는 텍스쳐 한 장. 알파는 shared/PongDuBloodMoonLight.lua 가
--- 조명/안개와 같은 사다리꼴 곡선으로 계산해두므로 여기서는 getTintAlpha() 를
--- 그대로 읽어서 그리기만 한다.
+-- 알파는 shared/PongDuBloodMoonLight.lua 가 조명/안개와 같은 사다리꼴 곡선으로
+-- 계산해두므로 여기서는 getTintAlpha() 를 그대로 읽어서 그리기만 한다.
 --
--- ISUIElement 에는 bringToTop() 만 있고 sendToBack() 이 없어서, UIManager에
--- 나중에 얹히는 이 패널은 인벤토리/체력바 같은 기존 HUD 위에 그려진다 -- 즉
--- 세계 위가 아니라 HUD 를 포함한 화면 전체를 덮는 비네트다. TINT_PEAK 를
--- 낮게 잡아둔 이유이기도 하다(shared/PongDuBloodMoonLight.lua 참조).
+-- ISPanel + addToUIManager() 로 하지 않는다. 전체화면 크기의 UI 엘리먼트를
+-- UIManager 에 등록하면 그 영역의 마우스 히트테스트를 그 엘리먼트가 최상단에서
+-- 가로채서, 우클릭 컨텍스트 메뉴를 비롯한 월드 입력이 그 아래 게임 화면으로
+-- 전달되지 않는다(실제로 겪은 증상 -- 블러드문 진행 중 우클릭이 안 먹음).
+-- bombard.lua 의 DOTex(kaboom 플래시)와 동일하게, UI 엘리먼트 트리에 아예
+-- 들어가지 않는 순수 렌더 훅(OnPreUIDraw + UIManager.DrawTexture)으로 그리면
+-- 입력을 가로챌 여지 자체가 없다.
 local TINT_TEX_PATH = "media/ui/BloodMoon_Tint.png"
 
-local BloodMoonTint = ISPanel:derive("BloodMoonTint")
+local BloodMoonTint = {}
+BloodMoonTint.tex          = nil
+BloodMoonTint.texTried     = false
+BloodMoonTint.armed        = false
+BloodMoonTint.screenWidth  = getCore():getScreenWidth()
+BloodMoonTint.screenHeight = getCore():getScreenHeight()
 
-function BloodMoonTint:new()
-    local w, h = getCore():getScreenWidth(), getCore():getScreenHeight()
-    local o = ISPanel:new(0, 0, w, h)
-    setmetatable(o, self)
-    self.__index = self
-    o:noBackground()
-    o.tex = getTexture(TINT_TEX_PATH)
-    if not o.tex then
-        -- 에셋 미배치 폴백. 매 프레임 로그하면 스팸이므로 최초 1회만.
-        log("WARNING: tint texture not found at " .. TINT_TEX_PATH)
-    end
-    return o
-end
-
-function BloodMoonTint:render()
-    if not self.tex then return end
-
-    -- 해상도가 바뀌어도 항상 화면 전체를 덮도록 매 프레임 재확인한다.
-    -- (BloodMoonIndicator 와 달리 이쪽은 리사이즈 이벤트를 안 쓴다 -- 값 2개
-    -- 비교라 비용이 사실상 없다.)
-    local w, h = getCore():getScreenWidth(), getCore():getScreenHeight()
-    if self.width ~= w or self.height ~= h then
-        self:setWidth(w)
-        self:setHeight(h)
-    end
+local function drawTint()
+    if not BloodMoonTint.armed then return end
+    if not BloodMoonTint.tex then return end
 
     local a = PongDuBloodMoonLight.getTintAlpha()
     if a <= 0 then return end
-    self:drawTextureScaled(self.tex, 0, 0, self.width, self.height, a)
+    UIManager.DrawTexture(BloodMoonTint.tex, 0, 0,
+        BloodMoonTint.screenWidth, BloodMoonTint.screenHeight, a)
 end
+Events.OnPreUIDraw.Add(drawTint)
+
+Events.OnResolutionChange.Add(function(_, _, w, h)
+    BloodMoonTint.screenWidth  = w
+    BloodMoonTint.screenHeight = h
+end)
 
 local function showTint()
-    if _tintPanel then return end
-    _tintPanel = BloodMoonTint:new()
-    _tintPanel:addToUIManager()
-    _tintPanel:setVisible(true)
+    if not BloodMoonTint.texTried then
+        BloodMoonTint.texTried = true
+        BloodMoonTint.tex = getTexture(TINT_TEX_PATH)
+        if not BloodMoonTint.tex then
+            -- 에셋 미배치 폴백. 매 프레임 로그하면 스팸이므로 최초 1회만.
+            log("WARNING: tint texture not found at " .. TINT_TEX_PATH)
+        end
+    end
+    BloodMoonTint.armed = true
 end
 
 local function hideTint()
-    if not _tintPanel then return end
-    _tintPanel:setVisible(false)
-    _tintPanel:removeFromUIManager()
-    _tintPanel = nil
+    BloodMoonTint.armed = false
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
