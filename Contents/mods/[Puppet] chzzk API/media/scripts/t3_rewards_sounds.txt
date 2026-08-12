@@ -284,4 +284,21 @@ module Base
         }
     }
 
+    /*
+        블러드문 연장음.
+        진행 중에 추가 후원이 들어와 연장될 때만 재생 (features/bloodmoon.lua
+        의 startLocal, wasActive 분기, EXTEND_SOUND 상수). 최초 발동음
+        (pongdu_howling)과 구분해 "이미 진행 중임"을 알리는 용도.
+    */
+    sound pongdu_creepy_forest
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/creepy_forest.wav,
+            volume = 0.8,
+        }
+    }
+
 }

@@ -501,6 +501,10 @@ local END_LINE_COUNT   = 5   -- IGUI_donation_blood_moon_end1..5
 -- 호드 나이트 예약음(pongdu_heartbeat)과 공유하다가 늑대 울음으로 분리했다.
 local START_SOUND = "pongdu_howling"
 
+-- 연장음. 진행 중에 추가 후원이 들어와 연장될 때만 재생한다 -- 최초 발동음과
+-- 다른 소리를 써서 "이미 블러드문 중인데 또 늘어났다"를 구분할 수 있게 한다.
+local EXTEND_SOUND = "pongdu_creepy_forest"
+
 -- Say 는 사망/미생성 타이밍에 걸릴 수 있어 pcall 로 감싼다(hordenight 과 동일).
 local function sayRandomLine(prefix, count)
     local p = getPlayer()
@@ -542,6 +546,9 @@ function _a.startLocal(remainMin, totalMin, sender)
     fxSync()
 
     if wasActive then
+        local audio = getSoundManager():PlaySound(EXTEND_SOUND, false, 1.0)
+        if audio then audio:setVolume(0.7) end
+
         log("EXTENDED remainGameMin=" .. tostring(remainMin)
             .. " sender=" .. tostring(sender))
         return
