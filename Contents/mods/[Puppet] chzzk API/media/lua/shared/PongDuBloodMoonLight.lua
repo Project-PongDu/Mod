@@ -73,29 +73,50 @@
 -- 안개/포화도와 곡선 구조는 같지만 방향이 반대다(자연값 -> peak 로 하강,
 -- darkTarget 참조) -- 안개/포화도는 "더한다", 어두움은 "깎는다".
 --
--- ═══ 패킷 프레임 1프레임 점멸 ══════════════════════════════════════════════
--- MP 클라에서 기후 패킷이 오는 프레임에 붉은빛이 한 프레임 통째로 빠진다.
--- 원인은 networkLerp 계산의 float 정밀도 버그다(ClimateManager.java:826-834):
+-- ═══ 패킷 프레임 점멸 ══════════════════════════════════════════════════════
+-- MP 클라에서 기후 패킷이 오는 프레임에 붉은빛이 통째로 한 번 빠졌다 돌아온다.
+-- 빨리감기 중에는 10 인게임분이 순식간에 지나가 패킷이 초당 몇 번씩 오므로
+-- 거의 연속 점멸로 보인다 -- 빈도만 올라간 것이고 원인은 아래와 동일하다.
+--
+-- [원인 ①] networkLerp 계산의 float 정밀도 버그(ClimateManager.java:826-834):
 --     if ((float)long0 < (float)networkUpdateStamp + networkLerpTime)
 -- 밀리초 epoch(~1.79e12)를 float 로 캐스팅하면 ULP 가 131072ms(~131초)라
 -- 오른쪽의 +500ms(networkLerpTime)가 반올림으로 통째로 사라진다. 즉 조건은
 -- 사실상 항상 false 이고 networkLerp 는 늘 1.0 이다 -- 5초 보간이 죽어 있다.
--- 그래서 패킷이 온 프레임의 순서가 이렇게 된다:
---     ① 패킷 수신    : internalValue = finalValue(핏빛), override = 자연광
---     ② climate update: interpolate = networkLerp = 1.0
---     ③ calculate()  : finalValue = lerp(1.0, internal, override) = 자연광
---     ④ OnTick(우리) : override 를 다시 핏빛으로 되돌림
---     ⑤ 렌더         : finalValue 를 읽음 -> ③의 자연광
--- ④가 ⑤보다 먼저인데 ③이 이미 finalValue 를 갈아엎은 뒤라 한 프레임이 샌다.
--- 조명 변화는 LightingThread 를 통해 사각형 단위로 번져 나갔다 돌아오므로
--- 체감상 0.1~0.3초짜리 점멸로 보인다.
+-- 그래서 패킷 직후 첫 calculate() 는 finalValue = override = 자연광이 된다.
 --
--- 해결: override 뿐 아니라 finalValue 에도 같은 값을 직접 써넣는다. 우리 틱은
--- 렌더보다 앞이므로(IngameState.java:1309-1311, IsoWorld.update 이후 OnTick,
--- 그 뒤 render) 그 프레임 렌더가 우리 값을 본다. finalValue 는 다음 프레임
--- calculate() 가 어차피 재계산하므로 부작용이 없다.
--- 다만 updateFx()/SkyBox 는 ClimateManager.update() 안에서 이미 돌아간 뒤라
--- 하늘 색만 한 프레임 튀는 건 엔진 훅 없이는 못 막는다(지상 조명은 해결됨).
+-- [원인 ②] 우리 훅이 프레임 안에서 너무 늦게 돌았다. 한 프레임의 순서:
+--     GameWindow.logic()
+--       └ GameClient.instance.update()          -- 패킷 드레인, override=자연광
+--       └ states.update()
+--           IngameState.updateInternal()
+--             ├ OnTickEvenPaused                (IngameState.java:1117)
+--             ├ IsoWorld.update() -> ClimateManager.update()
+--             │     -> calculate()              -- finalValue 확정
+--             │     -> updateFx() / SkyBox      -- finalValue 소비
+--             ├ UpdateStuff() -> RenderSettings.update() (IngameState.java:556)
+--             │     -- rmod/gmod/bmod/ambient 를 finalValue 로부터 스냅샷
+--             └ OnTick                          (IngameState.java:1311)
+--     renderInternal()
+--     LightingThread.instance.update() -> LightingJNI.update()
+--           -- 위 스냅샷(getRmod/getGmod/getBmod/getAmbient)을 네이티브
+--              조명 상태로 밀어넣는다 (LightingJNI.java:680-685)
+--
+-- 지상 조명은 finalValue 를 직접 읽는 게 아니라 RenderSettings 스냅샷을 거친다.
+-- 그 스냅샷은 OnTick 보다 먼저 떠버리므로, OnTick 에서 finalValue 를 되돌려도
+-- 그 프레임 조명은 이미 자연광으로 굳은 뒤다. 조명 변화는 LightingThread 를
+-- 통해 사각형 단위로 번져 나갔다 돌아오므로 체감상 0.1~0.3초짜리 점멸이 된다.
+--
+-- 해결: 훅을 OnTick 이 아니라 OnTickEvenPaused 에 건다. 이 이벤트는 패킷
+-- 드레인 직후이면서 calculate() 보다 앞이라, 패킷이 밀어넣은 자연광 override 가
+-- calculate() 에 도달하는 일 자체가 없어진다 -- finalValue 가 애초에 자연광이
+-- 된 적이 없으므로 RenderSettings / LightingThread / updateFx / SkyBox 어느
+-- 경로로도 새지 않는다(하늘 색 튐도 같이 해결).
+--
+-- override 와 함께 finalValue 에도 직접 써넣는 건 그대로 둔다. 일시정지 중에는
+-- states.update() 가 통째로 스킵돼 ClimateManager.update() 가 아예 안 돌아
+-- calculate() 가 finalValue 를 갱신해주지 않기 때문이다(GameWindow.java:288-296,
+-- 이때도 OnTickEvenPaused 는 따로 발화한다).
 --
 -- ═══ UI 틴트 텍스쳐 ═════════════════════════════════════════════════════════
 -- 위 세 채널(조명/안개/포화도)은 전부 ClimateManager 소관이라 "자연값과 섞기"가
@@ -328,11 +349,11 @@ end
 -- override 의 색만 우리가 계산해 덮어쓴다. interpolate 는 엔진이 networkLerp 로
 -- 관리하므로 건드리지 않는다 -- 어차피 매 프레임 덮어써지고, 실제로는 float
 -- 정밀도 버그 때문에 늘 1.0 이라 우리가 쓴 색이 그대로 화면에 나온다
--- (파일 상단 "패킷 프레임 1프레임 점멸" 항목 참조).
+-- (파일 상단 "패킷 프레임 점멸" 항목 참조).
 --
--- finalValue 에도 같은 값을 써넣는다. 패킷이 온 프레임에는 calculate() 가
--- 우리보다 먼저 돌면서 finalValue 를 자연광으로 갈아엎어 놓기 때문에, override
--- 만 되돌려서는 그 프레임 렌더를 못 막는다. 이게 점멸의 원인이었다.
+-- finalValue 에도 같은 값을 써넣는다. 일시정지 중에는 calculate() 가 아예 안
+-- 돌아 finalValue 가 갱신되지 않으므로, override 만 써서는 정지 화면에서
+-- 조명이 풀린다.
 local function applyMP(cc, t)
     local ov = cc:getOverride()
     local cur = readInfo(ov)
@@ -618,6 +639,11 @@ end
 -- ── 틱 ──────────────────────────────────────────────────────────────────────
 -- 매 프레임 돈다. 하는 일은 float 8개 읽기 / 비교 / 쓰기라 비용이 사실상 없고,
 -- 이 주기가 곧 곡선의 해상도다.
+--
+-- OnTick 이 아니라 OnTickEvenPaused 를 쓰는 이유는 파일 상단 "패킷 프레임 점멸"
+-- 참조 -- 요약하면 이 훅만이 "패킷 드레인 이후 & ClimateManager.calculate() 이전"
+-- 이라서, 서버가 밀어넣은 자연광 override 가 화면에 도달하기 전에 덮을 수 있다.
+-- 일시정지 중에도 발화하지만 gameHours() 가 멈춰 있어 강도는 그대로 유지된다.
 local function lightTick()
     if not _armed then return end
     if not hasScreen() then return end
@@ -632,6 +658,6 @@ local function lightTick()
         _m.disarm()
     end
 end
-Events.OnTick.Add(lightTick)
+Events.OnTickEvenPaused.Add(lightTick)
 
 return _m
