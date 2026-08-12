@@ -179,6 +179,12 @@ IGUI_KO = {
     IGUI_donation_blood_moon_end4 = "끝났나... 아직 심장이 뛰는군.",
     IGUI_donation_blood_moon_end5 = "다시는 겪고 싶지 않은 밤이었어.",
 
+    IGUI_donation_blood_moon_extended1 = "젠장, 핏빛 밤이 끝나질 않아.",
+    IGUI_donation_blood_moon_extended2 = "또야...? 언제까지 버텨야 하는 거야.",
+    IGUI_donation_blood_moon_extended3 = "하늘이 다시 붉어지고 있어. 아직 안 끝났어.",
+    IGUI_donation_blood_moon_extended4 = "이 밤이 영원히 안 끝날 것 같아.",
+    IGUI_donation_blood_moon_extended5 = "무슨... 끝이 나질 않잖아.",
+
 
 
     IGUI_donation_fire_support = "화력 지원",

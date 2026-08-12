@@ -7,67 +7,20 @@ local textOutline = require("utils/textOutline")
 -- ── 블러드문 (blood_moon) 클라이언트 ─────────────────────────────────────────
 --
 -- 서버 후원(PongDu_Server 탭) 계열. 서버장에게 후원이 들어오면 접속자 전원에게
--- 일정 인게임 시간 동안 다음 3가지가 동시에 걸린다:
---   ① 핏빛 달빛  : ClimateManager 야간 색상 교체
---   ② 화면 틴트  : 붉은 비네트 오버레이 (낮에 강하게, 밤에 약하게)
---   ③ 좀비 가속  : 뮤턴트/퐁듀 소유 좀비를 제외한 모든 일반좀비를 스프린터로
--- 종료 시 셋 다 원상복구한다.
+-- 일정 인게임 시간 동안 다음이 걸린다:
+--   ① 좀비 가속  : 뮤턴트/퐁듀 소유 좀비를 제외한 모든 일반좀비를 스프린터로
+--   ② 핏빛 조명 (shared/PongDuBloodMoonLight.lua) -- 낮/밤 모두 적용
+--   ③ 무들 인디케이터로 남은 시간 표시
+-- 종료 시 전부 원상복구한다.
 --
 -- 서버(server/PongDuBloodMoonServer.lua)는 "언제 시작하고 언제 끝나는가"만
--- 관리하고, 위 3가지 적용은 전부 이 파일이 각 클라에서 로컬로 수행한다.
--- 특히 ③이 클라 담당인 이유는 B41 좀비 소유권 모델 때문이다 -- 서버에서
--- IsoZombie 스탯을 바꾸면 소유 클라의 sync 패킷에 그대로 덮어써진다.
+-- 관리하고, 좀비 변환은 각 클라가 로컬로 수행한다. ①이 클라 담당인 이유는
+-- B41 좀비 소유권 모델 때문이다 -- 서버에서 IsoZombie 스탯을 바꾸면 소유
+-- 클라의 sync 패킷에 그대로 덮어써진다.
 --
 -- 싱글플레이 예외: SP 는 sendClientCommand/sendServerCommand 가 둘 다 동작하지
 -- 않으므로(LuaManager.java 의 GameClient.bClient / GameServer.bServer 가드),
 -- medicalbox.lua 와 같은 방식으로 서버 왕복 없이 로컬에서 바로 시작한다.
-
--- ── 조명 ────────────────────────────────────────────────────────────────────
--- ClimateManager.java:1416 에서 매 프레임
---     colNightNoMoon.interp(colNightMoon, moonFloat, colNight)
---     globalLight.interp(colNight, nightStrength, globalLight)
--- 가 돈다. 즉 colNight 는 "입력"이 아니라 매 프레임 재계산되는 "출력"이라
--- setExterior 해봐야 다음 프레임에 덮어써진다 -- 손대지 않는다.
--- 실제로 유효한 레버는 colNightMoon / colNightNoMoon 둘뿐이고, 둘 다 생성자
--- (206~215줄) 이후로는 엔진이 건드리지 않으므로 한 번 세팅하면 유지된다.
---
--- 달 위상(moonFloat)에 따라 결과가 흔들리지 않도록 Moon/NoMoon 을 같은 값으로
--- 맞춘다. 바닐라 기본값은 (0.33, 0.33, 1.0, 0.4) 푸른색이고, 네 번째 성분은
--- RGB 가 아니라 블렌드 강도다(ClimateColorInfo 클래스 주석).
-local BLOOD_EXTERIOR = { 0.72, 0.09, 0.11, 0.52 }
-local BLOOD_INTERIOR = { 0.42, 0.06, 0.09, 0.30 }
-
--- ── 강도 엔벨로프 ───────────────────────────────────────────────────────────
--- 조명과 틴트는 같은 계수 p(0..1)를 공유한다. p 는 실시간 페이드가 아니라
--- 이벤트 시간축 위의 삼각 엔벨로프다:
---
---     p 1 |        /\
---         |       /  \
---       0 |______/____\______
---         t0   peak   end
---
---   peak = t0 + (end - t0) / 2
---   상승 구간: p0 -> 1 를 (peak - t0) 동안 리니어
---   하강 구간: 1 -> 0 를 (end - peak) 동안 리니어
---
--- 중복 후원(연장)이 들어오면 그 시점의 p 를 새 p0 로 삼고 t0 = now,
--- peak = now + (newEnd - now)/2 로 다시 잡는다. 그래서 연장 순간에 값이
--- 튀지 않고 현재 밝기에서 이어서 다시 차오른다.
---
--- 시간축은 getWorldAgeHours() -- 배속/DayLength 를 자동으로 따라간다.
--- 프레임 기반 페이드(구 FADE_SPEED)를 쓰지 않는 이유가 이것이다. 프레임
--- 페이드는 이벤트 길이와 무관하게 항상 2~3초 만에 최대치에 도달해서,
--- 120분짜리 이벤트든 10분짜리든 똑같이 "켜짐/꺼짐"으로만 보였다.
-
--- ── 화면 틴트 ───────────────────────────────────────────────────────────────
--- 조명은 nightStrength 로 블렌딩되므로 낮(nightStrength≈0)에는 아무 효과가 없다.
--- 그 구간을 화면 오버레이가 메운다. 반대로 밤에는 조명이 이미 화면 전체를
--- 붉게 만들고 있어 틴트까지 겹치면 시야가 죽으므로 강도를 낮춘다.
---     alpha = p * (NIGHT + (DAY - NIGHT) * (1 - nightStrength)) * 샌박배율
--- 낮/밤 전환 구간에서 자동으로 크로스페이드되므로 별도 분기가 필요 없다.
-local TINT_PATH     = "media/textures/bloodmoon_tint.png"   
-local TINT_DAY      = 1.00   -- nightStrength = 0 (한낮)
-local TINT_NIGHT    = 0.28   -- nightStrength = 1 (한밤)
 
 -- ── 좀비 변환 ───────────────────────────────────────────────────────────────
 local SPEED_SPRINTER = 1     -- ZombieLore.Speed 값 (1=스프린터 2=속보 3=완보)
@@ -89,198 +42,7 @@ local _active      = false
 local _endHours    = nil   -- getWorldAgeHours() 기준 종료 예정 시각
 local _totalMin    = 0     -- 이번 이벤트 총 길이 (인게임 분) -- 툴팁 클램프용
 local _sweepTick   = 0
-
--- 엔벨로프 상태 (위 "강도 엔벨로프" 주석 참조)
-local _rampT0      = 0     -- 현재 상승 구간의 시작 시각 (worldAgeHours)
-local _rampP0      = 0     -- t0 시점의 강도
-local _peakHours   = 0     -- 피크 시각
-local _env         = 0     -- 이번 틱의 p. 렌더에서 재계산하지 않으려고 캐싱한다
-local _lastLightP  = nil   -- 조명에 마지막으로 반영한 p (중복 세팅 컷)
 local _panel       = nil
-local _tintTex     = nil
-local _tintTexTried = false
-
--- 조명 원본 스냅샷. ClimateColorInfo.getExterior() 는 라이브 Color 객체를
--- 돌려주므로 참조를 들고 있으면 안 된다 -- r/g/b/a 를 값으로 복사한다.
-local _lightSaved  = nil
-
-local function screenW() return getCore():getScreenWidth() end
-local function screenH() return getCore():getScreenHeight() end
-
--- PZMath.lerp / PZMath.clampFloat 를 쓰지 않는 이유:
--- clampFloat 는 바닐라 Lua 에서 실사용되지만 lerp 는 단 한 번도 호출되지 않는다.
--- 둘 다 한 줄짜리 산술이라 외부 클래스에 의존할 이유가 없어 로컬로 둔다.
-local function clamp01(v)
-    if v < 0 then return 0 end
-    if v > 1 then return 1 end
-    return v
-end
-
-local function lerp(from, to, t)
-    return from + (to - from) * t
-end
-
--- ═══════════════════════════════════════════════════════════════════════════
---  조명 적용 / 복원
--- ═══════════════════════════════════════════════════════════════════════════
--- 주의: zombie.core.Color 에는 getA() 가 없다. 알파는 getAlpha()(0~255 int)와
--- getAlphaFloat()(0~1 float) 두 가지뿐이라, RGB 도 *Float 계열로 통일해 읽는다.
-local function snapColor(colorInfo)
-    local ex, inr = colorInfo:getExterior(), colorInfo:getInterior()
-    return {
-        ex  = { ex:getRedFloat(),  ex:getGreenFloat(),  ex:getBlueFloat(),  ex:getAlphaFloat() },
-        inr = { inr:getRedFloat(), inr:getGreenFloat(), inr:getBlueFloat(), inr:getAlphaFloat() },
-    }
-end
-
-local function restoreColor(colorInfo, snap)
-    colorInfo:setExterior(snap.ex[1], snap.ex[2], snap.ex[3], snap.ex[4])
-    colorInfo:setInterior(snap.inr[1], snap.inr[2], snap.inr[3], snap.inr[4])
-end
-
-local function snapshotLight()
-    if _lightSaved then return end   -- 중복 후원으로 재진입해도 스냅샷은 1회만
-    local cm = getClimateManager()
-    if not cm then
-        log("snapshotLight aborted: climate manager is nil")
-        return
-    end
-
-    _lightSaved = {
-        moon   = snapColor(cm:getColNightMoon()),
-        noMoon = snapColor(cm:getColNightNoMoon()),
-    }
-    log("light snapshot taken")
-end
-
--- 바닐라 원본(snap)에서 핏빛(BLOOD_*)까지를 p 로 선형 보간해서 써넣는다.
--- p = 0 이면 원본과 정확히 같은 값이 들어가므로 이벤트 시작/종료 시점에
--- 조명이 튀지 않는다 -- 별도의 페이드 인/아웃 처리가 필요 없는 이유다.
-local function blendColor(colorInfo, snap, p)
-    colorInfo:setExterior(
-        lerp(snap.ex[1], BLOOD_EXTERIOR[1], p),
-        lerp(snap.ex[2], BLOOD_EXTERIOR[2], p),
-        lerp(snap.ex[3], BLOOD_EXTERIOR[3], p),
-        lerp(snap.ex[4], BLOOD_EXTERIOR[4], p))
-    colorInfo:setInterior(
-        lerp(snap.inr[1], BLOOD_INTERIOR[1], p),
-        lerp(snap.inr[2], BLOOD_INTERIOR[2], p),
-        lerp(snap.inr[3], BLOOD_INTERIOR[3], p),
-        lerp(snap.inr[4], BLOOD_INTERIOR[4], p))
-end
-
--- 매 틱 호출되지만 실제 세팅은 p 가 유의미하게 변했을 때만 한다.
--- 120분짜리 이벤트면 p 는 인게임 1분당 약 0.017 씩 움직이므로 실제 세팅
--- 횟수는 초당 수십 번이 아니라 이벤트 전체에서 수백 번 수준이다.
---
--- ClimateManager 가 colNight* 를 소비하는 시점(updateValues)은 인게임 1분에
--- 한 번뿐이라 그보다 촘촘히 써넣어봐야 화면에 반영되지 않는다. 즉 여기서
--- 얻는 최대 해상도는 "인게임 1분당 1스텝"이고, 그게 이 레버의 물리적 한계다.
-local LIGHT_EPSILON = 0.002
-
-local function updateLight(p)
-    if not _lightSaved then return end
-    if _lastLightP then
-        local d = p - _lastLightP
-        if d < 0 then d = -d end
-        if d < LIGHT_EPSILON then return end
-    end
-
-    local cm = getClimateManager()
-    if not cm then return end
-
-    blendColor(cm:getColNightMoon(),   _lightSaved.moon,   p)
-    blendColor(cm:getColNightNoMoon(), _lightSaved.noMoon, p)
-    _lastLightP = p
-end
-
-local function restoreLight()
-    if not _lightSaved then return end
-    local cm = getClimateManager()
-    if cm then
-        restoreColor(cm:getColNightMoon(), _lightSaved.moon)
-        restoreColor(cm:getColNightNoMoon(), _lightSaved.noMoon)
-        log("light restored")
-    else
-        log("restoreLight skipped: climate manager is nil")
-    end
-    _lightSaved = nil
-    _lastLightP = nil
-end
-
--- ═══════════════════════════════════════════════════════════════════════════
---  화면 틴트
--- ═══════════════════════════════════════════════════════════════════════════
--- 텍스처가 없어도(에셋 미배치) 크래시 없이 조용히 스킵된다. getTexture 결과를
--- false 로 캐싱해 매 프레임 파일 조회가 반복되지 않게 한다 (DonationReceiver
--- 의 getIconTexture 와 같은 기법).
-local function tintTexture()
-    if not _tintTexTried then
-        _tintTexTried = true
-        _tintTex = getTexture(TINT_PATH) or false
-        if _tintTex == false then
-            log("tint texture missing: " .. TINT_PATH .. " (overlay disabled)")
-        end
-    end
-    if _tintTex == false then return nil end
-    return _tintTex
-end
-
-local function tintScale()
-    local pct = SandboxVars.PongDu.BloodMoon_TintStrength
-    return pct / 100
-end
-
-local function drawTint()
-    if not isIngameState() then return end
-    if _env <= 0 then return end
-
-    local tex = tintTexture()
-    if not tex then return end
-
-    local cm = getClimateManager()
-    if not cm then return end
-
-    -- nightStrength: 0(한낮) ~ 1(한밤). ClimateManager.java:454
-    local ns = clamp01(cm:getNightStrength())
-    local a = _env * (TINT_NIGHT + (TINT_DAY - TINT_NIGHT) * (1.0 - ns)) * tintScale()
-    if a <= 0 then return end
-    if a > 1 then a = 1 end
-
-    UIManager.DrawTexture(tex, 0, 0, screenW(), screenH(), a)
-end
-
--- ── 엔벨로프 ────────────────────────────────────────────────────────────────
--- 현재 시각의 강도. 상태(_rampT0/_rampP0/_peakHours/_endHours)만 보고 계산하는
--- 순수 함수라 어느 시점에 불러도 같은 값이 나온다 -- 연장 시 "지금 값"을 그대로
--- 새 시작점으로 물려받을 수 있는 근거다.
-local function envelope()
-    if not _active or not _endHours then return 0 end
-
-    local now = getGameTime():getWorldAgeHours()
-    if now >= _endHours then return 0 end
-    if now <= _rampT0 then return clamp01(_rampP0) end
-
-    if now < _peakHours then
-        local span = _peakHours - _rampT0
-        if span <= 0 then return 1 end
-        return clamp01(_rampP0 + (1.0 - _rampP0) * ((now - _rampT0) / span))
-    end
-
-    local span = _endHours - _peakHours
-    if span <= 0 then return 0 end
-    return clamp01((_endHours - now) / span)
-end
-
--- 남은 시간의 절반 지점을 피크로 잡고, 지금 강도에서 이어서 올라가게 한다.
--- 시작이든 연장이든 동일한 경로를 탄다 -- 시작은 그냥 p0 = 0 인 연장이다.
-local function rearm(remainHours, p0)
-    local now = getGameTime():getWorldAgeHours()
-    _rampT0    = now
-    _rampP0    = clamp01(p0)
-    _endHours  = now + remainHours
-    _peakHours = now + remainHours * 0.5
-end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  좀비 변환 / 복원
@@ -295,6 +57,75 @@ end
 -- DoZombieStats() 를 따로 한 번 더 부르지 않는다. makeInactive(false) 안에서
 -- 이미 호출되며, 중복 호출하면 speedMod/bLunger/walkVariant 가 한 번 더
 -- 재굴림되어 좀비 걸음걸이가 불필요하게 흔들린다.
+
+-- ── IsoZombie 필드 리플렉션 ─────────────────────────────────────────────────
+-- Kahlua 의 LuaJavaClassExposer 는 인스턴스 public 필드를 Lua 에 노출하지
+-- 않는다 -- exposeLikeJava() 가 메서드(exposeMethods)와 static 필드
+-- (exposeStatics)만 테이블에 얹는다. 즉 zed.speedType / zed.inactive 는
+-- 항상 nil 이고, 이걸 그대로 쓰면 조건문이 통째로 죽는다(이번 버그의 절반).
+-- PZ 가 전역으로 뚫어둔 리플렉션 API(getNumClassFields / getClassField /
+-- getClassFieldVal, LuaManager.java:5597-5766)로 읽어야 한다.
+-- RandomZombies 가 같은 이유로 같은 방식을 쓴다.
+--
+-- Field 객체는 클래스 단위라 한 번만 찾아 캐싱한다. 실패하면 nil 을 캐싱해
+-- 매 스윕 재시도하지 않는다(마커 전용 폴백 모드로 내려간다).
+local FIELD_SPEED    = "public int zombie.characters.IsoZombie.speedType"
+local FIELD_INACTIVE = "public boolean zombie.characters.IsoZombie.inactive"
+
+local _fields      = nil
+local _fieldsTried = false
+
+local function fields(zed)
+    if _fieldsTried then return _fields end
+    _fieldsTried = true
+
+    local found = {}
+    local ok, err = pcall(function()
+        for i = 0, getNumClassFields(zed) - 1 do
+            local f = getClassField(zed, i)
+            local n = tostring(f)
+            if n == FIELD_SPEED then
+                found.speed = f
+            elseif n == FIELD_INACTIVE then
+                found.inactive = f
+            end
+        end
+    end)
+
+    if not ok then
+        log("field reflection failed: " .. tostring(err) .. " (marker-only fallback)")
+        return nil
+    end
+    if not found.speed then
+        log("speedType field not found (marker-only fallback)")
+        return nil
+    end
+
+    _fields = found
+    log("field reflection ready (inactive="
+        .. tostring(found.inactive ~= nil) .. ")")
+    return _fields
+end
+
+-- 현재 speedType. 1/2/3 이 정상값이고, 아직 DoZombieStats 를 한 번도 타지
+-- 않은 개체는 -1 이다(IsoZombie.java:200). -1 도 그대로 돌려준다 -- "읽지
+-- 못함(nil)"과 "아직 미배정(-1)"은 처리가 다르기 때문이다.
+local function readSpeed(zed)
+    local f = fields(zed)
+    if not f then return nil end
+    local ok, v = pcall(getClassFieldVal, zed, f.speed)
+    if not ok then return nil end
+    return tonumber(v)
+end
+
+-- 휴면(가상) 좀비 여부. 읽지 못하면 false 로 보수적으로 처리한다.
+local function isInactive(zed)
+    local f = fields(zed)
+    if not f or not f.inactive then return false end
+    local ok, v = pcall(getClassFieldVal, zed, f.inactive)
+    return ok and v == true
+end
+
 local function setZombieSpeed(zed, target)
     local so = getSandboxOptions()
     local prev = so:getOptionByName("ZombieLore.Speed"):getValue()
@@ -305,17 +136,21 @@ local function setZombieSpeed(zed, target)
 end
 
 -- 변환 제외 대상 판정.
---   PongDuCompat.isOwnedZombie : 뮤턴트 4종(screamer/brute/roach/tracer) +
+--   PongDuCompat.isSpecialZombie : 뮤턴트 4종(screamer/brute/roach/tracer) +
 --     뮤턴트 스프린터(PuppetMutant="sprinter") + 일반 스프린터(isSprinter) +
 --     히트맨 NPC. server/PongDuCompatRandomZombies.lua 에 정의돼 있고
 --     media/lua/server/ 는 클라에서도 로드되므로 여기서 그대로 쓸 수 있다.
+--     블러드문 마커까지 포함하는 isOwnedZombie 가 아님에 주의(아래 주석 참조).
 --   inactive : 휴면(가상) 좀비. makeInactive(true) 가 "이미 inactive 면 no-op"
 --     이라(IsoZombie.java:4080) 토글하면 깨워버리는 부작용이 있어 건너뛴다.
 --     RandomZombies 모드는 이 가드가 없어서 대규모 휴면 무리를 깨운다.
 local function isConvertible(zed)
     if not zed then return false end
-    if zed.inactive == true then return false end
-    if PongDuCompat and PongDuCompat.isOwnedZombie and PongDuCompat.isOwnedZombie(zed) then
+    if isInactive(zed) then return false end
+    -- isOwnedZombie 가 아니라 isSpecialZombie 를 쓴다. 전자는 블러드문 마커까지
+    -- 포함하므로(RZ 제외용) 여기서 쓰면 한 번 변환된 좀비가 영구히 재변환
+    -- 대상에서 빠진다 -- 스트리밍 아웃/인으로 speedType 이 리셋되면 복구 불가.
+    if PongDuCompat and PongDuCompat.isSpecialZombie and PongDuCompat.isSpecialZombie(zed) then
         return false
     end
     return true
@@ -343,14 +178,45 @@ local function resolveOrigSpeed(md)
     return getSandboxOptions():getOptionByName("ZombieLore.Speed"):getValue()
 end
 
+-- 마커가 아니라 "지금 실제 speedType 이 뭔가"로 판정한다.
+--
+-- 마커 기준 1회 변환이 실패하는 이유:
+-- 좀비가 스트리밍 아웃되면 makeInactive(true) 로 speedType = 3 이 되고,
+-- 다시 들어올 때 makeInactive(false) -> speedType = -1 -> DoZombieStats() 가
+-- 서버 샌드박스 Lore.Speed 로 재배정한다(IsoZombie.java:4079-4093). 리사이클
+-- 경로(resetForReuse, 3327줄)도 speedType 을 -1 로 되돌린다. 마커는 ModData 라
+-- 살아남으므로, 마커만 보면 "이미 변환됨"으로 판단해 영영 다시 안 건드린다.
+-- 실제로 겪은 증상이 정확히 이것이다 -- 멀리 갔다 오면 다시 걷는다.
+--
+-- 그래서 RandomZombies 와 같은 구조를 택한다: 목표 속도와 실제 속도를 매 스윕
+-- 비교하고 다르면 덮어쓴다. 마커는 "변환 판정"이 아니라 "종료 시 복원 대상
+-- 표시 + RZ 제외 표시" 용도로만 남는다.
 local function convertZombie(zed)
     if isForeign(zed) then return false end
-    local md = zed:getModData()
-    if md[MD_MARK] then return false end
     if not isConvertible(zed) then return false end
 
-    local cur = tonumber(zed.speedType)
-    md[MD_ORIG] = (cur == 1 or cur == 2 or cur == 3) and cur or nil
+    local md  = zed:getModData()
+    local cur = readSpeed(zed)
+
+    -- 리플렉션 폴백. 실제 속도를 못 읽으면 매 스윕 makeInactive 토글이 무한
+    -- 반복되므로(걸음걸이가 계속 재굴림된다) 마커 기준 1회 변환으로 물러선다.
+    if cur == nil then
+        if md[MD_MARK] then return false end
+        md[MD_MARK] = true
+        setZombieSpeed(zed, SPEED_SPRINTER)
+        return true
+    end
+
+    if cur == SPEED_SPRINTER then
+        -- 이미 스프린터. 마커만 채워둔다(종료 시 복원 대상 + RZ 제외).
+        md[MD_MARK] = true
+        return false
+    end
+
+    -- 원본 속도는 최초 1회만 기록한다. 두 번째부터는 우리가 넣은 값(1)을
+    -- 원본으로 덮어쓸 위험이 있어 조건을 건다. -1(미배정)은 기록하지 않고
+    -- 복원 시 서버 기본값으로 떨어지게 둔다(resolveOrigSpeed).
+    if md[MD_ORIG] == nil and (cur == 2 or cur == 3) then md[MD_ORIG] = cur end
     md[MD_MARK] = true
     setZombieSpeed(zed, SPEED_SPRINTER)
     return true
@@ -366,12 +232,16 @@ local function revertZombie(zed)
     md[MD_MARK] = nil
     md[MD_ORIG] = nil
 
-    -- 변환 후에 휴면 상태로 넘어간 좀비는 이미 엔진이 speedType 을 3 으로
-    -- 강제해둔 상태다(IsoZombie.java:4086). 여기서 makeInactive 를 토글하면
-    -- 되돌리는 게 아니라 잠든 좀비를 깨우는 꼴이 된다. 마커만 지우면 되고,
-    -- 엔진이 나중에 이 좀비를 깨울 때 speedType 이 -1 로 리셋되며 서버 기본
-    -- 속도로 자동 재배정된다(4088-4090).
-    if zed.inactive == true then return true end
+    -- 휴면 상태로 넘어간 좀비는 이미 엔진이 speedType 을 3 으로 강제해둔
+    -- 상태다(IsoZombie.java:4086). 여기서 makeInactive 를 토글하면 되돌리는 게
+    -- 아니라 잠든 좀비를 깨우는 꼴이 된다. 마커만 지우면 되고, 엔진이 나중에
+    -- 이 좀비를 깨울 때 speedType 이 -1 로 리셋되며 서버 기본 속도로 자동
+    -- 재배정된다(4088-4090).
+    if isInactive(zed) then return true end
+
+    -- 이미 원래 속도면(스트리밍 재진입으로 엔진이 먼저 되돌려놓은 경우)
+    -- 불필요한 DoZombieStats 재굴림을 피한다.
+    if readSpeed(zed) == orig then return true end
 
     setZombieSpeed(zed, orig)
     return true
@@ -561,10 +431,130 @@ local function hideTimer()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
+--  화면 틴트
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 알파는 shared/PongDuBloodMoonLight.lua 가 조명/안개와 같은 사다리꼴 곡선으로
+-- 계산해두므로 여기서는 getTintAlpha() 를 그대로 읽어서 그리기만 한다.
+--
+-- ISPanel + addToUIManager() 로 하지 않는다. 전체화면 크기의 UI 엘리먼트를
+-- UIManager 에 등록하면 그 영역의 마우스 히트테스트를 그 엘리먼트가 최상단에서
+-- 가로채서, 우클릭 컨텍스트 메뉴를 비롯한 월드 입력이 그 아래 게임 화면으로
+-- 전달되지 않는다(실제로 겪은 증상 -- 블러드문 진행 중 우클릭이 안 먹음).
+-- bombard.lua 의 DOTex(kaboom 플래시)와 동일하게, UI 엘리먼트 트리에 아예
+-- 들어가지 않는 순수 렌더 훅(OnPreUIDraw + UIManager.DrawTexture)으로 그리면
+-- 입력을 가로챌 여지 자체가 없다.
+local TINT_TEX_PATH = "media/ui/BloodMoon_Tint.png"
+
+local BloodMoonTint = {}
+BloodMoonTint.tex          = nil
+BloodMoonTint.texTried     = false
+BloodMoonTint.armed        = false
+BloodMoonTint.screenWidth  = getCore():getScreenWidth()
+BloodMoonTint.screenHeight = getCore():getScreenHeight()
+
+local function drawTint()
+    if not BloodMoonTint.armed then return end
+    if not BloodMoonTint.tex then return end
+
+    local a = PongDuBloodMoonLight.getTintAlpha()
+    if a <= 0 then return end
+    UIManager.DrawTexture(BloodMoonTint.tex, 0, 0,
+        BloodMoonTint.screenWidth, BloodMoonTint.screenHeight, a)
+end
+Events.OnPreUIDraw.Add(drawTint)
+
+Events.OnResolutionChange.Add(function(_, _, w, h)
+    BloodMoonTint.screenWidth  = w
+    BloodMoonTint.screenHeight = h
+end)
+
+local function showTint()
+    if not BloodMoonTint.texTried then
+        BloodMoonTint.texTried = true
+        BloodMoonTint.tex = getTexture(TINT_TEX_PATH)
+        if not BloodMoonTint.tex then
+            -- 에셋 미배치 폴백. 매 프레임 로그하면 스팸이므로 최초 1회만.
+            log("WARNING: tint texture not found at " .. TINT_TEX_PATH)
+        end
+    end
+    BloodMoonTint.armed = true
+end
+
+local function hideTint()
+    BloodMoonTint.armed = false
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  달빛 광원
+-- ═══════════════════════════════════════════════════════════════════════════
+-- BloodMoonTint 와 같은 렌더 훅 방식(OnPreUIDraw + UIManager.DrawTexture)이지만
+-- 화면 전체로 늘리지 않고 좌상단 코너에 고정 크기로 앵커한다. 텍스쳐
+-- (media/ui/BloodMoon_Moon.png) 자체가 좌상단에 몰린 그라데이션이라(비네트로
+-- 쓰던 걸 대칭형으로 새로 만들면서 원본은 놀리고 있었다), 이렇게 원본 비율
+-- 그대로 작게 그리면 "그 코너에서 핏빛 달이 번진다"는 초점 요소가 된다.
+-- 다른 코너에 앵커하려면 텍스쳐를 뒤집어야 하는데 UIManager.DrawTexture 는
+-- flip 을 지원하지 않아(인자에 회전/반전이 없다) 좌상단이 가장 자연스럽다.
+local MOON_TEX_PATH   = "media/ui/BloodMoon_Moon.png"
+local MOON_WIDTH_FRAC = 0.38            -- 화면 너비 대비 광원 박스 폭
+local MOON_ASPECT     = 1536 / 1024     -- 원본 텍스쳐 종횡비(3:2). 높이 계산용
+
+local BloodMoonMoon = {}
+BloodMoonMoon.tex      = nil
+BloodMoonMoon.texTried = false
+BloodMoonMoon.armed    = false
+BloodMoonMoon.width    = 0
+BloodMoonMoon.height   = 0
+
+local function recalcMoonSize(screenW)
+    BloodMoonMoon.width  = screenW * MOON_WIDTH_FRAC
+    BloodMoonMoon.height = BloodMoonMoon.width / MOON_ASPECT
+end
+recalcMoonSize(getCore():getScreenWidth())
+
+local function drawMoon()
+    if not BloodMoonMoon.armed then return end
+    if not BloodMoonMoon.tex then return end
+
+    local a = PongDuBloodMoonLight.getMoonAlpha()
+    if a <= 0 then return end
+    UIManager.DrawTexture(BloodMoonMoon.tex, 0, 0,
+        BloodMoonMoon.width, BloodMoonMoon.height, a)
+end
+Events.OnPreUIDraw.Add(drawMoon)
+
+Events.OnResolutionChange.Add(function(_, _, w, h)
+    recalcMoonSize(w)
+end)
+
+local function showMoon()
+    if not BloodMoonMoon.texTried then
+        BloodMoonMoon.texTried = true
+        BloodMoonMoon.tex = getTexture(MOON_TEX_PATH)
+        if not BloodMoonMoon.tex then
+            log("WARNING: moon texture not found at " .. MOON_TEX_PATH)
+        end
+    end
+    BloodMoonMoon.armed = true
+end
+
+local function hideMoon()
+    BloodMoonMoon.armed = false
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 --  시작 / 종료
 -- ═══════════════════════════════════════════════════════════════════════════
-local START_LINE_COUNT = 5   -- IGUI_donation_blood_moon_start1..5
-local END_LINE_COUNT   = 5   -- IGUI_donation_blood_moon_end1..5
+local START_LINE_COUNT     = 5   -- IGUI_donation_blood_moon_start1..5
+local END_LINE_COUNT       = 5   -- IGUI_donation_blood_moon_end1..5
+local EXTENDED_LINE_COUNT  = 5   -- IGUI_donation_blood_moon_extended1..5
+
+-- 발동음. scripts/t3_rewards_sounds.txt 에 정의돼 있다.
+-- 호드 나이트 예약음(pongdu_heartbeat)과 공유하다가 늑대 울음으로 분리했다.
+local START_SOUND = "pongdu_howling"
+
+-- 연장음. 진행 중에 추가 후원이 들어와 연장될 때만 재생한다 -- 최초 발동음과
+-- 다른 소리를 써서 "이미 블러드문 중인데 또 늘어났다"를 구분할 수 있게 한다.
+local EXTEND_SOUND = "pongdu_creepy_forest"
 
 -- Say 는 사망/미생성 타이밍에 걸릴 수 있어 pcall 로 감싼다(hordenight 과 동일).
 local function sayRandomLine(prefix, count)
@@ -574,9 +564,22 @@ local function sayRandomLine(prefix, count)
     pcall(function() p:Say(getText(key)) end)
 end
 
+-- ── 연출 훅 ─────────────────────────────────────────────────────────────────
+-- 조명은 shared/PongDuBloodMoonLight.lua 가 담당하고, 서버가 아니라 각 클라가
+-- 자기 화면에 매 틱 적용한다. SP/MP 구분 없이 여기가 유일한 진입점이다
+-- (전용서버 프로세스에서는 모듈이 스스로 no-op 이 된다).
+local function fxSync()
+    PongDuBloodMoonLight.arm(_endHours)
+end
+
+-- 서버 End 브로드캐스트 / 클라 자체 타임아웃 / OnDisconnect 세 경로에서
+-- 들어오므로 멱등이어야 한다. disarm 은 _armed 가드로 멱등이다.
+local function fxStop()
+    PongDuBloodMoonLight.disarm()
+end
+
 -- remainMin: 지금부터 남은 인게임 분. totalMin: 이벤트 전체 길이(툴팁 클램프용).
--- 이미 진행 중이면 종료 시각만 갱신한다(중복 후원 = 연장). 조명/좀비는 이미
--- 걸려 있으므로 재적용하지 않는다.
+-- 이미 진행 중이면 종료 시각만 갱신한다(중복 후원 = 연장).
 function _a.startLocal(remainMin, totalMin, sender)
     remainMin = tonumber(remainMin) or 0
     if remainMin <= 0 then
@@ -586,27 +589,29 @@ function _a.startLocal(remainMin, totalMin, sender)
 
     local wasActive = _active
 
-    -- 상태를 갱신하기 전에 현재 강도를 먼저 읽는다. 이 값이 새 상승 구간의
-    -- 시작점이 되어 연장 순간에 밝기가 튀지 않는다.
-    local p0 = 0
-    if wasActive then p0 = envelope() end
-
     _totalMin = math.max(tonumber(totalMin) or remainMin, remainMin)
     _active   = true
-    rearm(remainMin / 60, p0)
+    _endHours = getGameTime():getWorldAgeHours() + remainMin / 60
+
+    -- 연장 시에도 불러야 한다(현재 강도에서 이어서 다시 피크로 올라간다).
+    fxSync()
 
     if wasActive then
+        local audio = getSoundManager():PlaySound(EXTEND_SOUND, false, 1.0)
+        if audio then audio:setVolume(0.7) end
+        sayRandomLine("extended", EXTENDED_LINE_COUNT)
+
         log("EXTENDED remainGameMin=" .. tostring(remainMin)
-            .. " resumeFrom=" .. tostring(p0)
             .. " sender=" .. tostring(sender))
         return
     end
 
-    snapshotLight()
     showTimer()
+    showTint()
+    showMoon()
     sayRandomLine("start", START_LINE_COUNT)
 
-    local audio = getSoundManager():PlaySound("pongdu_heartbeat", false, 1.0)
+    local audio = getSoundManager():PlaySound(START_SOUND, false, 1.0)
     if audio then audio:setVolume(0.7) end
 
     log("START remainGameMin=" .. tostring(remainMin)
@@ -623,12 +628,10 @@ function _a.stopLocal()
     _active   = false
     _endHours = nil
     _totalMin = 0
-    _env      = 0
-    _rampP0   = 0
-    -- 정상 종료면 이 시점의 조명은 이미 p=0(원본값)까지 내려와 있다. 서버
-    -- End 브로드캐스트로 조기 종료된 경우에만 여기서 눈에 띄게 끊긴다.
-    restoreLight()
+    fxStop()
     hideTimer()
+    hideTint()
+    hideMoon()
     sayRandomLine("end", END_LINE_COUNT)
     log("END -- reverting zombies")
     -- 좀비 복원은 아래 스윕이 이어서 처리한다(다음 틱부터 즉시 시작).
@@ -639,13 +642,8 @@ end
 --  틱
 -- ═══════════════════════════════════════════════════════════════════════════
 -- 종료 판정을 클라도 자체적으로 한다. 서버 End 브로드캐스트가 유실되거나
--- 서버가 죽어도 조명/좀비가 영구히 남지 않게 하기 위한 안전망이다.
+-- 서버가 죽어도 좀비가 영구히 스프린터로 남지 않게 하기 위한 안전망이다.
 local function onTick()
-    -- 렌더(drawTint)는 이 값을 그대로 읽는다. 프레임마다 게임시각을 다시
-    -- 조회하지 않게 여기서 한 번만 계산해 캐싱한다.
-    _env = envelope()
-    updateLight(_env)
-
     -- 무들박스 밀림/복귀와 아이콘 슬라이드는 패널이 없어도 계속 돌아야 한다
     -- (사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 호드나이트가 같은 틱에
     -- 또 호출해도 멱등이다.
@@ -663,17 +661,16 @@ local function onTick()
     sweep()
 end
 Events.OnTick.Add(onTick)
-Events.OnPreUIDraw.Add(drawTint)
 
--- 게임 종료/캐릭터 사망으로 세션이 끝날 때 조명이 남지 않게 되돌린다.
--- (ClimateManager 는 월드 단위라 재접속 시 초기화되지만, 로컬 호스트에서
---  같은 프로세스로 재접속하는 경우가 있어 명시적으로 정리한다)
+-- 게임 종료/캐릭터 사망으로 세션이 끝날 때 연출이 남지 않게 정리한다.
 Events.OnDisconnect.Add(function()
-    restoreLight()
+    fxStop()
     hideTimer()
-    _active = false
-    _env    = 0
-    _rampP0 = 0
+    hideTint()
+    hideMoon()
+    _active   = false
+    _endHours = nil
+    _totalMin = 0
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════

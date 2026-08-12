@@ -713,11 +713,6 @@ option PongDu.BloodMoon_LightStrength = {
     page = PongDu_Server, translation = PongDu_BloodMoon_LightStrength,
 }
 
-option PongDu.BloodMoon_TintStrength = {
-    type = integer, min = 0, max = 100, default = 0,
-    page = PongDu_Server, translation = PongDu_BloodMoon_TintStrength,
-}
-
 option PongDu.BloodMoon_ShowIndicator = {
     type = boolean, default = true,
     page = PongDu_Server, translation = PongDu_BloodMoon_ShowIndicator,
