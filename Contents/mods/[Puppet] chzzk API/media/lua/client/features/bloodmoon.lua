@@ -544,8 +544,9 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 --  시작 / 종료
 -- ═══════════════════════════════════════════════════════════════════════════
-local START_LINE_COUNT = 5   -- IGUI_donation_blood_moon_start1..5
-local END_LINE_COUNT   = 5   -- IGUI_donation_blood_moon_end1..5
+local START_LINE_COUNT     = 5   -- IGUI_donation_blood_moon_start1..5
+local END_LINE_COUNT       = 5   -- IGUI_donation_blood_moon_end1..5
+local EXTENDED_LINE_COUNT  = 5   -- IGUI_donation_blood_moon_extended1..5
 
 -- 발동음. scripts/t3_rewards_sounds.txt 에 정의돼 있다.
 -- 호드 나이트 예약음(pongdu_heartbeat)과 공유하다가 늑대 울음으로 분리했다.
@@ -598,6 +599,7 @@ function _a.startLocal(remainMin, totalMin, sender)
     if wasActive then
         local audio = getSoundManager():PlaySound(EXTEND_SOUND, false, 1.0)
         if audio then audio:setVolume(0.7) end
+        sayRandomLine("extended", EXTENDED_LINE_COUNT)
 
         log("EXTENDED remainGameMin=" .. tostring(remainMin)
             .. " sender=" .. tostring(sender))

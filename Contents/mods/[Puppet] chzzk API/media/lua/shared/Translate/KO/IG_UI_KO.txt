@@ -170,7 +170,7 @@ IGUI_KO = {
     IGUI_donation_blood_moon_start1 = "달이... 피처럼 붉어지고 있어.",
     IGUI_donation_blood_moon_start2 = "하늘이 이상해. 놈들이 날뛰기 시작했다!",
     IGUI_donation_blood_moon_start3 = "저 빛깔은 뭐야... 좋은 징조는 아니야.",
-    IGUI_donation_blood_moon_start4 = "이런, 붉은 달이다... 위험해지겠어!!",
+    IGUI_donation_blood_moon_start4 = "놈들이 전부 달리기 시작했어!!",
     IGUI_donation_blood_moon_start5 = "붉은 달이다... 오늘 밤은 못 버틸지도 몰라.",
 
     IGUI_donation_blood_moon_end1 = "붉은 기운이 걷혔다...",
@@ -178,6 +178,12 @@ IGUI_KO = {
     IGUI_donation_blood_moon_end3 = "하늘이 원래대로 돌아왔어.",
     IGUI_donation_blood_moon_end4 = "끝났나... 아직 심장이 뛰는군.",
     IGUI_donation_blood_moon_end5 = "다시는 겪고 싶지 않은 밤이었어.",
+
+    IGUI_donation_blood_moon_extended1 = "젠장, 핏빛 밤이 끝나질 않아.",
+    IGUI_donation_blood_moon_extended2 = "또야...? 언제까지 버텨야 하는 거야.",
+    IGUI_donation_blood_moon_extended3 = "하늘이 다시 붉어지고 있어. 아직 안 끝났어.",
+    IGUI_donation_blood_moon_extended4 = "이 밤이 영원히 안 끝날 것 같아.",
+    IGUI_donation_blood_moon_extended5 = "무슨... 끝이 나질 않잖아.",
 
 
 
