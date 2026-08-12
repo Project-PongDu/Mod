@@ -48,11 +48,6 @@ option PongDu.Tier_vaccine = {
     page = PongDu_Main, translation = PongDu_Tier_vaccine,
 }
 
-option PongDu.Tier_medical_box = {
-    type = integer, min = 0, max = 1000000, default = 5500,
-    page = PongDu_Main, translation = PongDu_Tier_medical_box,
-}
-
 option PongDu.Tier_vehicle_drop = {
     type = integer, min = 0, max = 1000000, default = 7000,
     page = PongDu_Main, translation = PongDu_Tier_vehicle_drop,
@@ -103,15 +98,21 @@ option PongDu.Tier_rise_up_dead_man = {
     page = PongDu_Main, translation = PongDu_Tier_rise_up_dead_man,
 }
 
+option PongDu.Tier_medical_box = {
+    type = integer, min = 0, max = 1000000, default = 5500,
+    page = PongDu_Main, translation = PongDu_Tier_medical_box,
+}
+
+option PongDu.Tier_blood_moon = {
+    type = integer, min = 0, max = 1000000, default = 66600,
+    page = PongDu_Main, translation = PongDu_Tier_blood_moon,
+}
+
 option PongDu.Tier_horde_night = {
     type = integer, min = 0, max = 1000000, default = 100000,
     page = PongDu_Main, translation = PongDu_Tier_horde_night,
 }
 
-option PongDu.Tier_blood_moon = {
-    type = integer, min = 0, max = 1000000, default = 150000,
-    page = PongDu_Main, translation = PongDu_Tier_blood_moon,
-}
 
 option PongDu.Tier_bandit_melee = {
     type = integer, min = 0, max = 1000000, default = 0,
