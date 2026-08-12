@@ -116,15 +116,15 @@ local iconTexPath = {
     ["vehicle_drop"]         = "media/textures/donation/vehicle_drop.png",
     ["mutant_spawn"]         = "media/textures/donation/mutant_spawn.png",
     ["rise_up_dead_man"]     = "media/textures/donation/rise_up_dead_man.png",
-    ["horde_night"]          = "media/textures/donation/horde_night.png",
-    ["blood_moon"]           = "media/textures/donation/blood_moon.png",
     ["zombie_rain"]          = "media/textures/donation/zombie_rain.png",
     ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
     ["fire_support"]         = "media/textures/donation/fire_support.png",
     
     
+    ["medical_box"]          = "media/textures/donation/medical_box.png",
+    ["blood_moon"]           = "media/textures/donation/blood_moon.png",
+    ["horde_night"]          = "media/textures/donation/horde_night.png",
     
-    -- ["medical_box"]          = "media/textures/donation/medical_box.png",
     -- ["revive_ticket"]        = "media/textures/donation/revive_ticket.png",
     -- ["secret_passage_kit"]   = "media/textures/donation/secret_passage_kit.png",
     
