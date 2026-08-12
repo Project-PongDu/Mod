@@ -53,12 +53,48 @@
 -- 이벤트 타임라인(_endHours)은 어차피 모든 클라가 이미 들고 있다.
 --
 -- 전용서버 프로세스는 렌더링을 하지 않으므로 이 모듈이 아무 일도 하지 않는다.
+--
+-- ═══ 안개 / 포화도 저하 ════════════════════════════════════════════════════
+-- globalLight 와 같은 곡선을 타고 자연값 -> FOG_PEAK / DESAT_PEAK 로 올라간다.
+-- 이쪽은 ClimateFloat 채널(FLOAT_FOG_INTENSITY / FLOAT_DESATURATION)이고
+-- 레버 구조는 ClimateColor 와 완전히 동일하다(override / admin / modded).
+-- 안개는 finalValue 가 updateFx() 에서 weatherFX 로 흘러가야 실제 안개 스프라이트가
+-- 나오므로, finalValue 만 쓰면 안 되고 반드시 override 를 써서 다음 프레임
+-- calculate() 를 거치게 해야 한다.
+--
+-- ═══ 패킷 프레임 1프레임 점멸 ══════════════════════════════════════════════
+-- MP 클라에서 기후 패킷이 오는 프레임에 붉은빛이 한 프레임 통째로 빠진다.
+-- 원인은 networkLerp 계산의 float 정밀도 버그다(ClimateManager.java:826-834):
+--     if ((float)long0 < (float)networkUpdateStamp + networkLerpTime)
+-- 밀리초 epoch(~1.79e12)를 float 로 캐스팅하면 ULP 가 131072ms(~131초)라
+-- 오른쪽의 +500ms(networkLerpTime)가 반올림으로 통째로 사라진다. 즉 조건은
+-- 사실상 항상 false 이고 networkLerp 는 늘 1.0 이다 -- 5초 보간이 죽어 있다.
+-- 그래서 패킷이 온 프레임의 순서가 이렇게 된다:
+--     ① 패킷 수신    : internalValue = finalValue(핏빛), override = 자연광
+--     ② climate update: interpolate = networkLerp = 1.0
+--     ③ calculate()  : finalValue = lerp(1.0, internal, override) = 자연광
+--     ④ OnTick(우리) : override 를 다시 핏빛으로 되돌림
+--     ⑤ 렌더         : finalValue 를 읽음 -> ③의 자연광
+-- ④가 ⑤보다 먼저인데 ③이 이미 finalValue 를 갈아엎은 뒤라 한 프레임이 샌다.
+-- 조명 변화는 LightingThread 를 통해 사각형 단위로 번져 나갔다 돌아오므로
+-- 체감상 0.1~0.3초짜리 점멸로 보인다.
+--
+-- 해결: override 뿐 아니라 finalValue 에도 같은 값을 직접 써넣는다. 우리 틱은
+-- 렌더보다 앞이므로(IngameState.java:1309-1311, IsoWorld.update 이후 OnTick,
+-- 그 뒤 render) 그 프레임 렌더가 우리 값을 본다. finalValue 는 다음 프레임
+-- calculate() 가 어차피 재계산하므로 부작용이 없다.
+-- 다만 updateFx()/SkyBox 는 ClimateManager.update() 안에서 이미 돌아간 뒤라
+-- 하늘 색만 한 프레임 튀는 건 엔진 훅 없이는 못 막는다(지상 조명은 해결됨).
 
 PongDuBloodMoonLight = PongDuBloodMoonLight or {}
 local _m = PongDuBloodMoonLight
 
 -- ── 상수 ────────────────────────────────────────────────────────────────────
 local COLOR_GLOBAL_LIGHT = 0   -- ClimateManager.COLOR_GLOBAL_LIGHT (133줄)
+
+-- ClimateManager.FLOAT_* (118-131줄)
+local FLOAT_DESATURATION  = 0
+local FLOAT_FOG_INTENSITY = 5
 
 -- 네 번째 성분은 RGB 가 아니라 블렌드 강도다(ClimateColorInfo).
 -- 실내는 창문 마스크 경로로 따로 칠해지므로 실외보다 약하게 잡는다.
@@ -68,6 +104,11 @@ local BLOOD_INT = { 0.55, 0.05, 0.07, 0.45 }
 -- 혼합 최대치. 1.0 이면 자연광이 완전히 사라져 낮/밤 명암 자체가 없어진다.
 -- 0.7 이면 자연광이 30% 남아 낮은 밝은 핏빛, 밤은 어두운 핏빛으로 구분된다.
 local PEAK = 0.7
+
+-- 안개/포화도저하 피크값. 조명의 PEAK 와 달리 "자연광을 남긴다"는 개념이 없어서
+-- 그대로 목표치다. 자연값이 이미 피크보다 높으면 낮추지 않는다(아래 clamp 참조).
+local FOG_PEAK   = 0.35
+local DESAT_PEAK = 1.0
 
 -- ── 강도 곡선 ───────────────────────────────────────────────────────────────
 --   0% ~ 25%  : 자연광 -> 블러드문 (상승)
@@ -105,6 +146,14 @@ local _appliedT  = nil   -- SP 경로에서 마지막으로 세팅한 interpolat
 local _base      = nil   -- MP 경로에서 추적 중인 자연광 { ex = {...}, inr = {...} }
 local _written   = nil   -- MP 경로에서 마지막으로 써넣은 값 (읽어온 값)
 local _mode      = nil   -- "sp" | "mp" | "admin"
+
+-- 안개/포화도 채널. 조명과 구조가 같아 상태만 채널별로 들고 간다.
+--   base    : 추적 중인 자연값
+--   written : 마지막으로 써넣은 값 (MP 경로의 base 추적용)
+local _fx = {
+    { id = FLOAT_FOG_INTENSITY, peak = FOG_PEAK,   base = nil, written = nil },
+    { id = FLOAT_DESATURATION,  peak = DESAT_PEAK, base = nil, written = nil },
+}
 
 local function gameHours()
     return getGameTime():getWorldAgeHours()
@@ -198,9 +247,13 @@ end
 
 -- ── MP 클라 적용 ────────────────────────────────────────────────────────────
 -- override 의 색만 우리가 계산해 덮어쓴다. interpolate 는 엔진이 networkLerp 로
--- 관리하므로 건드리지 않는다 -- 패킷 직후 5초 동안은 그 값이 1 미만이라 직전
--- 프레임 색에서 새 색으로 자연스럽게 흘러가고, 그 뒤로는 1.0 고정이라 우리가
--- 쓴 색이 그대로 화면에 나온다.
+-- 관리하므로 건드리지 않는다 -- 어차피 매 프레임 덮어써지고, 실제로는 float
+-- 정밀도 버그 때문에 늘 1.0 이라 우리가 쓴 색이 그대로 화면에 나온다
+-- (파일 상단 "패킷 프레임 1프레임 점멸" 항목 참조).
+--
+-- finalValue 에도 같은 값을 써넣는다. 패킷이 온 프레임에는 calculate() 가
+-- 우리보다 먼저 돌면서 finalValue 를 자연광으로 갈아엎어 놓기 때문에, override
+-- 만 되돌려서는 그 프레임 렌더를 못 막는다. 이게 점멸의 원인이었다.
 local function applyMP(cc, t)
     local ov = cc:getOverride()
     local cur = readInfo(ov)
@@ -213,6 +266,88 @@ local function applyMP(cc, t)
 
     writeBlend(ov, _base, t)
     _written = readInfo(ov)
+
+    -- 이번 프레임 렌더용. 다음 프레임 calculate() 가 어차피 재계산한다.
+    writeBlend(cc:getFinalValue(), _base, t)
+end
+
+-- ── 안개 / 포화도 저하 ──────────────────────────────────────────────────────
+-- 조명과 같은 곡선(k = 0~1)을 타고 자연값 -> peak 로 올라간다.
+-- 자연값이 이미 peak 보다 크면(폭풍 안개 등) 낮추지 않는다 -- 이벤트가 켜졌다고
+-- 폭풍 안개가 걷히면 그게 더 이상하다.
+local function fxTarget(base, peak, k)
+    local v = base + (peak - base) * k
+    if v < base then return base end
+    return v
+end
+
+local function climateFloat(id)
+    local cm = getClimateManager()
+    if not cm then return nil end
+    return cm:getClimateFloat(id)
+end
+
+-- MP 클라: 색 채널과 완전히 같은 패턴이다. override 를 읽어 base 를 추적하고,
+-- override + finalValue 양쪽에 써넣는다.
+--
+-- 안개는 finalValue 만 써서는 안 된다. 실제 안개 스프라이트는
+-- updateFx() -> weatherFX.setFogIntensity(finalValue) 로 나가는데 이건
+-- ClimateManager.update() 안에서 우리보다 먼저 돌기 때문에, override 를 써서
+-- 다음 프레임 calculate() 를 거치게 해야 한 프레임 뒤에 반영된다.
+local function applyFxMP(k)
+    for i = 1, #_fx do
+        local st = _fx[i]
+        local cf = climateFloat(st.id)
+        if cf then
+            local cur = cf:getOverride()
+            if st.written == nil or cur ~= st.written then
+                st.base = cur
+            end
+            local target = fxTarget(st.base, st.peak, k)
+            cf:setOverride(target, cf:getOverrideInterpolate())
+            st.written = cf:getOverride()
+            cf:setFinalValue(target)
+        end
+    end
+end
+
+-- SP: internalValue 가 진짜 자연값이므로 base 추적이 필요 없다.
+-- interpolate = 1 로 두면 finalValue = override 라 우리가 계산한 값이 그대로 간다.
+--
+-- 한계: 이벤트 중에는 바닐라 WeatherPeriod 가 거는 안개/포화도 override 를
+-- 덮어쓴다(WeatherPeriod.java:948, 1117). 종료 시 override 를 끄면 다음 기후
+-- 틱(인게임 1분 이내)에 WeatherPeriod 가 다시 걸어주므로 영구 손상은 없다.
+local function applyFxSP(k)
+    for i = 1, #_fx do
+        local cf = climateFloat(_fx[i].id)
+        if cf then
+            if k <= 0 then
+                cf:setEnableOverride(false)
+            else
+                cf:setOverride(fxTarget(cf:getInternalValue(), _fx[i].peak, k), 1.0)
+            end
+        end
+    end
+end
+
+local function clearFx()
+    for i = 1, #_fx do
+        local st = _fx[i]
+        local cf = climateFloat(st.id)
+        if cf then
+            if _mode == "mp" then
+                -- 색 채널과 같은 이유로 끄지 않고 자연값을 그대로 써넣는다.
+                if st.base then
+                    cf:setOverride(st.base, cf:getOverrideInterpolate())
+                    cf:setFinalValue(st.base)
+                end
+            else
+                pcall(function() cf:setEnableOverride(false) end)
+            end
+        end
+        st.base    = nil
+        st.written = nil
+    end
 end
 
 -- 이벤트 종료 시 복구.
@@ -224,12 +359,16 @@ local function clearLight()
             -- internalValue 는 우리가 물들여놓은 직전 finalValue 다. 다음 패킷이
             -- 올 때까지(최대 10 인게임분) 핏빛이 얼어붙는다. 그러니 끄지 말고
             -- 추적해둔 자연광을 그대로 써넣는다 -- 즉시 원상복구된다.
-            if _base then writeBlend(cc:getOverride(), _base, 0) end
+            if _base then
+                writeBlend(cc:getOverride(), _base, 0)
+                writeBlend(cc:getFinalValue(), _base, 0)
+            end
         else
             pcall(function() cc:setEnableOverride(false) end)
             pcall(function() cc:setEnableAdmin(false) end)
         end
     end
+    clearFx()
     _appliedT  = nil
     _written   = nil
     _base      = nil
@@ -266,14 +405,24 @@ local function toBlend(p)
     return p * PEAK * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
 end
 
+-- 안개/포화도용 계수. 조명과 달리 "자연광을 얼마나 남길지"의 개념이 없어서
+-- PEAK 를 곱하지 않는다. 서버가 조명 세기를 낮추면 같이 낮아지는 게 맞으므로
+-- 샌드박스 스케일은 공유한다.
+local function toFx(p)
+    return p * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
+end
+
 local function applyNow()
     local cc = globalLightColor()
     if not cc then return end
     local t = toBlend(_intensity)
+    local k = toFx(_intensity)
     if _mode == "mp" then
         applyMP(cc, t)
+        applyFxMP(k)
     else
         applySP(cc, t)
+        applyFxSP(k)
     end
 end
 
@@ -313,7 +462,9 @@ function _m.arm(endHours)
     llog((_rampFrom > 0 and "REARM" or "ARM")
         .. " spanGameMin=" .. tostring(span * 60)
         .. " resumeFrom=" .. tostring(_rampFrom)
-        .. " peakBlend=" .. tostring(toBlend(1)))
+        .. " peakBlend=" .. tostring(toBlend(1))
+        .. " peakFog=" .. tostring(fxTarget(0, FOG_PEAK, toFx(1)))
+        .. " peakDesat=" .. tostring(fxTarget(0, DESAT_PEAK, toFx(1))))
 
     applyNow()
 end

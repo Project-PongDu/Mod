@@ -251,6 +251,22 @@ module Base
         }
     }
 
+    /*
+        블러드문 발동음.
+        호드 나이트 예약 알림음(pongdu_heartbeat)과 공유하다가 분리했다
+        (features/bloodmoon.lua 의 startLocal, START_SOUND 상수).
+    */
+    sound pongdu_howling
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/howling.wav,
+            volume = 0.8,
+        }
+    }
+
     /* 
         호드 나이트 발동 효과음. 
         예약 알림음(pongdu_heartbeat)과 달리
