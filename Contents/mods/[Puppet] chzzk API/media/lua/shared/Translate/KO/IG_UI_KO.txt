@@ -170,7 +170,7 @@ IGUI_KO = {
     IGUI_donation_blood_moon_start1 = "달이... 피처럼 붉어지고 있어.",
     IGUI_donation_blood_moon_start2 = "하늘이 이상해. 놈들이 날뛰기 시작했다!",
     IGUI_donation_blood_moon_start3 = "저 빛깔은 뭐야... 좋은 징조는 아니야.",
-    IGUI_donation_blood_moon_start4 = "놈들이 전부 달리기 시작했어!!",
+    IGUI_donation_blood_moon_start4 = "이런, 붉은 달이다... 위험해지겠어!!",
     IGUI_donation_blood_moon_start5 = "붉은 달이다... 오늘 밤은 못 버틸지도 몰라.",
 
     IGUI_donation_blood_moon_end1 = "붉은 기운이 걷혔다...",

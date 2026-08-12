@@ -170,6 +170,14 @@ local DARK_PEAK = 0.12
 -- 0.35 -> 0.45 로 올린 건 나머지 절반(단순히 낮았던 알파) 보정이다.
 local TINT_PEAK = 0.45
 
+-- 달빛 광원 텍스쳐(client/features/bloodmoon.lua 의 BloodMoonMoon) 알파 피크값.
+-- 코너에 몰려있던 원본 그라데이션(구 BloodMoon_Tint.png)을 화면 전체에 늘리지
+-- 않고 media/ui/BloodMoon_Moon.png 로 그대로 살려서, 화면 좌상단 코너에 고정
+-- 크기로 앵커해 "그 쪽에서 핏빛 달이 번진다"는 초점 요소로 쓴다. 화면 전체를
+-- 덮는 비네트(TINT_PEAK)보다 훨씬 진하게 잡아도 된다 -- 시야 대부분을 가리는
+-- 게 아니라 한 구석의 장식 요소라 과해도 부담이 적다.
+local MOON_PEAK = 0.9
+
 -- ── 강도 곡선 ───────────────────────────────────────────────────────────────
 --   0% ~ 25%  : 자연광 -> 블러드문 (상승)
 --  25% ~ 75%  : 최대 유지
@@ -221,6 +229,10 @@ local _fx = {
 -- UI 틴트 텍스쳐용 알파. ClimateManager 채널이 아니라 클라이언트가 직접 그리는
 -- 값이라 base/written 추적이 필요 없다 -- 자연값이라는 개념 자체가 없다.
 local _tintAlpha = 0
+
+-- 달빛 광원 텍스쳐(BloodMoon_Moon.png)용 알파. 틴트와 같은 이유로 base 추적이
+-- 필요 없다 -- 둘 다 같은 _intensity 곡선을 공유하되 피크(MOON_PEAK)만 다르다.
+local _moonAlpha = 0
 
 local function gameHours()
     return getGameTime():getWorldAgeHours()
@@ -455,6 +467,7 @@ local function clearLight()
     _base      = nil
     _intensity = 0
     _tintAlpha = 0
+    _moonAlpha = 0
     llog("light cleared (natural light restored)")
 end
 
@@ -499,6 +512,13 @@ local function toTint(p)
     return p * TINT_PEAK * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
 end
 
+-- 달빛 광원 텍스쳐용 계수. 틴트와 같은 스케일을 공유하되 자체 피크(MOON_PEAK)를
+-- 곱한다 -- 화면 전체 비네트보다 훨씬 진하게 잡아도 되는 이유는 MOON_PEAK
+-- 정의 위 주석 참조.
+local function toMoon(p)
+    return p * MOON_PEAK * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
+end
+
 local function applyNow()
     local cc = globalLightColor()
     if not cc then return end
@@ -514,6 +534,7 @@ local function applyNow()
     -- UI 틴트는 ClimateManager 채널이 아니라 값 하나만 있으면 되므로
     -- MP/SP 분기 없이 여기서 바로 계산한다.
     _tintAlpha = toTint(_intensity)
+    _moonAlpha = toMoon(_intensity)
 end
 
 -- ── 공개 API ────────────────────────────────────────────────────────────────
@@ -559,7 +580,8 @@ function _m.arm(endHours)
         -- 못 낸다. DARK_PEAK 는 "자연값이 이보다 밝을 때 내려가는 바닥"이므로
         -- 그대로 로그에 남긴다 -- 실제 적용치는 자연값에 따라 다를 수 있다.
         .. " peakDarkFloor=" .. tostring(DARK_PEAK)
-        .. " peakTint=" .. tostring(toTint(1)))
+        .. " peakTint=" .. tostring(toTint(1))
+        .. " peakMoon=" .. tostring(toMoon(1)))
 
     applyNow()
 end
@@ -581,10 +603,16 @@ function _m.getIntensity()
     return _intensity
 end
 
--- UI 틴트 텍스쳐 알파. client/features/bloodmoon.lua 의 BloodMoonTint 패널이
--- 매 렌더 프레임 이 값을 읽어 drawTextureScaled 의 알파로 그대로 넘긴다.
+-- UI 틴트 텍스쳐 알파. client/features/bloodmoon.lua 가 OnPreUIDraw 훅에서
+-- 매 프레임 이 값을 읽어 UIManager.DrawTexture 의 알파로 그대로 넘긴다.
 function _m.getTintAlpha()
     return _tintAlpha
+end
+
+-- 달빛 광원 텍스쳐(BloodMoon_Moon.png) 알파. 화면 좌상단 코너에 고정 크기로
+-- 앵커된 BloodMoonMoon 이 매 프레임 이 값을 읽는다.
+function _m.getMoonAlpha()
+    return _moonAlpha
 end
 
 -- ── 틱 ──────────────────────────────────────────────────────────────────────

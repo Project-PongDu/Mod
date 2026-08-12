@@ -485,6 +485,63 @@ local function hideTint()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
+--  달빛 광원
+-- ═══════════════════════════════════════════════════════════════════════════
+-- BloodMoonTint 와 같은 렌더 훅 방식(OnPreUIDraw + UIManager.DrawTexture)이지만
+-- 화면 전체로 늘리지 않고 좌상단 코너에 고정 크기로 앵커한다. 텍스쳐
+-- (media/ui/BloodMoon_Moon.png) 자체가 좌상단에 몰린 그라데이션이라(비네트로
+-- 쓰던 걸 대칭형으로 새로 만들면서 원본은 놀리고 있었다), 이렇게 원본 비율
+-- 그대로 작게 그리면 "그 코너에서 핏빛 달이 번진다"는 초점 요소가 된다.
+-- 다른 코너에 앵커하려면 텍스쳐를 뒤집어야 하는데 UIManager.DrawTexture 는
+-- flip 을 지원하지 않아(인자에 회전/반전이 없다) 좌상단이 가장 자연스럽다.
+local MOON_TEX_PATH   = "media/ui/BloodMoon_Moon.png"
+local MOON_WIDTH_FRAC = 0.38            -- 화면 너비 대비 광원 박스 폭
+local MOON_ASPECT     = 1536 / 1024     -- 원본 텍스쳐 종횡비(3:2). 높이 계산용
+
+local BloodMoonMoon = {}
+BloodMoonMoon.tex      = nil
+BloodMoonMoon.texTried = false
+BloodMoonMoon.armed    = false
+BloodMoonMoon.width    = 0
+BloodMoonMoon.height   = 0
+
+local function recalcMoonSize(screenW)
+    BloodMoonMoon.width  = screenW * MOON_WIDTH_FRAC
+    BloodMoonMoon.height = BloodMoonMoon.width / MOON_ASPECT
+end
+recalcMoonSize(getCore():getScreenWidth())
+
+local function drawMoon()
+    if not BloodMoonMoon.armed then return end
+    if not BloodMoonMoon.tex then return end
+
+    local a = PongDuBloodMoonLight.getMoonAlpha()
+    if a <= 0 then return end
+    UIManager.DrawTexture(BloodMoonMoon.tex, 0, 0,
+        BloodMoonMoon.width, BloodMoonMoon.height, a)
+end
+Events.OnPreUIDraw.Add(drawMoon)
+
+Events.OnResolutionChange.Add(function(_, _, w, h)
+    recalcMoonSize(w)
+end)
+
+local function showMoon()
+    if not BloodMoonMoon.texTried then
+        BloodMoonMoon.texTried = true
+        BloodMoonMoon.tex = getTexture(MOON_TEX_PATH)
+        if not BloodMoonMoon.tex then
+            log("WARNING: moon texture not found at " .. MOON_TEX_PATH)
+        end
+    end
+    BloodMoonMoon.armed = true
+end
+
+local function hideMoon()
+    BloodMoonMoon.armed = false
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
 --  시작 / 종료
 -- ═══════════════════════════════════════════════════════════════════════════
 local START_LINE_COUNT = 5   -- IGUI_donation_blood_moon_start1..5
@@ -549,6 +606,7 @@ function _a.startLocal(remainMin, totalMin, sender)
 
     showTimer()
     showTint()
+    showMoon()
     sayRandomLine("start", START_LINE_COUNT)
 
     local audio = getSoundManager():PlaySound(START_SOUND, false, 1.0)
@@ -571,6 +629,7 @@ function _a.stopLocal()
     fxStop()
     hideTimer()
     hideTint()
+    hideMoon()
     sayRandomLine("end", END_LINE_COUNT)
     log("END -- reverting zombies")
     -- 좀비 복원은 아래 스윕이 이어서 처리한다(다음 틱부터 즉시 시작).
@@ -606,6 +665,7 @@ Events.OnDisconnect.Add(function()
     fxStop()
     hideTimer()
     hideTint()
+    hideMoon()
     _active   = false
     _endHours = nil
     _totalMin = 0
