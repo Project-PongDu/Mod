@@ -1,21 +1,21 @@
 -- ── 블러드문 (blood_moon) 서버 ───────────────────────────────────────────────
 --
 -- 서버가 하는 일은 하나다: 언제 시작해서 언제 끝나는가.
--- 좀비 스프린터화와 인디케이터는 각 클라가 로컬로 수행한다
--- (client/features/bloodmoon.lua). 조명/화면 연출은 재설계 예정이라 현재
--- 서버에는 없다.
+-- 좀비 스프린터화, 핏빛 조명, 인디케이터는 전부 각 클라가 로컬로 수행한다
+-- (client/features/bloodmoon.lua, shared/PongDuBloodMoonLight.lua).
+--
+-- 조명까지 클라 담당인 이유: 서버에서 globalLight 를 물들이면 그 결과가 기후
+-- 패킷에 실려 나가는데, 그 패킷은 10 인게임분에 한 번만 나간다
+-- (ClimateManager.java:890, tickIsTenMins 가드). 강도 곡선이 그 해상도로
+-- 뭉개져 계단처럼 뚝뚝 오른다. 이벤트 타임라인은 어차피 모든 클라가 Start/
+-- End/State 커맨드로 들고 있으므로, 각자 매 틱 계산하는 편이 매끄럽고 종료
+-- 복구도 즉시 된다.
 --
 -- 좀비 변환을 서버가 직접 하지 않는 이유:
 -- B41 MP 에서 IsoZombie 의 권위는 소유 클라이언트에 있다. 서버에서
 -- makeInactive/DoZombieStats 로 speedType 을 바꿔도 소유 클라가 보내는 sync
 -- 패킷에 그대로 덮어써진다. 서버는 "블러드문이다"만 알리고, 판정과 실행은
 -- 각 클라가 자기 셀의 좀비에 대해 수행해야 한다.
---
--- 조명을 나중에 서버로 붙일 경우의 근거(재설계 시 참고):
--- ClimateColor.calculate() (ClimateManager.java:2762) 에서 MP 클라이언트는
--- 서버가 보낸 finalValue 를 override 로 받아 그쪽으로 lerp 하므로, 클라가
--- 로컬에서 무엇을 설정하든 다음 기후 패킷에 씻겨나간다. 즉 월드 조명은
--- 서버 단독 권위다.
 --
 -- 상태는 종료 예정 시각(인게임) 하나로 표현하고 ModData 에 얹어 서버 재시작을
 -- 넘긴다. 현실 ms 가 아니라 게임 시간을 쓰는 이유는 지속시간 자체가 인게임
@@ -132,7 +132,7 @@ end
 -- EveryOneMinute 는 인게임 1분마다 발화하므로 종료 판정 해상도로 충분하고,
 -- OnTick 과 달리 전수 루프가 없어 비용이 사실상 0 이다. 클라도 자체 타임아웃
 -- 판정을 갖고 있어(client/features/bloodmoon.lua onTick) 이 브로드캐스트가
--- 유실돼도 조명이 영구히 남지는 않는다 -- 여기는 정상 경로다.
+-- 유실돼도 효과가 영구히 남지는 않는다 -- 여기는 정상 경로다.
 local function checkExpiry()
     if not isAuthority() then return end
     local endHours = getState()

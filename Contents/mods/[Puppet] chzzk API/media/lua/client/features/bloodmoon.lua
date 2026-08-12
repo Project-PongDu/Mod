@@ -9,11 +9,9 @@ local textOutline = require("utils/textOutline")
 -- 서버 후원(PongDu_Server 탭) 계열. 서버장에게 후원이 들어오면 접속자 전원에게
 -- 일정 인게임 시간 동안 다음이 걸린다:
 --   ① 좀비 가속  : 뮤턴트/퐁듀 소유 좀비를 제외한 모든 일반좀비를 스프린터로
---   ② 무들 인디케이터로 남은 시간 표시
--- 종료 시 원상복구한다.
---
--- 조명/화면 연출은 이 버전에 없다. 재설계 예정이며, 붙일 자리는 아래
--- "연출 훅" 주석 지점이다.
+--   ② 핏빛 조명 (shared/PongDuBloodMoonLight.lua) -- 낮/밤 모두 적용
+--   ③ 무들 인디케이터로 남은 시간 표시
+-- 종료 시 전부 원상복구한다.
 --
 -- 서버(server/PongDuBloodMoonServer.lua)는 "언제 시작하고 언제 끝나는가"만
 -- 관리하고, 좀비 변환은 각 클라가 로컬로 수행한다. ①이 클라 담당인 이유는
@@ -447,12 +445,18 @@ local function sayRandomLine(prefix, count)
 end
 
 -- ── 연출 훅 ─────────────────────────────────────────────────────────────────
--- 조명/화면 연출은 재설계 예정. 시작/연장/종료 시점에 여기서 갈라 붙인다.
---   fxStart()  : 최초 시작 (연장 때는 호출되지 않는다)
---   fxStop()   : 종료 -- 반드시 멱등이어야 한다 (서버 End 브로드캐스트,
---                클라 자체 타임아웃, OnDisconnect 세 경로에서 들어온다)
-local function fxStart() end
-local function fxStop() end
+-- 조명은 shared/PongDuBloodMoonLight.lua 가 담당하고, 서버가 아니라 각 클라가
+-- 자기 화면에 매 틱 적용한다. SP/MP 구분 없이 여기가 유일한 진입점이다
+-- (전용서버 프로세스에서는 모듈이 스스로 no-op 이 된다).
+local function fxSync()
+    PongDuBloodMoonLight.arm(_endHours)
+end
+
+-- 서버 End 브로드캐스트 / 클라 자체 타임아웃 / OnDisconnect 세 경로에서
+-- 들어오므로 멱등이어야 한다. disarm 은 _armed 가드로 멱등이다.
+local function fxStop()
+    PongDuBloodMoonLight.disarm()
+end
 
 -- remainMin: 지금부터 남은 인게임 분. totalMin: 이벤트 전체 길이(툴팁 클램프용).
 -- 이미 진행 중이면 종료 시각만 갱신한다(중복 후원 = 연장).
@@ -469,6 +473,9 @@ function _a.startLocal(remainMin, totalMin, sender)
     _active   = true
     _endHours = getGameTime():getWorldAgeHours() + remainMin / 60
 
+    -- 연장 시에도 불러야 한다(현재 강도에서 이어서 다시 피크로 올라간다).
+    fxSync()
+
     if wasActive then
         log("EXTENDED remainGameMin=" .. tostring(remainMin)
             .. " sender=" .. tostring(sender))
@@ -476,7 +483,6 @@ function _a.startLocal(remainMin, totalMin, sender)
     end
 
     showTimer()
-    fxStart()
     sayRandomLine("start", START_LINE_COUNT)
 
     local audio = getSoundManager():PlaySound("pongdu_heartbeat", false, 1.0)

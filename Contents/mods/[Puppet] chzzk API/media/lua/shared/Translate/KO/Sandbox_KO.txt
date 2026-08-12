@@ -249,6 +249,8 @@ Sandbox_KO = {
 	Sandbox_PongDu_BloodMoon_DurationMin_tooltip = "블러드문이 유지되는 인게임 시간입니다(기본 120분 = 2시간). 현실 시간이 아니라 게임 시간 기준이라, 하루 길이(DayLength) 설정이나 배속을 바꿔도 체감 길이가 유지됩니다. 진행 중에 블러드문 후원이 또 들어오면 남은 시간에 이 값이 더해집니다.",
 	Sandbox_PongDu_BloodMoon_ConvertZombies = "블러드문 중 좀비 가속",
 	Sandbox_PongDu_BloodMoon_ConvertZombies_tooltip = "블러드문이 유지되는 동안 일반 좀비를 전부 뛰는 좀비로 바꿉니다. 특수좀비(뮤턴트)와 후원으로 소환된 뛰는 좀비, 암살자는 대상에서 제외되며 원래 상태를 유지합니다. 이벤트가 끝나면 바뀐 좀비들은 원래 속도로 되돌아옵니다. 끄면 좀비 속도는 그대로 유지되고 진행 표시만 뜹니다.",
+	Sandbox_PongDu_BloodMoon_LightStrength = "블러드문 조명 강도",
+	Sandbox_PongDu_BloodMoon_LightStrength_tooltip = "블러드문이 유지되는 동안 세상이 핏빛으로 물드는 정도입니다. 100이면 가장 진하게 물들고, 0이면 조명 연출을 끕니다. 낮과 밤 모두 적용되며, 비나 안개, 폭풍이 진행 중이어도 그 위에 덮입니다. 이벤트 시작 직후 서서히 짙어져 중반까지 최대로 유지되다가 종료가 가까워지면 원래 조명으로 돌아옵니다.",
 	Sandbox_PongDu_BloodMoon_ShowIndicator = "블러드문 진행 표시",
 	Sandbox_PongDu_BloodMoon_ShowIndicator_tooltip = "블러드문이 진행되는 동안 화면 우측 상단에 블러드문 아이콘을 표시합니다. 호드 나이트 아이콘이 함께 떠 있으면 그 아래에 놓입니다. 아이콘에 마우스를 올리면 종료까지 남은 시간이 표시되며, 남은 시간이 줄어들수록 아이콘 배경 단계가 낮아집니다.",
 	Sandbox_PongDu_Divider_MedicalBox = "________ 의약품 랜덤박스 ________",
