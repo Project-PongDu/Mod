@@ -85,6 +85,22 @@
 -- calculate() 가 어차피 재계산하므로 부작용이 없다.
 -- 다만 updateFx()/SkyBox 는 ClimateManager.update() 안에서 이미 돌아간 뒤라
 -- 하늘 색만 한 프레임 튀는 건 엔진 훅 없이는 못 막는다(지상 조명은 해결됨).
+--
+-- ═══ UI 틴트 텍스쳐 ═════════════════════════════════════════════════════════
+-- 위 세 채널(조명/안개/포화도)은 전부 ClimateManager 소관이라 "자연값과 섞기"가
+-- 항상 문제였다. 틴트 텍스쳐는 그런 제약이 없다 -- ClimateManager 를 거치지
+-- 않고 client/features/bloodmoon.lua 의 BloodMoonTint 패널이 UIManager 위에
+-- 직접 그리는 이미지라, 여기서는 "지금 알파가 얼마여야 하나" 숫자 하나만
+-- 계산해서 _m.getTintAlpha() 로 내주면 끝이다. base 추적도, SP/MP 분기도 없다
+-- -- 같은 사다리꼴 곡선(_intensity)만 공유한다.
+--
+-- UIManager 패널이라 다른 UI(인벤토리/체력바/무들)보다 나중에 addToUIManager
+-- 되면 그 위에 그려진다 -- sendToBack 같은 API가 ISUIElement 에 없다
+-- (bringToTop 만 있다). 즉 이 틴트는 HUD 를 가리는 화면 전체 비네트다.
+-- 게임 세계와 HUD 사이에 끼워 넣으려면 OnPreUIDraw + SpriteRenderer 직접
+-- 호출이 필요한데, 그 경로(renderi 의 Consumer 인자)는 이 모드는 물론 바닐라
+-- Lua 어디에도 쓰인 전례가 없어 검증되지 않았다 -- 검증된 ISPanel 경로를
+-- 택했다. TINT_PEAK 을 낮게(0.35) 잡은 이유이기도 하다.
 
 PongDuBloodMoonLight = PongDuBloodMoonLight or {}
 local _m = PongDuBloodMoonLight
@@ -109,6 +125,10 @@ local PEAK = 0.7
 -- 그대로 목표치다. 자연값이 이미 피크보다 높으면 낮추지 않는다(아래 clamp 참조).
 local FOG_PEAK   = 0.35
 local DESAT_PEAK = 1.0
+
+-- UI 틴트 텍스쳐 알파 피크값. 화면 전체를 덮는 연출이라 조명/안개보다 훨씬
+-- 낮게 잡는다 -- 1.0 이면 텍스쳐가 완전 불투명해져 그 아래 게임 화면이 안 보인다.
+local TINT_PEAK = 0.35
 
 -- ── 강도 곡선 ───────────────────────────────────────────────────────────────
 --   0% ~ 25%  : 자연광 -> 블러드문 (상승)
@@ -154,6 +174,10 @@ local _fx = {
     { id = FLOAT_FOG_INTENSITY, peak = FOG_PEAK,   base = nil, written = nil },
     { id = FLOAT_DESATURATION,  peak = DESAT_PEAK, base = nil, written = nil },
 }
+
+-- UI 틴트 텍스쳐용 알파. ClimateManager 채널이 아니라 클라이언트가 직접 그리는
+-- 값이라 base/written 추적이 필요 없다 -- 자연값이라는 개념 자체가 없다.
+local _tintAlpha = 0
 
 local function gameHours()
     return getGameTime():getWorldAgeHours()
@@ -373,6 +397,7 @@ local function clearLight()
     _written   = nil
     _base      = nil
     _intensity = 0
+    _tintAlpha = 0
     llog("light cleared (natural light restored)")
 end
 
@@ -412,6 +437,11 @@ local function toFx(p)
     return p * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
 end
 
+-- UI 틴트용 계수. 조명과 같은 스케일(LightStrength)을 공유하되 자체 피크를 곱한다.
+local function toTint(p)
+    return p * TINT_PEAK * (SandboxVars.PongDu.BloodMoon_LightStrength / 100)
+end
+
 local function applyNow()
     local cc = globalLightColor()
     if not cc then return end
@@ -424,6 +454,9 @@ local function applyNow()
         applySP(cc, t)
         applyFxSP(k)
     end
+    -- UI 틴트는 ClimateManager 채널이 아니라 값 하나만 있으면 되므로
+    -- MP/SP 분기 없이 여기서 바로 계산한다.
+    _tintAlpha = toTint(_intensity)
 end
 
 -- ── 공개 API ────────────────────────────────────────────────────────────────
@@ -464,7 +497,8 @@ function _m.arm(endHours)
         .. " resumeFrom=" .. tostring(_rampFrom)
         .. " peakBlend=" .. tostring(toBlend(1))
         .. " peakFog=" .. tostring(fxTarget(0, FOG_PEAK, toFx(1)))
-        .. " peakDesat=" .. tostring(fxTarget(0, DESAT_PEAK, toFx(1))))
+        .. " peakDesat=" .. tostring(fxTarget(0, DESAT_PEAK, toFx(1)))
+        .. " peakTint=" .. tostring(toTint(1)))
 
     applyNow()
 end
@@ -484,6 +518,12 @@ end
 
 function _m.getIntensity()
     return _intensity
+end
+
+-- UI 틴트 텍스쳐 알파. client/features/bloodmoon.lua 의 BloodMoonTint 패널이
+-- 매 렌더 프레임 이 값을 읽어 drawTextureScaled 의 알파로 그대로 넘긴다.
+function _m.getTintAlpha()
+    return _tintAlpha
 end
 
 -- ── 틱 ──────────────────────────────────────────────────────────────────────
