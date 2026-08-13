@@ -114,7 +114,7 @@ IGUI_KO = {
     IGUI_mutant_endment_7 = "가 쫓아온다!",
     
 
-    IGUI_donation_rise_up_dead_man = "라이즈 업 데드 맨",
+    IGUI_donation_rise_up_dead_man = "강령술",
 
 
 

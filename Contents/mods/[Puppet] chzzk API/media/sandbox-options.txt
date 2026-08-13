@@ -18,7 +18,7 @@ option PongDu.Host_SteamID = {
     page = PongDu_Main, translation = PongDu_Host_SteamID,
 }
 
-option PongDu.Divider_Tier = {
+option PongDu.Divider_BuffTier = {
     type = boolean, default = false,
     page = PongDu_Main, translation = PongDu_Divider_Tier,
 }
@@ -56,6 +56,11 @@ option PongDu.Tier_inv_save_ticket = {
 option PongDu.Tier_fire_support = {
     type = integer, min = 0, max = 1000000, default = 50000,
     page = PongDu_Main, translation = PongDu_Tier_fire_support,
+}
+
+option PongDu.Divider_DebuffTier = {
+    type = boolean, default = false,
+    page = PongDu_Main, translation = PongDu_Divider_Tier,
 }
 
 option PongDu.Tier_debuff_roulette = {
@@ -149,6 +154,16 @@ option PongDu.Delay_buff_roulette = {
     page = PongDu_Buff, translation = PongDu_Delay_buff_roulette,
 }
 
+option PongDu.Divider_RandomWeapon = {
+    type = boolean, default = false,
+    page = PongDu_Buff, translation = PongDu_Divider_RandomWeapon,
+}
+
+option PongDu.Delay_random_weapon = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Buff, translation = PongDu_Delay_random_weapon,
+}
+
 option PongDu.Divider_Vaccine = {
     type = boolean, default = false,
     page = PongDu_Buff, translation = PongDu_Divider_Vaccine,
@@ -159,19 +174,53 @@ option PongDu.Delay_vaccine = {
     page = PongDu_Buff, translation = PongDu_Delay_vaccine,
 }
 
-option PongDu.Divider_RandomSkillPotion = {
+option PongDu.Divider_VehicleDrop = {
     type = boolean, default = false,
-    page = PongDu_Buff, translation = PongDu_Divider_RandomSkillPotion,
+    page = PongDu_Buff, translation = PongDu_Divider_VehicleDrop,
 }
 
-option PongDu.Delay_random_skill_potion = {
+option PongDu.Delay_vehicle_drop = {
     type = integer, min = 0, max = 60, default = 3,
-    page = PongDu_Buff, translation = PongDu_Delay_random_skill_potion,
+    page = PongDu_Buff, translation = PongDu_Delay_vehicle_drop,
+}
+
+option PongDu.VehicleDrop_Source = {
+    type = enum, numValues = 4, default = 2,
+    page = PongDu_Buff,
+    translation = PongDu_VehicleDrop_Source,
+    valueTranslation = PongDu_VehicleDrop_Source,
+}
+
+option PongDu.VehicleDrop_Pool = {
+    type = string,
+    default = ,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_Pool,
+}
+
+option PongDu.VehicleDrop_ExcludePool = {
+    type = string,
+    default = Base.PongDuDrone;Base.PongDuHeli,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_ExcludePool,
+}
+
+option PongDu.VehicleDrop_MinDistance = {
+    type = integer, min = 0, max = 300, default = 30,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,
+}
+
+option PongDu.VehicleDrop_MaxDistance = {
+    type = integer, min = 0, max = 300, default = 50,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_MaxDistance,
 }
 
 /* 스킬별 강화혈청 획득 등급 제한.
    1=일반+희귀+특급 / 2=일반+희귀 / 3=일반만 / 4=획득 불가
    valueTranslation 은 14개 옵션이 PongDu_SerumDrop 하나를 공유한다. */
+
+option PongDu.Divider_RandomSkillPotion = {
+    type = boolean, default = false,
+    page = PongDu_Buff, translation = PongDu_Divider_RandomSkillPotion,
+}
 
 option PongDu.Serum_Fitness = {
     type = enum, numValues = 4, default = 1,
@@ -269,55 +318,6 @@ option PongDu.Serum_Aiming = {
     page = PongDu_Buff,
     translation = PongDu_Serum_Aiming,
     valueTranslation = PongDu_SerumDrop,
-}
-
-option PongDu.Divider_RandomWeapon = {
-    type = boolean, default = false,
-    page = PongDu_Buff, translation = PongDu_Divider_RandomWeapon,
-}
-
-option PongDu.Delay_random_weapon = {
-    type = integer, min = 0, max = 60, default = 3,
-    page = PongDu_Buff, translation = PongDu_Delay_random_weapon,
-}
-
-option PongDu.Divider_VehicleDrop = {
-    type = boolean, default = false,
-    page = PongDu_Buff, translation = PongDu_Divider_VehicleDrop,
-}
-
-option PongDu.Delay_vehicle_drop = {
-    type = integer, min = 0, max = 60, default = 3,
-    page = PongDu_Buff, translation = PongDu_Delay_vehicle_drop,
-}
-
-option PongDu.VehicleDrop_Source = {
-    type = enum, numValues = 4, default = 2,
-    page = PongDu_Buff,
-    translation = PongDu_VehicleDrop_Source,
-    valueTranslation = PongDu_VehicleDrop_Source,
-}
-
-option PongDu.VehicleDrop_Pool = {
-    type = string,
-    default = ,
-    page = PongDu_Buff, translation = PongDu_VehicleDrop_Pool,
-}
-
-option PongDu.VehicleDrop_ExcludePool = {
-    type = string,
-    default = Base.PongDuDrone;Base.PongDuHeli,
-    page = PongDu_Buff, translation = PongDu_VehicleDrop_ExcludePool,
-}
-
-option PongDu.VehicleDrop_MinDistance = {
-    type = integer, min = 0, max = 300, default = 30,
-    page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,
-}
-
-option PongDu.VehicleDrop_MaxDistance = {
-    type = integer, min = 0, max = 300, default = 50,
-    page = PongDu_Buff, translation = PongDu_VehicleDrop_MaxDistance,
 }
 
 option PongDu.Divider_InvSaveTicket = {

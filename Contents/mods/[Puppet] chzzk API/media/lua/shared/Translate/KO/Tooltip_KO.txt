@@ -49,6 +49,6 @@ Tooltip_KO = {
 	Tooltip_Syringe_Adrenaline = "지침과 피로를 회복합니다. 패닉 수치가 상승합니다.",
 	Tooltip_Syringe_Doxycycline = "감기, 식중독, 오염된 상처를 치료합니다. 좀비 감염은 치료할 수 없습니다.",
 	Tooltip_Syringe_Morphine = "통증을 즉시 없애고, 일정 시간 동안 통증과 부상으로 인한 공격 속도 저하를 무시합니다.",
-	Tooltip_Syringe_Emergency = "체력 감소를 즉시 멈춥니다. 시간내에 지혈하지 않으면 다시 체력이 감소합니다.",
-	Tooltip_medical_box = "주사기 네 종류 중 하나가 들어있다. 열어보기 전까지는 무엇이 들었는지 알 수 없다. 우클릭으로 개봉.",
+	Tooltip_Syringe_Emergency = "일정시간동안 체력 감소를 즉시 멈춥니다. 시간내에 지혈하지 않으면 다시 체력이 감소합니다.",
+	Tooltip_medical_box = "우클릭으로 개봉.",
 }
