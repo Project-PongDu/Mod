@@ -118,6 +118,65 @@ local function WriteTierTable()
     print("[PongDu] tier dump written: " .. tostring(count) .. " tiers -> " .. TIER_FILE)
 end
 
+------------------------------------------------------------
+-- Runtime tier refresh
+--
+-- 샌드박스 옵션은 어드민 패널(ISServerSandboxOptionsUI)로 세션 도중에도
+-- 바뀐다. 엔진은 바뀐 값을 전 클라의 SandboxVars 에 즉시 반영하지만
+-- (GameClient.receiveSandboxOptions -> SandboxOptions.toLua, 41.78.20
+-- GameClient.java:5925), 그 과정에서 Lua 이벤트를 하나도 쏘지 않는다.
+-- 즉 "값이 바뀌었다"를 알려주는 공식 훅이 없어서, 그냥 두면 접속 시점에
+-- 뜬 pongdu_tiers.txt 가 계속 남는다.
+--
+-- 대신 패널의 Apply 버튼이 Lua 라 훅이 가능하다
+-- (ISServerSandboxOptionsUI.lua:686). 단 이 버튼은 어드민 본인 클라에서만
+-- 돌고, 파일은 스트리머 각자의 Zomboid/Lua/ 에 있어야 하므로 훅은 서버에
+-- 핑만 보내고 서버가 전 클라로 되쏜다.
+--
+-- 지연 보정은 필요 없다. SandboxOptions(패킷 31)와 ClientCommand(패킷 57,
+-- sendServerCommand 도 이걸 쓴다)는 둘 다 priority 1 / reliability 2 /
+-- ordering channel 0 이라 같은 채널의 reliable-ordered 다
+-- (PacketTypes.java:181,220). 어드민의 옵션 패킷이 우리 핑보다 먼저 서버에
+-- 닿고, 서버의 옵션 재브로드캐스트가 Refresh 보다 먼저 각 클라에 닿는다.
+------------------------------------------------------------
+
+local TIER_MODULE = "PongDuTier"
+
+-- 어드민 패널이 열릴 수 있는 시점보다 앞이면 언제 걸든 상관없다. 파일
+-- 로드시점은 바닐라 ISUI 로드 순서에 의존하므로 OnGameStart 에서 건다.
+local function HookAdminApply()
+    if not ISServerSandboxOptionsUI then
+        print("[PongDu] tier refresh hook skipped: ISServerSandboxOptionsUI is nil")
+        return
+    end
+    if ISServerSandboxOptionsUI.pongduTierHooked then
+        return
+    end
+    ISServerSandboxOptionsUI.pongduTierHooked = true
+
+    local original = ISServerSandboxOptionsUI.onButtonApply
+    if not original then
+        print("[PongDu] tier refresh hook skipped: onButtonApply is nil")
+        return
+    end
+
+    -- 원본이 self:destroy() 까지 하므로 먼저 돌리고 뒤에 핑을 붙인다.
+    ISServerSandboxOptionsUI.onButtonApply = function(self, button)
+        original(self, button)
+        sendClientCommand(TIER_MODULE, "Changed", {})
+        print("[PongDu] admin applied sandbox options - tier refresh requested")
+    end
+
+    print("[PongDu] tier refresh hook installed on ISServerSandboxOptionsUI")
+end
+
+Events.OnServerCommand.Add(function(module, command, args)
+    if module ~= TIER_MODULE then return end
+    if command ~= "Refresh" then return end
+    print("[PongDu] tier refresh received - rewriting dump")
+    WriteTierTable()
+end)
+
 local _tickCount = 0
 local TICK_INTERVAL = 150  -- OnTick 약 150회 ≈ 5초
 
@@ -125,6 +184,7 @@ local TICK_INTERVAL = 150  -- OnTick 약 150회 ≈ 5초
 Events.OnGameStart.Add(function()
     WritePuppetStatus("CONNECTED|" .. tostring(os.time()))
     WriteTierTable()
+    HookAdminApply()
 end)
 
 -- 5초마다 타임스탬프 갱신 (Python이 heartbeat로 생존 확인)
