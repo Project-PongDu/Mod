@@ -20,7 +20,7 @@ option PongDu.Host_SteamID = {
 
 option PongDu.Divider_BuffTier = {
     type = boolean, default = false,
-    page = PongDu_Main, translation = PongDu_Divider_Tier,
+    page = PongDu_Main, translation = PongDu_Divider_BuffTier,
 }
 
 option PongDu.Tier_buff_roulette = {
@@ -60,7 +60,7 @@ option PongDu.Tier_fire_support = {
 
 option PongDu.Divider_DebuffTier = {
     type = boolean, default = false,
-    page = PongDu_Main, translation = PongDu_Divider_Tier,
+    page = PongDu_Main, translation = PongDu_Divider_DebuffTier,
 }
 
 option PongDu.Tier_debuff_roulette = {
