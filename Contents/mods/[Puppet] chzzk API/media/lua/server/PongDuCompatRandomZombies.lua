@@ -86,6 +86,121 @@ function PongDuCompat.patchRandomZombies()
     print("[PongDuCompat] RandomZombies detected - updateZombie wrapped, PongDu zombies excluded")
 end
 
+-- ═══════════════════════════════════════════════════════════════════════════
+--  BLTRandomZombies (workshop id: BLTRandomZombies) 호환 패치
+--
+--  [문제]
+--  RZ와 동일한 원리다. OnTick에서 셀 좀비 전수를 훑으며 onlineID 해시로
+--  속도/체력/인지 버킷을 배정하고, makeInactive(true/false)로 DoZombieStats()를
+--  강제 호출한다(IsoZombie.java:4079). DoZombieStats()는 speedType 기준으로
+--  walkType을 무조건 재생성하므로(2644) 퐁듀가 준 sprintN이 날아간다.
+--
+--  [RZ 방식이 안 통하는 이유]
+--  RZ는 갱신 함수가 rzf_zombiesManager.updateZombie라는 모듈 테이블 필드라
+--  래핑이 가능했다. BLT는 updateZombies / updateZombiesTick이 전부 파일 로컬
+--  업밸류고, BLTRandomZombies 테이블에는 진단용 함수만 노출돼 있어 좀비 1마리
+--  단위로 끼어들 지점이 없다.
+--
+--  [대신 쓰는 구멍: BLT 자신의 스킵 캐시]
+--  BLT는 같은 좀비를 매 사이클 재처리하지 않으려고 좀비 modData에 세대번호와
+--  마지막 좌표를 박아둔다(randomzombies_server.lua:589~596):
+--
+--      if modData.BLTgen == currentGen and diffX < 20 and diffY < 20 and diffZ < 1
+--      then skipped else <스탯 덮어쓰기> end
+--
+--  즉 퐁듀 좀비의 modData에 "이번 세대에 이미 처리했다"고 미리 찍어두면 BLT는
+--  그 좀비를 건드리지 않고 지나간다. 사후 복구가 아니라 원천 차단이라 RZ
+--  패치와 동일하게 깜빡임이 없다.
+--
+--  [세대번호를 알아내는 법]
+--  generation은 로컬이라 직접 못 읽지만, BLT가 방문한 모든 좀비에 nextGen을
+--  찍어두므로 셀에서 역으로 읽어낼 수 있다. 패스 시작 시점 기준으로
+--    - 직전 패스에서 방문된 좀비 : BLTgen == 이번 currentGen
+--    - 오래 전 값이 남은 좀비    : 그보다 작음
+--    - currentGen보다 큰 값      : 존재 불가 (아직 아무도 방문 안 됨)
+--  이므로 "non-nil BLTgen의 최댓값 == currentGen"이 성립한다.
+--
+--  패스 시작 시점을 잡는 훅으로는 makeDistribution을 쓴다. 이건 테이블 필드로
+--  호출되고(:789 cacheDist = Lib.makeDistribution()), 좀비를 하나라도 처리하기
+--  전에 불리며, 진행 중인 패스가 남아 있으면 그 위쪽에서 early return 되므로
+--  "패스 1회당 정확히 1번"이 보장된다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+PongDuCompat.bltGen = nil   -- 마지막으로 관측한 BLT currentGen
+
+-- 좀비 하나에 "이번 세대 처리 완료" 도장을 찍는다. 좌표까지 현재 칸으로
+-- 맞춰야 20타일 이동 검사에도 안 걸린다. BLT 미설치거나 아직 세대를 모르면
+-- 아무것도 안 한다(no-op).
+function PongDuCompat.bltStamp(zombie)
+    local gen = PongDuCompat.bltGen
+    if not gen or not zombie then return end
+    local sq = zombie:getCurrentSquare()
+    if not sq then return end
+    local md = zombie:getModData()
+    md.BLTgen = gen
+    md.BLTx = sq:getX()
+    md.BLTy = sq:getY()
+    md.BLTz = sq:getZ()
+end
+
+local function bltOnPassStart()
+    local cell = getCell()
+    if not cell then return end
+    local zeds = cell:getZombieList()
+    if not zeds then return end
+
+    -- ① 이번 패스의 currentGen 관측 (non-nil BLTgen 최댓값)
+    local gen = nil
+    local n = zeds:size()
+    for i = 0, n - 1 do
+        local g = zeds:get(i):getModData().BLTgen
+        if g and (not gen or g > gen) then gen = g end
+    end
+    if not gen then return end   -- BLT가 아직 한 바퀴도 안 돌았다
+    PongDuCompat.bltGen = gen
+
+    -- ② 퐁듀 소유 좀비에 선제 도장
+    local marked = 0
+    for i = 0, n - 1 do
+        local z = zeds:get(i)
+        if PongDuCompat.isOwnedZombie(z) then
+            PongDuCompat.bltStamp(z)
+            marked = marked + 1
+        end
+    end
+    if marked > 0 and not PongDuCompat.bltLogged then
+        PongDuCompat.bltLogged = true
+        print("[PongDuCompat] BLTRandomZombies skip-cache stamping active (gen=" ..
+            tostring(gen) .. ", marked=" .. tostring(marked) .. ")")
+    end
+end
+
+function PongDuCompat.patchBLTRandomZombies()
+    if PongDuCompat.bltPatched then return end
+    if type(BLTRandomZombies) ~= "table"
+        or type(BLTRandomZombies.makeDistribution) ~= "function" then
+        print("[PongDuCompat] BLTRandomZombies not present - no patch needed")
+        return
+    end
+
+    local original = BLTRandomZombies.makeDistribution
+    BLTRandomZombies.makeDistribution = function(...)
+        -- 스탬핑이 터져도 BLT 본체는 정상 동작해야 한다.
+        local ok, err = pcall(bltOnPassStart)
+        if not ok then
+            print("[PongDuCompat] BLT stamp error: " .. tostring(err))
+        end
+        return original(...)
+    end
+
+    PongDuCompat.bltPatched = true
+    print("[PongDuCompat] BLTRandomZombies detected - makeDistribution wrapped, PongDu zombies pre-stamped")
+end
+
+-- 로드 시점 즉시 시도는 하지 않는다. BLT의 randomzombies_server.lua가 우리보다
+-- 늦게 로드되면 function Lib.makeDistribution 정의가 래퍼를 덮어쓰기 때문.
+-- 모든 파일 로드가 끝난 뒤인 OnGameStart에서만 건다.
 PongDuCompat.patchRandomZombies()
 Events.OnGameStart.Add(PongDuCompat.patchRandomZombies)
 Events.OnServerStarted.Add(PongDuCompat.patchRandomZombies)
+Events.OnGameStart.Add(PongDuCompat.patchBLTRandomZombies)

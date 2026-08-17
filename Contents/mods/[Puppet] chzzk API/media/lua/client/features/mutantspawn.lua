@@ -135,6 +135,76 @@ local function initMutant(zombie, kind)
     zombie:setVariable("PuppetMutantInit", true)
 end
 
+-- ── 외부 모드 스탯 덮어쓰기 감시 ─────────────────────────────────────────────
+-- 좀비 랜덤화 모드들(BLTRandomZombies 등)은 셀 전체를 훑으며 makeInactive
+-- (true/false) 또는 toggleCrawling()으로 DoZombieStats()를 강제 호출한다
+-- (IsoZombie.java 4079 / 3786). DoZombieStats()는 speedType 기준으로 walkType을
+-- 무조건 재생성하고(2644) 근력도 샌드박스 값으로 되돌리므로, 퐁듀가 준
+-- sprintN 걸음과 브루트 초인근력이 통째로 날아간다. PuppetMutantInit은 애님
+-- 변수라 이때 그대로 남아 재적용이 안 걸리고, 결과적으로 특좀이 소환 몇 초 뒤
+-- 일반좀비처럼 행동하게 된다.
+--
+-- 알려진 모드(RZ, BLT)는 PongDuCompatRandomZombies.lua에서 원천 차단하므로
+-- 여기까지 오지 않는다. 이 함수는 그 차단이 실패했을 때를 위한 최후 방어선이다
+-- (모드 업데이트로 내부 구조가 바뀌어 스킵 캐시 키가 달라진 경우, 또는 아직
+-- 모르는 제3의 좀비 랜덤화 모드). 상태가 어긋나면 초기화 가드를 풀어 다음
+-- 틱에 재적용시킨다. 이런 모드들은 좀비 1마리를 사이클당 1회만 건드리므로
+-- 재적용이 항상 마지막 쓰기가 된다. 다만 "덮어씀 -> 다음 틱 복구" 순서라
+-- 한 틱짜리 깜빡임이 생기므로, 정상 경로는 어디까지나 원천 차단 쪽이다.
+--
+-- 비용은 특좀 1마리당 문자열 조회 1회. 판별 대상이 아닌 일반좀비는 applyMutant
+-- 상단 kind 검사에서 이미 걸러져 여기까지 오지 않는다.
+--
+-- 체력 스냅샷은 modData가 아니라 클라 로컬 테이블에 둔다. modData는 B41의
+-- IsoZombie 객체 풀 재활용 때 그대로 딸려와, 죽기 직전 체력이 새 좀비에게
+-- 적용되는 사고를 낸다(호드매니저 둔갑 버그와 동일 원인). OnZombieDead에서
+-- 항목을 지워 onlineID 재사용에도 오염되지 않게 한다.
+local _hpSnap = {}
+local SPRINT_KIND = { brute = true, tracer = true, sprinter = true }
+
+local function guardStats(zombie, kind)
+    if not zombie:getVariableBoolean("PuppetMutantInit") then return end
+    local zid = zombie:getOnlineID()
+    local reason = nil
+
+    -- ① 걸음타입: sprint 계열이어야 할 종류가 다른 값으로 재생성됨
+    if SPRINT_KIND[kind] then
+        local wt = zombie:getVariableString("zombiewalktype")
+        if not (wt and string.sub(wt, 1, 6) == "sprint") then
+            reason = "walkType=" .. tostring(wt)
+        end
+    end
+
+    -- ② 크롤: 로치가 아닌데 정당한 사유 없이 기고 있음(크롤러 버킷 배정).
+    --    다리 부러짐/넉다운 등 정상 크롤과 싸우지 않도록 바닐라와 동일한
+    --    조건일 때만 되돌린다.
+    if not reason and kind ~= "roach" and zombie:isCrawling()
+        and not zombie:isKnockedDown() and zombie:getCrawlerType() == 0
+        and not zombie:wasFakeDead() then
+        zombie:toggleCrawling()
+        zombie:setCanWalk(true)
+        reason = "forced-crawl"
+    end
+
+    -- ③ 체력: 마지막 정상 스냅샷보다 높아짐. 체력은 피해로만 내려가므로
+    --    올라갔다면 외부에서 setHealth한 것이 확실하다(오탐 없음).
+    local last = _hpSnap[zid]
+    if not reason and last and zombie:getHealth() > last + 0.01 then
+        reason = "health=" .. tostring(zombie:getHealth()) .. " expected<=" .. tostring(last)
+        zombie:setHealth(last)
+    end
+
+    if not reason then
+        _hpSnap[zid] = zombie:getHealth()           -- 정상 구간에서만 갱신
+        return
+    end
+
+    print("[PuppetMutant] stats overwritten by another mod - reasserting kind="
+        .. tostring(kind) .. " " .. reason
+        .. " zid=" .. tostring(zombie:getOnlineID()))
+    zombie:setVariable("PuppetMutantInit", false)
+end
+
 -- ── 스크리머: 비명 (CDDA_ZombieFunction.Scream 이식) ─────────────────────────
 -- playSound는 클라 로컬 렌더링이라 각 클라가 각자 재생 = 전원이 들림.
 -- addSound(월드사운드)는 각 클라가 자기 소유 좀비를 유인 -> 폭격(bombard)과
@@ -781,8 +851,22 @@ local function applyMutant(zombie)
     if sender and not md["PuppetMutantSender"] then md["PuppetMutantSender"] = sender end
     md["PuppetMutantZid"] = curZid
     if zombie:getVariableBoolean("Hitman") then return end   -- NPC 오염 방지
+    -- BLT 선제 차단: 패스 도중에 새로 스폰된 특좀은 PongDuCompat의 패스 시작
+    -- 스캔을 놓치므로, 여기서 매 틱 도장을 갱신해 사각을 없앤다(modData 3필드
+    -- 쓰기라 비용은 무시 가능). BLT 미설치 시 bltGen이 nil이라 no-op.
+    if PongDuCompat and PongDuCompat.bltStamp then
+        PongDuCompat.bltStamp(zombie)
+    end
+    guardStats(zombie, kind)                           -- 최후 방어선(사후 복구)
     if not zombie:getVariableBoolean("PuppetMutantInit") then
         initMutant(zombie, kind)
+        -- 재적용은 initMutant의 초기 체력(브루트 3.0 등)을 다시 씌우므로,
+        -- 그동안 입은 전투 피해가 회복돼버린다. 마지막 정상 스냅샷이 더 낮으면
+        -- 그 값으로 되돌려 피해를 보존한다(최초 초기화 시엔 스냅샷이 없다).
+        local lastHP = _hpSnap[curZid]
+        if lastHP and lastHP < zombie:getHealth() then
+            zombie:setHealth(lastHP)
+        end
         _a.pokeTag(zombie)                             -- 소환/부활 직후 잠깐 표기
     end
     _a.pokeTagOnHover(zombie)                          -- 조준+마우스 올림
@@ -813,6 +897,7 @@ Events.OnZombieDead.Add(function(zombie)
     local zid = zombie:getOnlineID()
     _pending[zid] = nil
     _nextScream[zid] = nil
+    _hpSnap[zid] = nil
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
