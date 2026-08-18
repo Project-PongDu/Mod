@@ -222,6 +222,11 @@ option PongDu.Divider_RandomSkillPotion = {
     page = PongDu_Buff, translation = PongDu_Divider_RandomSkillPotion,
 }
 
+option PongDu.Delay_random_skill_potion = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Buff, translation = PongDu_Delay_random_skill_potion,
+}
+
 option PongDu.Serum_Fitness = {
     type = enum, numValues = 4, default = 1,
     page = PongDu_Buff,
