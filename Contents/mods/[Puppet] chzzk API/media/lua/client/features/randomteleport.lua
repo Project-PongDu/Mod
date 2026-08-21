@@ -4,6 +4,7 @@ require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local zone = require("utils/zone")
 
 -- ── 랜덤 텔레포트 (random_teleport) ──────────────────────────────────────────
 -- 발동 시점 위치를 원점으로, 반경 RT_MinDist~RT_MaxDist(기본 100~200)타일
@@ -18,6 +19,9 @@ local textOutline = require("utils/textOutline")
 --      물타일 여부는 먼저 이동한 뒤 청크가 스트리밍되면 확인할 수밖에 없다.
 --      로딩된 스퀘어가 물타일 / 바닥 없음 / 솔리드(벽·나무)면 원점 기준으로
 --      재추첨해서 다시 텔포. MAX_ATTEMPTS 초과 시 원점 복귀 (안전망).
+-- 세이프존(세이프하우스 +10타일)은 위 조건과 별개로 무조건 제외한다. 판정은
+-- 사전 검사 단계에서 끝난다 -- 세이프하우스 목록은 클라에 동기화돼 있어
+-- 청크 로딩 없이 좌표만으로 판정 가능하다 (utils/zone.c).
 
 local MAX_ATTEMPTS       = 15    -- 사후 검증 실패 시 재추첨 한도
 local MAX_PREROLLS       = 200   -- 메타그리드 사전 검사 재추첨 한도
@@ -52,7 +56,8 @@ local function isMetaValid(x, y)
     return true
 end
 
--- 원점 기준 반경 min~max 링 안에서 메타 유효 좌표 하나 추첨. 실패 시 nil.
+-- 원점 기준 반경 min~max 링 안에서 메타 유효 + 세이프존 밖 좌표 하나 추첨.
+-- 실패 시 nil (세이프하우스가 링을 다 덮은 극단적 경우 포함).
 local function rollCandidate(ox, oy)
     local minR, maxR = distCfg()
     for _ = 1, MAX_PREROLLS do
@@ -60,7 +65,8 @@ local function rollCandidate(ox, oy)
         local a = math.rad(ZombRand(360))
         local x = math.floor(ox + r * math.cos(a) + 0.5)
         local y = math.floor(oy + r * math.sin(a) + 0.5)
-        if isMetaValid(x, y) then return x, y end
+        -- 메타 유효 && 세이프존 밖 (둘 다 만족해야 후보로 채택)
+        if isMetaValid(x, y) and not zone.c(x, y) then return x, y end
     end
     return nil
 end
