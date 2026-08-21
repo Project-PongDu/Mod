@@ -151,11 +151,26 @@ local rewardHandlers = {
     },
     ["random_teleport"] = {
         immediate = true,
-        -- 안전지대와 무관한 기능 자체 락. 착지 검증 중이거나 생존 복귀
-        -- 카운트다운(RT_Return)이 도는 동안엔 큐박스 슬롯이 자물쇠 상태로 대기하고,
-        -- 원점 복귀로 타이머가 끝나면 풀리면서 다음 유닛이 발동된다.
+        -- 안전지대와 무관한 기능 자체 락. 셋 중 하나라도 걸리면 큐박스 슬롯이
+        -- 자물쇠 상태로 대기하고, 조건이 풀리면 다음 유닛이 발동된다.
+        --   ① 랜텔 자체 진행 중 (착지 검증 / 생존 복귀 카운트다운)
+        --   ② 좀비 레인 지속시간 중
+        --      레인은 발동 시점 좌표로 낙하 컬럼을 전부 미리 뽑아두는데,
+        --      랜텔(기본 100~200타일)은 서버 셀 유지 반경(ReleventRange, 통상
+        --      ±70타일)을 넘어선다. 컬럼이 있던 셀이 언로드되면
+        --      ServerMap.getGridSquare 가 null 을 돌려주고 addZombiesInOutfit 이
+        --      빈 리스트를 반환해서, 남은 마리수가 로그도 없이 통째로 증발한다.
+        --   ③ 화력 지원 지속시간 중
+        --      헬기/드론은 서버 isOwnerTeleported(1틱 30타일 초과)가 job 을 즉시
+        --      종료시키므로 후원이 중간에 날아간다. 저격은 킬 자체는 이어지지만
+        --      저격수 원점이 발동 시점 고정이라 예광탄이 맵을 가로지른다.
+        -- 락 대상은 랜텔 슬롯 하나뿐이라 다른 기능은 그대로 발동되고, 레인/화력
+        -- 지원이 끝나면 쌓여 있던 랜텔이 순차로 소모된다.
         blocked = function(player)
-            return randomteleport.isBusy(player)
+            if randomteleport.isBusy(player) then return true end
+            if zombierain.c() then return true end
+            if firesupport.c() then return true end
+            return false
         end,
         fn = function()
             global.b(" random_teleport FUNCTION START")

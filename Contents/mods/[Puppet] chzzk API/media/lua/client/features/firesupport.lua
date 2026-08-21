@@ -1684,6 +1684,23 @@ Events.OnServerCommand.Add(function(module, command, args)
     end
 end)
 
+-- c(): 내 화력 지원이 지금 진행 중인가. [public name: .c]
+-- rewardManager의 random_teleport 락 판정에 쓴다. 랜텔로 좌표가 튀면 헬기/드론은
+-- 서버 isOwnerTeleported 가 job 을 즉시 종료시켜 후원이 통째로 날아가고, 저격도
+-- 원점이 고정이라 예광탄이 화면을 가로지르는 선으로 남는다. 그래서 지속시간
+-- 동안엔 랜텔을 큐박스 슬롯에 잠가둔다.
+--
+-- 세 타이머는 전부 own == myOnlineID() 게이트를 통과한 값만 세팅되므로
+-- (SniperStart/HeliStart/DroneStart 수신부), 다른 플레이어가 받은 화력 지원은
+-- 여기 걸리지 않는다.
+function _a.c()
+    local now = getTimestampMs()
+    if _sniperEndAt and _sniperEndAt > now then return true end
+    if _heliEndAt   and _heliEndAt   > now then return true end
+    if _droneEndAt  and _droneEndAt  > now then return true end
+    return false
+end
+
 -- b(): 진행 중인 화력 지원 연출을 전부 정리한다 (예광탄).
 -- 사격 타이밍/잔여 발수는 이제 서버 job이 들고 있으므로 클라에서 정리할
 -- 큐가 없다. 플레이어 사망/접속 종료 시 호출할 것. [public name: .b]

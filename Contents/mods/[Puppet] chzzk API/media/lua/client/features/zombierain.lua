@@ -228,6 +228,12 @@ local function onTick()
 end
 Events.OnTick.Add(onTick)
 
+-- ── 활성 여부 조회 (rewardManager의 random_teleport 락용) ────────────────────
+-- [public name: .c]
+function _a.c()
+    return _rainTicks > 0
+end
+
 -- ── 시작 (rewardManager에서 호출) ────────────────────────────────────────────
 function _a.b(player, sender)
     local r, pct, dur, cnt = rainCfg()
