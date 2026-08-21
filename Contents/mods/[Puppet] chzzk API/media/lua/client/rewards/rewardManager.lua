@@ -77,7 +77,7 @@ end
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
 -- immediate=true 인 기능은 안전지대 안에서도 즉시 발동. zombie_roulette / sprinter5 /
--- mutant_spawn 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
+-- mutant_spawn / rise_up_dead_man 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
 -- missile / zombie_rain 은 immediate 가 함수라서 각각 샌드박스 옵션
 -- (Bombard_SafeZoneBlock / Rain_SafeZoneBlock)에 따라 런타임에 결정된다.
 local rewardHandlers = {
@@ -215,7 +215,10 @@ local rewardHandlers = {
         end,
     },
     ["rise_up_dead_man"] = {
-        immediate = true,
+        -- 좀비룰렛과 동일한 상시 안전지대 락. 강령술은 반경 내 시체를 전부
+        -- 좀비로 되살리는 스폰 계열이라, 안전지대 안에서 터지면 기지 내부에
+        -- 좀비 더미가 생긴다. 벗어날 때까지 큐박스 슬롯에서 대기시킨다.
+        immediate = false,
         fn = function(sender)
             riseup.a(global.player)
             global.processingEvent = false
@@ -379,7 +382,7 @@ end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]
 -- immediate 판정이 false인 기능은 플레이어가 안전지대를 벗어날 때까지 대기(5초마다 재확인).
--- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn
+-- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn / rise_up_dead_man
 -- 조건부 대기 대상: missile (Bombard_SafeZoneBlock 켜짐, 기본 ON)
 --                   zombie_rain (Rain_SafeZoneBlock 켜짐, 기본 OFF)
 function rewardManager.a(featureId, sender, callback)
