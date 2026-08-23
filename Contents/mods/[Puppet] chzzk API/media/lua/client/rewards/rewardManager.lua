@@ -182,11 +182,18 @@ local rewardHandlers = {
             global.b(" random_teleport FUNCTION START")
             -- 효과음: 본인은 로컬 즉시, 주변 접속자는 서버 거리컷 브로드캐스트.
             -- 사라지는 쪽 좌표에서 울리므로 발동 시점 위치를 그대로 쓴다.
+            --
+            -- 본인 재생만 원음 고정(playAt 추적 X)인 이유: 발동 직후 100~200타일 밖으로
+            -- 순간이동하므로 거리 추적을 걸면 2.3초짜리 anomaly가 시작하자마자 최소
+            -- 볼륨으로 죽는다. 자기 텔포음은 끝까지 원음으로 들려야 맞다.
+            -- 주변은 soundScale 0.5 -- 거리 감쇠 위에 절반을 더 곱해서 "내가 아니라
+            -- 옆사람이 날아갔다"가 소리만으로 구분되게 한다.
             getSoundManager():PlaySound("anomaly", false, 1.0)
             fx.broadcast({
                 f = "random_teleport",
                 x = global.player:getX(), y = global.player:getY(), z = global.player:getZ(),
                 sound = "anomaly",
+                soundScale = 0.3,
             })
             randomteleport.a(global.player)               -- Random Teleport (100~200 tiles)
             global.processingEvent = false

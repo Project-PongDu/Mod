@@ -233,7 +233,7 @@ function _a.b(player, sender)
     -- 안 뜸), 마커는 낙하가 이어지는 지속시간 내내 유지된다.
     local px, py, pz = player:getX(), player:getY(), player:getZ()
     local showRadius = showRadiusEnabled()
-    getSoundManager():PlaySound("zombie_rain", false, 1.0)
+    fx.playAt("zombie_rain", px, py)
     fx.broadcast({
         f = "zombie_rain",
         x = px, y = py, z = pz,

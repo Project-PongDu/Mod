@@ -19,6 +19,8 @@ local colorMap = require("utils/colorMap")
 --  사운드/알림 반경은 기능 효과 반경과 무관하게 FX_RADIUS 고정이다. "근처 사람이
 --  듣는다/알아챈다"는 연출이지 효과 판정이 아니고, 레인(기본 20)·강령술(기본 30)처럼
 --  효과 반경이 작은 기능은 그대로 쓰면 바로 옆 사람도 못 듣는다.
+--  효과음은 발동 지점 기준 거리로 볼륨이 정해지고, 재생 중에도 매 틱 갱신된다
+--  (playAt) -- 소리를 듣고 도망치면 그만큼 작아진다.
 --
 --  마커 색상은 colorMap(도네 큐박스 색상표)을 그대로 쓴다 — 큐박스에서 보던
 --  색이 바닥에 그대로 뜬다.
@@ -38,9 +40,90 @@ local colorMap = require("utils/colorMap")
 
 local MODULE        = "PongDuFx"
 local FX_RADIUS     = 40    -- 효과음/머리위 알림 공용 반경(타일). missile 알림음이 쓰던 값
+local FX_VOL_NEAR   = 1.00  -- 발동 지점에서의 볼륨
+local FX_VOL_FAR    = 0.25  -- 반경 끝에서의 볼륨
 local SQ_WAIT_TICKS = 120   -- 마커 부착 대기 한도(약 2초) — 청크 스트리밍 대기용
 
 _fx.FX_RADIUS = FX_RADIUS
+
+-- ── 거리 감쇠 재생 (발동 지점 기준, 재생 중 실시간 갱신) ──────────────────
+-- getSoundManager():PlaySound 는 이미터를 (0,0,0)에 박고 재생하므로
+-- (SoundManager:551) 3D 감쇠가 아예 없다. maxGain 인자도 구현에서 버려진다.
+-- 그래서 헬기 로터음(firesupport.heliSoundTick)과 같은 방식으로 직접 건다 --
+-- 로컬 플레이어 emitter 의 재생 핸들을 잡아두고 매 틱 setVolume 을 다시 건다.
+-- 발동 지점은 고정이고 플레이어가 움직이므로, 소리를 듣고 도망치면 그만큼
+-- 작아진다 (재생 시점 1회 고정이면 이 연출이 안 나온다).
+--
+-- getSoundManager():PlaySound 가 돌려주는 Audio 핸들을 쓰지 않는 이유:
+-- 그건 풀에서 빌려온 공용 emitter(IsoWorld.getFreeEmitter)를 감싼 객체라,
+-- 사운드가 끝나 그 emitter 가 다른 소리에 재할당된 뒤에도 볼륨을 걸면 엉뚱한
+-- 소리를 건드릴 수 있다. 플레이어 emitter 는 그 캐릭터 전용이라 그 위험이 없고,
+-- 헬기/드론이 이미 쓰고 있는 검증된 경로다.
+--
+-- 추적은 사운드 길이만큼만. SOUND_MS 는 media/sound/*.wav 실측값이므로 파일을
+-- 교체하면 여기도 같이 고칠 것 (어긋나도 조기 종료 or 무의미한 갱신일 뿐이다).
+local SOUND_MS = {
+    ["necromance"]  = 7000,
+    ["zombie_rain"] = 7000,
+    ["anomaly"]     = 2300,
+    ["alert"]       = 12000,
+}
+local SOUND_MS_DEFAULT = 5000
+
+local _tracked = {}   -- { {h=핸들, x=, y=, expire=}, ... }
+
+local function volumeAt(dist)
+    local k = 1 - dist / FX_RADIUS
+    if k < 0 then k = 0 elseif k > 1 then k = 1 end
+    return FX_VOL_FAR + (FX_VOL_NEAR - FX_VOL_FAR) * k
+end
+
+-- playAt(name, x, y, scale): 발동 지점(x,y) 기준 거리 감쇠로 재생. 로컬 재생(발동 본인)과
+-- 브로드캐스트 수신 양쪽이 같이 쓴다 -- 본인도 발동 지점에서 멀어지면 작아져야 한다.
+-- scale(기본 1.0)은 거리 감쇠 위에 곱하는 고정 배율이다. "남한테 일어난 일"이라는 걸
+-- 소리로 구분시키고 싶을 때 쓴다 (랜덤텔포: 주변 클라만 0.5).
+function _fx.playAt(name, x, y, scale)
+    if not name or name == "" then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    local emitter = pl:getEmitter()
+    if not emitter then return end
+
+    local sc = tonumber(scale) or 1.0
+
+    local ok, handle = pcall(function() return emitter:playSound(name) end)
+    if not ok or not handle or handle == 0 then
+        print("[PongDu][Fx] sound start FAILED name=" .. tostring(name))
+        return
+    end
+
+    local dx, dy = pl:getX() - x, pl:getY() - y
+    pcall(function() emitter:setVolume(handle, volumeAt(math.sqrt(dx * dx + dy * dy)) * sc) end)
+
+    _tracked[#_tracked + 1] = {
+        h = handle, x = x, y = y, sc = sc,
+        expire = getTimestampMs() + (SOUND_MS[name] or SOUND_MS_DEFAULT),
+    }
+end
+
+-- 재생 중인 것들 볼륨 갱신. 추적 대상이 없으면 즉시 빠져나가 평시 비용 0.
+Events.OnTick.Add(function()
+    if #_tracked == 0 then return end
+    local pl = getSpecificPlayer(0)
+    local emitter = pl and pl:getEmitter()
+    local now = getTimestampMs()
+    local px, py = 0, 0
+    if pl then px, py = pl:getX(), pl:getY() end
+    for i = #_tracked, 1, -1 do
+        local t = _tracked[i]
+        if now > t.expire or not emitter then
+            table.remove(_tracked, i)
+        else
+            local dx, dy = px - t.x, py - t.y
+            pcall(function() emitter:setVolume(t.h, volumeAt(math.sqrt(dx * dx + dy * dy)) * t.sc) end)
+        end
+    end
+end)
 
 -- ── 로컬 반경 마커 ────────────────────────────────────────────────────────
 -- addGridSquareMarker(square, r, g, b, doAlpha, radius) -> marker 객체.
@@ -97,6 +180,7 @@ end
 -- broadcast{ f=featureId, x=, y=, z=, sound=, markerRadius=, markerMs=,
 --            noteKey=, noteName=, noteId= }
 --   sound        : 효과음 이름(생략 시 소리 없음)
+--   soundScale   : 수신측 볼륨 배율(기본 1.0). 발동 본인의 로컬 재생엔 적용되지 않는다.
 --   markerRadius : 0 또는 생략이면 마커 없음(샌드박스 반경표시 옵션이 꺼진 경우)
 --   noteKey      : 머리 위 말풍선 번역키(생략 시 알림 없음). %1 에 noteName 이 들어간다.
 -- 발동 클라 본인 몫(로컬 재생/렌더)은 호출부가 따로 처리한다.
@@ -112,6 +196,7 @@ function _fx.broadcast(t)
         ["y"]   = t.y,
         ["z"]   = math.floor(t.z or 0),
         ["s"]   = snd,
+        ["sv"]  = t.soundScale or 1.0,
         ["sr"]  = (snd ~= "" or note ~= "") and FX_RADIUS or 0,
         ["mr"]  = t.markerRadius or 0,
         ["ms"]  = t.markerMs or 3000,
@@ -184,7 +269,7 @@ Events.OnServerCommand.Add(function(module, command, args)
     local sr  = tonumber(args["sr"]) or FX_RADIUS
     local inRange = d2 <= sr * sr
     if snd ~= "" and inRange then
-        getSoundManager():PlaySound(snd, false, 1.0)
+        _fx.playAt(snd, x, y, tonumber(args["sv"]) or 1.0)
     end
 
     local feature = tostring(args["f"] or "")

@@ -33,7 +33,7 @@ function _a.a(player)
     local showRadius = SandboxVars.PongDu.RiseUp_ShowRadius
     local px, py, pz = player:getX(), player:getY(), player:getZ()
 
-    getSoundManager():PlaySound("necromance", false, 1.0)
+    fx.playAt("necromance", px, py)
     fx.broadcast({
         f = "rise_up_dead_man",
         x = px, y = py, z = pz,
