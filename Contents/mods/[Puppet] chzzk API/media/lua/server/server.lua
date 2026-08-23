@@ -1193,7 +1193,7 @@ end
 -- ── 후원 이펙트 릴레이 (PongDuFx/Play) ────────────────────────────────────────
 -- 발동 클라가 보낸 효과음/반경 마커를 주변 접속자에게 그대로 중계한다.
 -- 페이로드는 클라(utils/fx)가 만든 것을 손대지 않고 전달 — 서버는 거리컷만 한다.
---   sr = 효과음 가청 반경 (수신 클라가 다시 정확히 판정)
+--   sr = 효과음/머리위 알림 공용 반경 (수신 클라가 다시 정확히 판정)
 --   mr = 마커 반경 (0이면 마커 없음)
 -- 컷 반경은 둘 중 큰 쪽. 마커는 원의 가장자리가 화면에 걸리면 보여야 하므로
 -- 반경에 화면 여유(FX_VIEW_MARGIN)를 더한다.
@@ -1228,6 +1228,7 @@ DOServer["PongDuFx"]["Play"] = function(player, data)
     end
     print("[PongDu][Fx] relay feature=" .. tostring(data["f"])
         .. " sound=" .. tostring(data["s"]) .. " mr=" .. tostring(mr)
+        .. " note=" .. tostring(data["nk"]) .. " r=" .. tostring(send)
         .. " targets=" .. tostring(relayed))
 end
 

@@ -99,6 +99,9 @@ local rewardHandlers = {
         immediate = false,
         fn = function(sender)
             global.currentSender = sender or ""
+            -- 주변 10타일 플레이어 화면에 후원받은 사람 머리 위 경고 (utils/fx).
+            -- 좀비 소환 계열은 실제로 좀비를 보기 전까진 옆 사람이 알 방법이 없다.
+            fx.notifyNearby(global.player, "zombie_roulette", "IGUI_donation_nearby_zombie_roulette", 5)
             eventUtils.b(global.player)                   -- Zombie Roulette (random count)
         end,
     },
@@ -106,6 +109,7 @@ local rewardHandlers = {
         immediate = false,
         fn = function(sender)
             global.b(" sprinter5 FUNCTION START")
+            fx.notifyNearby(global.player, "sprinter5", "IGUI_donation_nearby_sprinter5", 5)
             -- 마릿수: 샌드박스 Sprinter_Count 고정값.
             -- 룰렛과 달리 랜덤 범위가 아니라 설정한 수만큼 정확히 소환.
             handleZombieSpawn(SandboxVars.PongDu.Sprinter_Count, 1, sender)   -- Sprinter xN
@@ -292,6 +296,7 @@ local rewardHandlers = {
     ["mutant_spawn"] = {
         immediate = false,
         fn = function(sender)
+            fx.notifyNearby(global.player, "mutant_spawn", "IGUI_donation_nearby_mutant_spawn", 5)
             mutantspawn.a(sender)            -- 스크리머/브루트/로치 중 1마리
             global.processingEvent = false
         end,

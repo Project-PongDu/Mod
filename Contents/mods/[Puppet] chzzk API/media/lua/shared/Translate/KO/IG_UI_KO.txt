@@ -34,6 +34,24 @@ IGUI_KO = {
 
 	IGUI_zombie_roulette_say = "좀비 %1마리",
 
+	IGUI_donation_nearby_zombie_roulette_1 = "%1 근처에 좀비다!",
+	IGUI_donation_nearby_zombie_roulette_2 = "%1 옆에 좀비다!",
+	IGUI_donation_nearby_zombie_roulette_3 = "%1 쪽에 좀비다!",
+	IGUI_donation_nearby_zombie_roulette_4 = "%1 주변에 좀비다!",
+	IGUI_donation_nearby_zombie_roulette_5 = "%1한테 좀비!",
+
+	IGUI_donation_nearby_sprinter5_1 = "%1 근처에 스프린터다!",
+	IGUI_donation_nearby_sprinter5_2 = "%1 옆에 스프린터다!",
+	IGUI_donation_nearby_sprinter5_3 = "%1 쪽에 스프린터다!",
+	IGUI_donation_nearby_sprinter5_4 = "%1 주변에 스프린터다!",
+	IGUI_donation_nearby_sprinter5_5 = "%1한테 스프린터!",
+
+	IGUI_donation_nearby_mutant_spawn_1 = "%1 근처에 특수좀비다!",
+	IGUI_donation_nearby_mutant_spawn_2 = "%1 옆에 특수좀비다!",
+	IGUI_donation_nearby_mutant_spawn_3 = "%1 쪽에 특수좀비다!",
+	IGUI_donation_nearby_mutant_spawn_4 = "%1 주변에 특수좀비다!",
+	IGUI_donation_nearby_mutant_spawn_5 = "%1한테 특수좀비!",
+
 
 
     IGUI_donation_sprinter = "뛰좀 %1마리!",
