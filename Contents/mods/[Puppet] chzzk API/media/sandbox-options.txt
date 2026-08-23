@@ -613,6 +613,16 @@ option PongDu.RiseUp_Radius = {
     page = PongDu_Debuff, translation = PongDu_RiseUp_Radius,
 }
 
+option PongDu.RiseUp_ShowRadius = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_RiseUp_ShowRadius,
+}
+
+option PongDu.RiseUp_SafeZoneBlock = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_RiseUp_SafeZoneBlock,
+}
+
 option PongDu.Divider_Rain = {
     type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Divider_Rain,

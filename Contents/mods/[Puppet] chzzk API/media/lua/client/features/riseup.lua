@@ -1,6 +1,7 @@
 local _a = {}
 
 local aggro = require("features/aggro")
+local fx    = require("utils/fx")
 
 -- 라이즈 업 데드 맨: 도네 플레이어 기준 반경 내 모든 시체(IsoDeadBody)를
 -- 좀비로 되살린다.
@@ -17,45 +18,39 @@ local aggro = require("features/aggro")
 
 local MARKER_DURATION_MS = 3000   -- 반경 표시 유지 시간
 
--- 바닥 반경 마커: ISSpawnHordeUI(바닐라 좀비떼 스폰 UI)가 쓰는 것과 동일한 API.
--- addGridSquareMarker(square, r, g, b, doAlpha, radius) -> marker 객체.
--- WorldMarkers는 로컬 렌더링이라 이 함수를 호출한 클라이언트 화면에만 보인다.
-local function showRadiusMarker(square, radius)
-    if not square then return end
-    local marker = getWorldMarkers():addGridSquareMarker(square, 0.55, 0.05, 0.65, true, radius)
-    marker:setScaleCircleTexture(true)
-
-    local start = getTimestampMs()
-    local function tick()
-        if getTimestampMs() - start >= MARKER_DURATION_MS then
-            marker:remove()
-            Events.OnTick.Remove(tick)
-        end
-    end
-    Events.OnTick.Add(tick)
-end
-
 -- 도네 발동 진입점. 서버에 좌표/반경만 넘기고 실제 부활은 server.lua 의
 -- DOServer["PongDuRiseUp"]["RiseUp"] 이 수행한다.
 -- SandboxVars는 파일 로드 시점엔 비어있을 수 있으므로 사용 시점에 읽는다.
+--
+-- 효과음/반경 마커는 utils/fx 로 처리한다: 본인은 즉시 로컬 재생/렌더,
+-- 나머지 접속자는 서버 거리컷 브로드캐스트로 동일한 necromance 음과 마커를
+-- 받는다 (기존엔 본인만 necromance, 나머지는 alert 였다).
+-- 반경 표시 자체는 샌드박스 RiseUp_ShowRadius 를 따른다 — 꺼져 있으면
+-- markerRadius=0 으로 나가므로 누구에게도 안 뜬다.
 function _a.a(player)
     if not player then return end
     local radius = SandboxVars.PongDu.RiseUp_Radius
+    local showRadius = SandboxVars.PongDu.RiseUp_ShowRadius
+    local px, py, pz = player:getX(), player:getY(), player:getZ()
 
     getSoundManager():PlaySound("necromance", false, 1.0)
-    sendClientCommand("PongDuDonation", "PlayAlert", {
-        ["x"] = player:getX(),
-        ["y"] = player:getY(),
-        ["r"] = radius,
+    fx.broadcast({
+        f = "rise_up_dead_man",
+        x = px, y = py, z = pz,
+        sound = "necromance",
+        markerRadius = showRadius and radius or 0,
+        markerMs = MARKER_DURATION_MS,
     })
     sendClientCommand("PongDuRiseUp", "RiseUp", {
-        ["x"] = player:getX(),
-        ["y"] = player:getY(),
+        ["x"] = px,
+        ["y"] = py,
         ["r"] = radius,
     })
 
     -- 도네이터 본인 화면에 반경 표시 (부활 시점과 동시, 3초간)
-    showRadiusMarker(player:getCurrentSquare(), radius)
+    if showRadius then
+        fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
+    end
 end
 
 -- ── 부활 좀비 기상 모션 복원 ──────────────────────────────────────────────

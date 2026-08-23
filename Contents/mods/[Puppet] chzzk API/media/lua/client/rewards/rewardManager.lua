@@ -21,6 +21,7 @@ local hordenight = require("features/hordenight")
 local medicalbox = require("features/medicalbox")
 local bloodmoon  = require("features/bloodmoon")
 local global     = require("global")
+local fx         = require("utils/fx")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
 local function handleZombieSpawn(amount, sprint, sender)
@@ -77,9 +78,10 @@ end
 -- Donation featureId -> effect. 금액은 GUI(퍼펫 API)에서 유저가 임의로 재배정하고,
 -- rewards.txt에 featureId를 실어서 보낸다. 여기는 "이 featureId가 오면 이 효과"만 안다.
 -- immediate=true 인 기능은 안전지대 안에서도 즉시 발동. zombie_roulette / sprinter5 /
--- mutant_spawn / rise_up_dead_man 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
--- missile / zombie_rain 은 immediate 가 함수라서 각각 샌드박스 옵션
--- (Bombard_SafeZoneBlock / Rain_SafeZoneBlock)에 따라 런타임에 결정된다.
+-- mutant_spawn 은 안전지대 밖으로 나갈 때까지 대기(immediate=false).
+-- missile / zombie_rain / rise_up_dead_man 은 immediate 가 함수라서 각각 샌드박스
+-- 옵션(Bombard_SafeZoneBlock / Rain_SafeZoneBlock / RiseUp_SafeZoneBlock)에 따라
+-- 런타임에 결정된다.
 local rewardHandlers = {
     ["debuff_roulette"] = {
         immediate = true,
@@ -174,7 +176,14 @@ local rewardHandlers = {
         end,
         fn = function()
             global.b(" random_teleport FUNCTION START")
+            -- 효과음: 본인은 로컬 즉시, 주변 접속자는 서버 거리컷 브로드캐스트.
+            -- 사라지는 쪽 좌표에서 울리므로 발동 시점 위치를 그대로 쓴다.
             getSoundManager():PlaySound("anomaly", false, 1.0)
+            fx.broadcast({
+                f = "random_teleport",
+                x = global.player:getX(), y = global.player:getY(), z = global.player:getZ(),
+                sound = "anomaly",
+            })
             randomteleport.a(global.player)               -- Random Teleport (100~200 tiles)
             global.processingEvent = false
             global.b(" random_teleport FUNCTION END")
@@ -206,10 +215,10 @@ local rewardHandlers = {
         fn = function()
             global.b(" DONATION EXPLOSION START")
             getSoundManager():PlaySound("alert", false, 1.0)
-            sendClientCommand("PongDuDonation", "PlayAlert", {
-                ["x"] = global.player:getX(),
-                ["y"] = global.player:getY(),
-                ["r"] = 40,
+            fx.broadcast({
+                f = "missile",
+                x = global.player:getX(), y = global.player:getY(), z = global.player:getZ(),
+                sound = "alert",
             })
             bombard.b(global.player)                      -- Missile Strike
             global.processingEvent = false
@@ -230,10 +239,14 @@ local rewardHandlers = {
         end,
     },
     ["rise_up_dead_man"] = {
-        -- 좀비룰렛과 동일한 상시 안전지대 락. 강령술은 반경 내 시체를 전부
-        -- 좀비로 되살리는 스폰 계열이라, 안전지대 안에서 터지면 기지 내부에
-        -- 좀비 더미가 생긴다. 벗어날 때까지 큐박스 슬롯에서 대기시킨다.
-        immediate = false,
+        -- 안전지대 처리는 샌드박스 "세이프존 강령술 방지"(RiseUp_SafeZoneBlock)를
+        -- 따른다. 강령술은 반경 내 시체를 전부 좀비로 되살리는 스폰 계열이라
+        -- 기본값은 켜짐(=대기)이고, 끄면 기지 안에서도 그대로 부활한다.
+        --   옵션 ON(기본) -> immediate=false. 벗어날 때까지 큐박스 슬롯에서 락.
+        --   옵션 OFF      -> immediate=true. 안전지대에서도 즉시 발동.
+        immediate = function()
+            return not SandboxVars.PongDu.RiseUp_SafeZoneBlock
+        end,
         fn = function(sender)
             riseup.a(global.player)
             global.processingEvent = false
@@ -330,10 +343,9 @@ local rewardHandlers = {
     },
     ["zombie_rain"] = {
         -- 안전지대 처리는 샌드박스 "세이프존 좀비 레인 방지"(Rain_SafeZoneBlock)를
-        -- 따른다. missile과 달리 기본값이 꺼짐이라, 옵션이 명시적으로 켜져 있을
-        -- 때만 대기(immediate=false)로 넘어간다.
-        --   옵션 OFF(기본) -> immediate=true. 안전지대에서도 그대로 발동.
-        --   옵션 ON        -> immediate=false. 벗어날 때까지 큐박스에서 락.
+        -- 따른다. missile / rise_up_dead_man 과 동일하게 기본값은 켜짐이다.
+        --   옵션 ON(기본) -> immediate=false. 벗어날 때까지 큐박스에서 락.
+        --   옵션 OFF      -> immediate=true. 안전지대에서도 그대로 발동.
         immediate = function()
             return not SandboxVars.PongDu.Rain_SafeZoneBlock
         end,
@@ -397,9 +409,10 @@ end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]
 -- immediate 판정이 false인 기능은 플레이어가 안전지대를 벗어날 때까지 대기(5초마다 재확인).
--- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn / rise_up_dead_man
+-- 상시 대기 대상: zombie_roulette / sprinter5 / mutant_spawn
 -- 조건부 대기 대상: missile (Bombard_SafeZoneBlock 켜짐, 기본 ON)
---                   zombie_rain (Rain_SafeZoneBlock 켜짐, 기본 OFF)
+--                   zombie_rain (Rain_SafeZoneBlock 켜짐, 기본 ON)
+--                   rise_up_dead_man (RiseUp_SafeZoneBlock 켜짐, 기본 ON)
 function rewardManager.a(featureId, sender, callback)
     global.player = getPlayer()
     if not global.player then return end

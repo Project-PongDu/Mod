@@ -3,6 +3,7 @@ require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local fx = require("utils/fx")
 
 -- ── 좀비 레인 (zombie_rain) 클라이언트 ── [프로토타입: 런타임 스퀘어 생성] ─────
 -- 역할 4가지:
@@ -48,22 +49,8 @@ local function showRadiusEnabled()
     return SandboxVars.PongDu.Rain_ShowRadius
 end
 
--- 바닥 반경 마커: riseup.lua와 동일 API (ISSpawnHordeUI가 쓰는 것).
--- WorldMarkers는 로컬 렌더링이라 호출한 클라이언트(도네 본인) 화면에만 보인다.
--- 레인은 지속시간 동안 유지 (강령술의 3초와 달리 낙하가 계속되므로).
-local function showRadiusMarker(square, radius, durationMs)
-    if not square then return end
-    local marker = getWorldMarkers():addGridSquareMarker(square, 0.35, 0.55, 1.0, true, radius)
-    marker:setScaleCircleTexture(true)
-    local start = getTimestampMs()
-    local function tick()
-        if getTimestampMs() - start >= durationMs then
-            marker:remove()
-            Events.OnTick.Remove(tick)
-        end
-    end
-    Events.OnTick.Add(tick)
-end
+-- 바닥 반경 마커/효과음은 utils/fx 가 처리한다 (본인 로컬 + 주변 브로드캐스트).
+-- 레인 마커는 지속시간 동안 유지 (강령술의 3초와 달리 낙하가 계속되므로).
 
 -- ── 남은시간 표시 패널 (BombardTimerDisplay와 동일 스타일) ─────────────────────
 local _rainTicks = 0
@@ -241,10 +228,21 @@ function _a.b(player, sender)
         ["r"] = r, ["pct"] = pct, ["dur"] = dur, ["cnt"] = cnt,
         ["sender"] = sender or "",
     })
+    -- 효과음/반경 표시: 본인은 즉시 로컬, 나머지 접속자는 서버 거리컷 브로드캐스트.
+    -- 반경 표시는 Rain_ShowRadius 를 따르고(꺼져 있으면 markerRadius=0 -> 아무에게도
+    -- 안 뜸), 마커는 낙하가 이어지는 지속시간 내내 유지된다.
+    local px, py, pz = player:getX(), player:getY(), player:getZ()
+    local showRadius = showRadiusEnabled()
     getSoundManager():PlaySound("zombie_rain", false, 1.0)
-    -- 반경 표시 (Rain_ShowRadius): 도네 본인 화면에 지속시간 동안
-    if showRadiusEnabled() then
-        showRadiusMarker(player:getCurrentSquare(), r, dur * 1000)
+    fx.broadcast({
+        f = "zombie_rain",
+        x = px, y = py, z = pz,
+        sound = "zombie_rain",
+        markerRadius = showRadius and r or 0,
+        markerMs = dur * 1000,
+    })
+    if showRadius then
+        fx.marker(px, py, pz, "zombie_rain", r, dur * 1000)
     end
     -- 독립 실행: 진행 중 재후원이 오면 서버는 세션을 병행하고,
     -- 클라 타이머는 "가장 늦게 끝나는 세션" 기준으로 지속시간만큼 리필한다.

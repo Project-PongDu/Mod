@@ -270,6 +270,7 @@ DOServer["PongDuBombard"]  = DOServer["PongDuBombard"]  or {}
 DOServer["PongDuRiseUp"]   = DOServer["PongDuRiseUp"]   or {}
 DOServer["PongDuDonation"] = DOServer["PongDuDonation"] or {}
 DOServer["PongDuFireSupport"] = DOServer["PongDuFireSupport"] or {}
+DOServer["PongDuFx"]       = DOServer["PongDuFx"]       or {}
 
 -- ── 폭격 반경 내 차량 파괴 ────────────────────────────────────────────────────
 -- setScript()로 불탄 차량 스크립트를 씌우는 방식은 바닐라에 Burnt 변형이
@@ -767,7 +768,7 @@ end
 -- 플레이어에게까지 보낼 이유가 없다. 기존엔 매 발 getOnlinePlayers() 전원에게
 -- 뿌렸는데, 드론 기본 iv 25ms(초당 40발) x job N개 x 접속자 N명이라 패킷이
 -- N^2 로 뛰었다. 8인 서버 전원 동시 발동이면 초당 2,560 패킷.
--- (PongDuDonation/PlayAlert 는 이미 같은 방식으로 컷하고 있다 -- 여기만
+-- (후원 이펙트 릴레이 PongDuFx/Play 는 이미 같은 방식으로 컷하고 있다 -- 여기만
 --  빠져 있었던 것이고 설계 판단이 아니었다.)
 --
 -- 원점과 목표 중 하나라도 반경 안이면 보낸다:
@@ -1189,20 +1190,45 @@ DOServer["PongDuBombard"]["PlayExplosion"] = function(player, data)
     end
 end
 
-DOServer["PongDuDonation"]["PlayAlert"] = function(player, data)
+-- ── 후원 이펙트 릴레이 (PongDuFx/Play) ────────────────────────────────────────
+-- 발동 클라가 보낸 효과음/반경 마커를 주변 접속자에게 그대로 중계한다.
+-- 페이로드는 클라(utils/fx)가 만든 것을 손대지 않고 전달 — 서버는 거리컷만 한다.
+--   sr = 효과음 가청 반경 (수신 클라가 다시 정확히 판정)
+--   mr = 마커 반경 (0이면 마커 없음)
+-- 컷 반경은 둘 중 큰 쪽. 마커는 원의 가장자리가 화면에 걸리면 보여야 하므로
+-- 반경에 화면 여유(FX_VIEW_MARGIN)를 더한다.
+-- 발동 클라 본인은 제외한다 — 왕복 지연 없이 로컬에서 이미 재생/렌더했다.
+-- (구 PongDuDonation/PlayAlert 를 대체. alert 고정이던 것을 기능별 전용
+--  효과음 + 마커까지 실어보낼 수 있게 일반화한 것이다.)
+local FX_VIEW_MARGIN = 60
+
+DOServer["PongDuFx"]["Play"] = function(player, data)
     local cx = tonumber(data["x"]) or player:getX()
     local cy = tonumber(data["y"]) or player:getY()
-    local r  = tonumber(data["r"]) or 40
+    local sr = tonumber(data["sr"]) or 0
+    local mr = tonumber(data["mr"]) or 0
+
+    local send = sr
+    if mr > 0 and (mr + FX_VIEW_MARGIN) > send then send = mr + FX_VIEW_MARGIN end
+    if send <= 0 then return end
+    local s2 = send * send
+
+    local relayed = 0
     local players = getOnlinePlayers()
     for i = 0, players:size() - 1 do
         local p = players:get(i)
         if p:getOnlineID() ~= player:getOnlineID() then
-            local dist = math.sqrt(math.pow(p:getX() - cx, 2) + math.pow(p:getY() - cy, 2))
-            if dist < r then
-                sendServerCommand(p, "PongDuDonation", "PlayAlert", {})
+            local dx = p:getX() - cx
+            local dy = p:getY() - cy
+            if dx * dx + dy * dy <= s2 then
+                sendServerCommand(p, "PongDuFx", "Play", data)
+                relayed = relayed + 1
             end
         end
     end
+    print("[PongDu][Fx] relay feature=" .. tostring(data["f"])
+        .. " sound=" .. tostring(data["s"]) .. " mr=" .. tostring(mr)
+        .. " targets=" .. tostring(relayed))
 end
 
 -- ── 사망 좌표 마크 (버그① 근본 수정) ──────────────────────────────────────────

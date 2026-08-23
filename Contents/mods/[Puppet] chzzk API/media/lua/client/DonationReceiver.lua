@@ -780,15 +780,12 @@ function PongDuDonationTest.inject(featureId, sender, amount, message)
 end
 
 -- PongDuDonation module receiver:
---  * PlayAlert -- server relays a donation alert sound to nearby clients
---    (sent by rewardManager missile / features/riseup; relay in server.lua).
 --  * Apply -- harmless fallback if a server ever pushes a donation directly.
+-- (구 PlayAlert 수신부 삭제 -- 주변 클라 효과음/반경 마커는 utils/fx 의
+--  PongDuFx/Play 로 일원화됐다. 기능별 전용 효과음이 필요해서 alert 고정이던
+--  구 경로를 대체한 것이다.)
 local function onServerCommand(module, command, data)
     if module ~= "PongDuDonation" then return end
-    if command == "PlayAlert" then
-        getSoundManager():PlaySound("alert", false, 1.0)
-        return
-    end
     if command ~= "Apply" then return end
     applyDonation(
         tostring(data.amount or ""),
