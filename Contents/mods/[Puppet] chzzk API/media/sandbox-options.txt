@@ -18,6 +18,11 @@ option PongDu.Host_SteamID = {
     page = PongDu_Main, translation = PongDu_Host_SteamID,
 }
 
+option PongDu.Host_AllowAdmin = {
+    type = boolean, default = false,
+    page = PongDu_Main, translation = PongDu_Host_AllowAdmin,
+}
+
 option PongDu.Divider_BuffTier = {
     type = boolean, default = false,
     page = PongDu_Main, translation = PongDu_Divider_BuffTier,

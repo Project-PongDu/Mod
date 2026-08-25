@@ -3,7 +3,8 @@
 -- 서버 후원은 접속자 전원에게 효과가 걸리는 계열이라 아무나 쏠 수 있으면 안 된다.
 -- 판정 기준은 두 가지다.
 --   ① 서버장: 샌드박스 PongDu.Host_SteamID 에 수동 입력한 Steam ID64 와 일치
---   ② 어드민: accessLevel == "Admin" (Host_SteamID 설정과 무관하게 통과)
+--   ② 어드민: accessLevel == "Admin". 단 샌드박스 PongDu.Host_AllowAdmin 이
+--      켜져 있을 때만이며, 이 경우 Host_SteamID 설정과 무관하게 통과한다.
 --
 -- 이 파일은 media/lua/shared/ 에 있어 서버와 클라이언트 양쪽에서 로드된다.
 -- require 가 아니라 전역 테이블 패턴(HitmanUtils 와 동일)을 쓴다.
@@ -80,9 +81,13 @@ function PongDuHost.getId()
 end
 
 -- ── 어드민 판정 ──────────────────────────────────────────────────────────────
--- 서버장 1명만 서버 후원을 쏠 수 있으면 운영이 안 된다. 서버장이 자리를 비운
--- 사이 스탭이 테스트를 돌리거나, Host_SteamID 를 아직 안 넣은 상태에서 확인할
--- 일이 있어 어드민도 통과시킨다.
+-- 서버장 1명만 서버 후원을 쏠 수 있으면 운영이 안 되는 경우가 있다. 서버장이
+-- 자리를 비운 사이 스탭이 테스트를 돌리거나, Host_SteamID 를 아직 안 넣은
+-- 상태에서 확인할 일이 있어 어드민도 통과시킬 수 있게 열어둔다.
+--
+-- 다만 어드민 권한은 /setaccesslevel 로 언제든 늘어나므로 기본값으로 열어두면
+-- 서버 전체 대상 효과(호드나이트/블러드문 등)의 발동 주체가 조용히 늘어난다.
+-- 그래서 샌드박스 PongDu.Host_AllowAdmin (기본 false) 로 명시적 opt-in 을 받는다.
 --
 -- 기준은 accessLevel == "Admin" 하나다. moderator / gm / overseer / observer 는
 -- 포함하지 않는다 -- 컨텍스트 메뉴 노출 조건인 isAdmin() 이 accessLevel == 32
@@ -100,6 +105,7 @@ end
 -- 물론 표시용일 뿐이고 실제 권한은 서버가 다시 본다.
 function PongDuHost.isAdminLevel(player)
     if not player then return false end
+    if not SandboxVars.PongDu.Host_AllowAdmin then return false end
     -- getAccessLevel() 은 내부 소문자값을 "Admin"/"Moderator"/.../"None" 으로
     -- 정규화해 돌려준다(IsoPlayer.java:6614). 미설정이면 "None".
     return player:getAccessLevel() == "Admin"
@@ -113,10 +119,11 @@ function PongDuHost.check(player)
     if not isClient() and not isServer() then return PongDuHost.OK end
     if not player then return PongDuHost.NOT_HOST end
 
-    -- 어드민 우회. Host_SteamID 설정/스팀 모드와 완전히 무관하게 통과시킨다.
+    -- 어드민 우회(PongDu.Host_AllowAdmin 이 켜져 있을 때만).
     -- 스팀 ID 게이트보다 먼저 두는 게 의도적이다 -- Host_SteamID 가 미설정이거나
     -- 오타여도, 스팀 모드가 꺼진 서버여도 어드민은 서버 후원을 쏠 수 있어야
-    -- 운영/테스트가 막히지 않는다.
+    -- 운영/테스트가 막히지 않는다. 옵션이 꺼져 있으면 isAdminLevel 이 항상
+    -- false 라 아래 기존 서버장 판정으로 그대로 떨어진다.
     if PongDuHost.isAdminLevel(player) then return PongDuHost.OK end
 
     -- 스팀 모드가 꺼진 서버(직접 IP 접속 전용)에서는 setSteamID 가 호출되지 않아
@@ -146,7 +153,11 @@ end
 function PongDuHost.logConfig()
     local s = rawId()
     if s == "" or s == NONE then
-        print("[PongDuHost] Host_SteamID not set -- server-tier donations are limited to admins")
+        if SandboxVars.PongDu.Host_AllowAdmin then
+            print("[PongDuHost] Host_SteamID not set -- server-tier donations are limited to admins")
+        else
+            print("[PongDuHost] Host_SteamID not set -- server-tier donations are DISABLED")
+        end
         return
     end
     if not isValidSteamID(s) then
@@ -167,5 +178,5 @@ function PongDuHost.logConfig()
         return
     end
     print("[PongDuHost] host configured steamID=" .. s
-        .. " (admins are also allowed to trigger server-tier donations)")
+        .. " allowAdmin=" .. tostring(SandboxVars.PongDu.Host_AllowAdmin))
 end
