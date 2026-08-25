@@ -2,14 +2,24 @@
 -- ***********************************
 -- *** [PongDu] 도네이션 (테스트)  ***
 -- ***********************************
--- MutantMenu.lua의 WorldContextMenuPre 패턴 이식. 어드민(또는 디버그)일 때만
--- 우클릭 컨텍스트메뉴에 "[PongDu] 도네이션" 항목이 뜨고, 그 안에서
--- 긍정효과 / 부정효과 / dev 세 서브메뉴로 나뉜다.
+-- MutantMenu.lua의 WorldContextMenuPre 패턴 이식. 어드민(또는 디버그)이
+-- **플레이어를 우클릭했을 때만** "[PongDu] <대상> 에게 후원효과 발동" 항목이
+-- 뜨고, 그 안에서 긍정효과 / 부정효과 / 서버 / dev 서브메뉴로 나뉜다.
+-- (구버전은 아무 칸이나 우클릭해도 뜨고 항상 자기 자신에게 발동했다.)
 --
--- 항목 클릭 = PongDuDonationTest.inject() 호출 -> 실제 도네이션과 완전히 같은
--- 경로(donationQueue -> 큐박스 슬롯 -> 안전지대 락 -> 카운트다운 -> 발동)를
--- 태운다. MutantMenu의 특좀 소환처럼 즉시 발동이 아니라 "가짜 후원 1건"이
--- 들어온 것과 동일하게 동작하는 게 목적. 통계(PongDuStats)에는 안 잡힘.
+-- ── 대상 지정 ──
+-- 클릭 지점 ±1칸을 훑어 IsoPlayer를 찾는다. 바닐라 clickedPlayer 전역은
+-- "본인 제외"라 싱글/혼자 접속 중엔 메뉴가 통째로 사라지므로 쓰지 않고
+-- 직접 훑는다 -- 자기 자신도 정상적인 대상이다(기존 자가 테스트 유지).
+--
+-- 항목 클릭 시:
+--   * 대상 == 본인  -> 로컬에서 바로 PongDuDonationTest.inject()
+--   * 대상 == 타인  -> PongDuDonation/Inject 를 서버로 -> 서버가 권한 재확인 후
+--                      해당 클라에만 중계 -> 그 클라에서 inject()
+-- 어느 쪽이든 실제 도네이션과 완전히 같은 경로(donationQueue -> 큐박스 슬롯 ->
+-- 안전지대 락 -> 카운트다운 -> 발동)를 탄다. MutantMenu의 특좀 소환처럼 즉시
+-- 발동이 아니라 "가짜 후원 1건"이 대상 클라에 들어온 것과 동일하게 동작하는 게
+-- 목적. 통계(PongDuStats)에는 안 잡힘.
 --
 -- ── 분류 기준 ──
 -- 샌드박스 옵션의 PongDu_Buff / PongDu_Debuff / PongDu_Server / PongDu_Dev
@@ -65,10 +75,79 @@ local CATEGORY_LIST = {
     { key = "dev",    label = getText("ContextMenu_PongDu_Dev"),    ids = DEV },
 }
 
-function DonationTestMenu.Fire(player, featureId)
-    if PongDuDonationTest and PongDuDonationTest.inject then
-        PongDuDonationTest.inject(featureId, "Admin", "0", "")
+-- ── 대상 플레이어 탐색 ────────────────────────────────────────────────────────
+-- 표시용 이름. MP에선 계정명(getUsername)이 우리가 원하는 값이고, SP에선 그게
+-- 비어 있을 수 있어 캐릭터 표시명으로 떨어진다.
+local function playerLabel(p)
+    local name = p:getUsername()
+    if name and name ~= "" then return name end
+    return p:getDisplayName()
+end
+
+-- 클릭 지점 ±1칸(바닐라 ISWorldObjectContextMenu.fetch와 동일 범위)을 훑어
+-- 대상 플레이어 1명을 고른다. 후보가 여럿이면 클릭한 칸 중심에 가장 가까운 쪽.
+-- 사망한 플레이어는 제외 -- 큐에 꽂아봐야 소모되지 않는다.
+local SEARCH_RANGE = 1
+
+local function findClickedPlayer()
+    local square = HitmanCompatibility.GetClickedSquare()
+    if not square then return nil end
+
+    local cx, cy, cz = square:getX(), square:getY(), square:getZ()
+    local cell = getCell()
+    local best, bestDist = nil, nil
+
+    for x = cx - SEARCH_RANGE, cx + SEARCH_RANGE do
+        for y = cy - SEARCH_RANGE, cy + SEARCH_RANGE do
+            local sq = cell:getGridSquare(x, y, cz)
+            if sq then
+                local movers = sq:getMovingObjects()
+                for i = 0, movers:size() - 1 do
+                    local o = movers:get(i)
+                    if instanceof(o, "IsoPlayer") and not o:isDead() then
+                        local dx = o:getX() - (cx + 0.5)
+                        local dy = o:getY() - (cy + 0.5)
+                        local d  = dx * dx + dy * dy
+                        if bestDist == nil or d < bestDist then
+                            best, bestDist = o, d
+                        end
+                    end
+                end
+            end
+        end
     end
+    return best
+end
+
+-- ── 발동 ──────────────────────────────────────────────────────────────────────
+-- target은 메뉴를 연 시점의 IsoPlayer 참조다. 메뉴 오픈~클릭 사이에 대상이
+-- 나가버릴 수 있으므로, 원격 경로에선 onlineID만 실어보내고 실제 존재 확인은
+-- 서버가 getPlayerByOnlineID로 다시 한다.
+function DonationTestMenu.Fire(player, featureId, target)
+    if not target then
+        print("[PongDuTestMenu] Fire aborted: target is nil (feature=" .. tostring(featureId) .. ")")
+        return
+    end
+
+    if target == player then
+        if PongDuDonationTest and PongDuDonationTest.inject then
+            PongDuDonationTest.inject(featureId, "Admin", "0", "")
+            print("[PongDuTestMenu] inject LOCAL feature=" .. tostring(featureId)
+                .. " target=" .. playerLabel(target))
+        else
+            print("[PongDuTestMenu] inject FAILED: PongDuDonationTest.inject missing")
+        end
+        return
+    end
+
+    sendClientCommand(player, "PongDuDonation", "Inject", {
+        ["target"]    = target:getOnlineID(),
+        ["featureId"] = featureId,
+        ["sender"]    = "Admin",
+    })
+    print("[PongDuTestMenu] inject REMOTE feature=" .. tostring(featureId)
+        .. " target=" .. playerLabel(target)
+        .. " onlineID=" .. tostring(target:getOnlineID()))
 end
 
 -- featureId의 한글 표시 라벨. IG_UI_KO.txt에 번역이 있으면 그걸 쓰고, 없으면
@@ -96,6 +175,10 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
     local player = getSpecificPlayer(playerID)
     if not player then return end
 
+    -- 플레이어를 우클릭한 게 아니면 메뉴 자체를 만들지 않는다.
+    local target = findClickedPlayer()
+    if not target then return end
+
     -- 분류표에 없는 featureId 추적용. CATEGORY_LIST를 훑어 뺀 나머지가
     -- getFeatureIds() 결과에 남으면 분류를 깜빡한 신규 기능이다.
     local uncategorized = {}
@@ -103,7 +186,7 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
         uncategorized[id] = true
     end
 
-    local rootOption = context:addOption(getText("ContextMenu_PongDu_Root"))
+    local rootOption = context:addOption(getText("ContextMenu_PongDu_Root", playerLabel(target)))
     local rootMenu = context:getNew(context)
     context:addSubMenu(rootOption, rootMenu)
 
@@ -119,7 +202,7 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
 
         for _, featureId in ipairs(category.ids) do
             if uncategorized[featureId] then
-                catMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId)
+                catMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId, target)
                 uncategorized[featureId] = nil
             end
         end
@@ -130,7 +213,7 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
     if uncategorized["missile"] then
         local missileCatMenu = SandboxVars.PongDu.Bombard_Injure
             and catMenusByKey["debuff"] or catMenusByKey["buff"]
-        missileCatMenu:addOption(displayLabel("missile"), player, DonationTestMenu.Fire, "missile")
+        missileCatMenu:addOption(displayLabel("missile"), player, DonationTestMenu.Fire, "missile", target)
         uncategorized["missile"] = nil
     end
 
@@ -147,7 +230,7 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
         local miscMenu = rootMenu:getNew(rootMenu)
         rootMenu:addSubMenu(miscOption, miscMenu)
         for _, featureId in ipairs(leftover) do
-            miscMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId)
+            miscMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId, target)
         end
     end
 end

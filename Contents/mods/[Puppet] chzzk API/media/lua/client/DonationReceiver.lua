@@ -787,6 +787,15 @@ end
 --  구 경로를 대체한 것이다.)
 local function onServerCommand(module, command, data)
     if module ~= "PongDuDonation" then return end
+    -- Inject -- 어드민이 DonationTestMenu에서 이 플레이어를 우클릭해 지정한 경우.
+    -- 서버가 권한 확인 후 대상 클라 1명에게만 보낸다. 로컬 우클릭 테스트와 같은
+    -- 경로(큐박스 -> 카운트다운 -> 발동)를 태우고 통계에는 잡히지 않는다.
+    if command == "Inject" then
+        local featureId = tostring(data.featureId or "")
+        local ok = PongDuDonationTest.inject(featureId, tostring(data.sender or "Admin"), "0", "")
+        print("[PongDu] admin inject received: feature=" .. featureId .. " accepted=" .. tostring(ok))
+        return
+    end
     if command ~= "Apply" then return end
     applyDonation(
         tostring(data.amount or ""),

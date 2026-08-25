@@ -272,6 +272,41 @@ DOServer["PongDuDonation"] = DOServer["PongDuDonation"] or {}
 DOServer["PongDuFireSupport"] = DOServer["PongDuFireSupport"] or {}
 DOServer["PongDuFx"]       = DOServer["PongDuFx"]       or {}
 
+-- ── 어드민 지정 후원효과 중계 ─────────────────────────────────────────────────
+-- 클라 DonationTestMenu에서 "타인"을 우클릭해 고른 경우에만 여기로 온다
+-- (대상이 본인이면 클라가 로컬에서 바로 inject하므로 서버를 안 거친다).
+-- 클라의 isAdmin() 체크는 신뢰 대상이 아니므로 서버에서 권한을 다시 본다.
+DOServer["PongDuDonation"]["Inject"] = function(player, data)
+    if not player or not data then return end
+    local from = tostring(player:getUsername())
+    if not player:isAccessLevel("admin") then
+        srvlog("Donation Inject DENIED: not admin (from=" .. from .. ")")
+        return
+    end
+
+    local targetID  = tonumber(data["target"])
+    local featureId = tostring(data["featureId"] or "")
+    if not targetID or featureId == "" then
+        srvlog("Donation Inject DROPPED: bad payload from=" .. from
+            .. " target=" .. tostring(data["target"]) .. " feature=" .. featureId)
+        return
+    end
+
+    local target = getPlayerByOnlineID(targetID)
+    if not target then
+        srvlog("Donation Inject DROPPED: target offline from=" .. from
+            .. " onlineID=" .. tostring(targetID) .. " feature=" .. featureId)
+        return
+    end
+
+    srvlog("Donation Inject from=" .. from .. " target=" .. tostring(target:getUsername())
+        .. " feature=" .. featureId)
+    sendServerCommand(target, "PongDuDonation", "Inject", {
+        ["featureId"] = featureId,
+        ["sender"]    = tostring(data["sender"] or "Admin"),
+    })
+end
+
 -- ── 폭격 반경 내 차량 파괴 ────────────────────────────────────────────────────
 -- setScript()로 불탄 차량 스크립트를 씌우는 방식은 바닐라에 Burnt 변형이
 -- 19종밖에 없어 전 차종을 커버하지 못하므로, 파츠 단위로 처리한다.
