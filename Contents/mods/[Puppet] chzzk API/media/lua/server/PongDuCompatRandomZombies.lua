@@ -47,8 +47,6 @@ function PongDuCompat.isSpecialZombie(zombie)
     if md then
         if md["PuppetMutant"] then return true end
         if md["isSprinter"] then return true end
-        -- 블러드문 변환 좀비. 이벤트 종료 시 마커가 지워지면 RZ 가 회수해간다.
-        if md["PongDuBloodMoon"] then return true end
         if md["hitmanBrain"] then return true end
     end
     if zombie:getVariableBoolean("Hitman") then return true end
