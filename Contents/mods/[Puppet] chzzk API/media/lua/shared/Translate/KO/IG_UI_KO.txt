@@ -89,9 +89,8 @@ IGUI_KO = {
     IGUI_donation_random_skill_potion = "강화 혈청",
 
 
-
     IGUI_donation_food_supply = "식량 보급",
-    IGUI_donation_food_supply_item = "차카칩",
+    IGUI_donation_food_supply_item = "",
 
     IGUI_donation_vehicle_drop = "차량 드랍",
 

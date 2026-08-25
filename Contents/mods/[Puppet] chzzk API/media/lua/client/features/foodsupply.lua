@@ -3,8 +3,13 @@ local _a = {}
 -- ── 식량 보급 (food_supply) 클라이언트 ───────────────────────────────────────
 --
 -- 후원자 개인 버프 계열. 후원이 발동하면 바닐라 감자칩(Base.Crisps)을
--- 샌드박스 FoodSupply_Count 개수만큼 인벤토리에 넣고, 표시명을 번역키
--- IGUI_donation_food_supply_item 으로 갈아끼운다.
+-- 샌드박스 FoodSupply_Count 개수만큼 인벤토리에 넣는다.
+--
+-- 표시명은 번역키 IGUI_donation_food_supply_item 이 있을 때만 덮어쓴다.
+-- 키가 없으면(번역 파일에서 지웠거나 다른 언어팩에 없는 경우) 아이템 기본
+-- 이름을 그대로 둔다 -- getTextOrNull()로 키 존재 여부를 확인하고, nil이면
+-- setName() 자체를 호출하지 않는다(호출하면 originalName과 달라져서 무조건
+-- "번역 안 된 키 문자열"이 이름이 돼버린다).
 --
 -- 이름 변경이 저장되는 근거 (B41 41.78.20 InventoryItem.java 확인):
 --   save() 가 `name != originalName` 일 때만 이름을 직렬화하므로,
@@ -38,7 +43,13 @@ function _a.a(sender)
     local count = SandboxVars.PongDu.FoodSupply_Count
 
     local inventory = player:getInventory()
-    local label     = getText("IGUI_donation_food_supply_item")
+    local label     = getTextOrNull("IGUI_donation_food_supply_item")
+    -- 키가 존재하되 값이 빈 문자열(또는 공백뿐)인 경우도 "없음"과 동일하게
+    -- 취급한다. Lua에서 ""는 truthy라 label만 nil 검사하면 걸러지지 않고,
+    -- 그대로 setName에 들어가 "닉네임's " 처럼 이름 없는 라벨이 박혀버린다.
+    if label and label:match("^%s*$") then
+        label = nil
+    end
     local delivered = 0
 
     for i = 1, count do
@@ -48,9 +59,15 @@ function _a.a(sender)
                 .. ", index=" .. i .. "/" .. tostring(count) .. ")")
             break
         end
-        item:setName((sender or "") .. "'s " .. label)
+        if label then
+            item:setName((sender or "") .. "'s " .. label)
+        end
         item:getModData().t3Donor = sender or ""
         delivered = delivered + 1
+    end
+
+    if not label then
+        print(LOG .. "translation key IGUI_donation_food_supply_item not found -- using default item name")
     end
 
     if delivered <= 0 then
