@@ -119,6 +119,30 @@ local function findClickedPlayer()
     return best
 end
 
+-- ── 서버 티어 표시 게이트 ────────────────────────────────────────────────────
+-- PongDu_Server 계열(호드나이트/블러드문/의약품박스)은 서버측 핸들러
+-- (PongDuHordeServer / PongDuBloodMoonServer / PongDuMedBoxServer)가 요청자를
+-- PongDuHost.check 로 게이트한다. 서버장이 아닌 대상에게 꽂아봐야 대상 화면에
+-- 거부 안내만 뜨고 아무 일도 안 일어난다.
+--
+-- 여기 판정은 **표시용**이다. 실제 발동 권한은 서버가 player:getSteamID() 로
+-- 다시 보므로 이 체크를 우회해도 얻는 게 없다.
+-- 클라에서도 판정이 가능한 건 원격 플레이어의 steamID 가 스팀 모드 서버에서
+-- 클라까지 동기화되기 때문이다(GameClient.java:3264 setSteamID).
+--
+-- NOT_HOST(대상이 확실히 서버장이 아님)일 때만 숨긴다. 설정 자체가 잘못된
+-- 경우(UNSET / BAD_ID / WRONG_KIND / NO_STEAM)는 그대로 노출한다 -- 눌러서
+-- 사유 안내를 받는 편이 메뉴가 조용히 사라지는 것보다 진단에 낫다.
+local function serverTierVisible(target)
+    local verdict = PongDuHost.check(target)
+    if verdict == PongDuHost.NOT_HOST then
+        print("[PongDuTestMenu] server-tier hidden: target is not the host ("
+            .. playerLabel(target) .. ")")
+        return false
+    end
+    return true
+end
+
 -- ── 발동 ──────────────────────────────────────────────────────────────────────
 -- target은 메뉴를 연 시점의 IsoPlayer 참조다. 메뉴 오픈~클릭 사이에 대상이
 -- 나가버릴 수 있으므로, 원격 경로에선 onlineID만 실어보내고 실제 존재 확인은
@@ -193,17 +217,26 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
     -- buff/debuff catMenu 참조를 key로 잡아둔다. missile을 루프 밖에서
     -- 동적으로 꽂아넣어야 해서(아래 참조).
     local catMenusByKey = {}
+    local showServerTier = serverTierVisible(target)
 
     for _, category in ipairs(CATEGORY_LIST) do
-        local catOption = rootMenu:addOption(category.label)
-        local catMenu = rootMenu:getNew(rootMenu)
-        rootMenu:addSubMenu(catOption, catMenu)
-        catMenusByKey[category.key] = catMenu
-
-        for _, featureId in ipairs(category.ids) do
-            if uncategorized[featureId] then
-                catMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId, target)
+        if category.key == "server" and not showServerTier then
+            -- 숨기더라도 uncategorized 소진은 해줘야 한다. 안 그러면 아래
+            -- "(미분류)" 폴백으로 새어나가 그대로 다시 노출된다.
+            for _, featureId in ipairs(category.ids) do
                 uncategorized[featureId] = nil
+            end
+        else
+            local catOption = rootMenu:addOption(category.label)
+            local catMenu = rootMenu:getNew(rootMenu)
+            rootMenu:addSubMenu(catOption, catMenu)
+            catMenusByKey[category.key] = catMenu
+
+            for _, featureId in ipairs(category.ids) do
+                if uncategorized[featureId] then
+                    catMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId, target)
+                    uncategorized[featureId] = nil
+                end
             end
         end
     end
