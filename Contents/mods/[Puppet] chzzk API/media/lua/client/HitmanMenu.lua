@@ -89,6 +89,9 @@ function HitmanMenu.WorldContextMenuPre(playerID, context, worldobjects, test)
     local world = getWorld()
     local player = getSpecificPlayer(playerID)
     local square = HitmanCompatibility.GetClickedSquare()
+    -- [PongDu] nil 가드. 원본은 곧바로 square:getZombie() 를 불러서 클릭 지점이
+    -- 잡히지 않으면 "attempt to index nil" 이 콘솔로 쏟아진다.
+    if not square then return end
 
     local zombie = square:getZombie()
     if not zombie then
@@ -131,16 +134,15 @@ function HitmanMenu.WorldContextMenuPre(playerID, context, worldobjects, test)
         end
     end
 
-    if isDebugEnabled() or isAdmin() then
-        HitmanCustom.Load()
-        local clanData  = HitmanCustom.ClanGetAllSorted()
-        local clanSpawnOption = context:addOption("Spawn Hitman Clan")
-        local clanSpawnMenu = context:getNew(context)
-        context:addSubMenu(clanSpawnOption, clanSpawnMenu)
-        for cid, clan in pairs(clanData) do
-            clanSpawnMenu:addOption("Clan " .. clan.general.name, player, HitmanMenu.SpawnClan, square, cid)
-        end
-    end
+    -- ── [PongDu] "Spawn Hitman Clan" 컨텍스트 메뉴 제거 ──────────────────────
+    -- 원본은 isDebugEnabled() or isAdmin() 조건으로 클랜 목록을 붙이고
+    -- Hitman_Spawner/Type 으로 즉시 소환했다. 방송 중 어드민이 우클릭 한 번
+    -- 잘못하면 밴딧이 그대로 쏟아지므로 뺐다.
+    -- 히트맨 소환은 퐁듀 도네 경로(featureId bandit_melee / bandit_ranged ->
+    -- features/hitman.lua -> Hitman_Spawner/Clan)로만 나가고, 수동 테스트는
+    -- DonationTestMenu 의 dev 서브메뉴를 쓴다.
+    -- 서버측 HitmanServer.Hitman_Spawner.Type 핸들러는 원본 그대로 남겨둔다
+    -- (히트맨 모드 상류 코드라 건드리지 않는다).
 end
 
 Events.OnPreFillWorldObjectContextMenu.Add(HitmanMenu.WorldContextMenuPre)
