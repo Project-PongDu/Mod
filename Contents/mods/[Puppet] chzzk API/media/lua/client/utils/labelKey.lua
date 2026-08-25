@@ -34,4 +34,5 @@ return {
     ["rise_up_dead_man"]     = "IGUI_donation_rise_up_dead_man",
     ["zombie_rain"]          = "IGUI_donation_zombie_rain",
     ["fire_support"]         = "IGUI_donation_fire_support",
+    ["food_supply"]          = "IGUI_donation_food_supply",
 }

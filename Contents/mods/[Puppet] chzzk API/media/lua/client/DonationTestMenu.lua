@@ -31,6 +31,7 @@ local labelKey       = require("utils/labelKey")
 local BUFF = {
     "buff_roulette", "vaccine", "random_skill_potion", "random_weapon",
     "vehicle_drop", "inv_save_ticket", "fire_support",
+    "food_supply",
 }
 
 local DEBUFF = {

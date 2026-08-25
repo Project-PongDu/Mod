@@ -58,6 +58,11 @@ option PongDu.Tier_fire_support = {
     page = PongDu_Main, translation = PongDu_Tier_fire_support,
 }
 
+option PongDu.Tier_food_supply = {
+    type = integer, min = 0, max = 1000000, default = 1500,
+    page = PongDu_Main, translation = PongDu_Tier_food_supply,
+}
+
 option PongDu.Divider_DebuffTier = {
     type = boolean, default = false,
     page = PongDu_Main, translation = PongDu_Divider_DebuffTier,
@@ -211,6 +216,21 @@ option PongDu.VehicleDrop_MinDistance = {
 option PongDu.VehicleDrop_MaxDistance = {
     type = integer, min = 0, max = 300, default = 50,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MaxDistance,
+}
+
+option PongDu.Divider_FoodSupply = {
+    type = boolean, default = false,
+    page = PongDu_Buff, translation = PongDu_Divider_FoodSupply,
+}
+
+option PongDu.Delay_food_supply = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Buff, translation = PongDu_Delay_food_supply,
+}
+
+option PongDu.FoodSupply_Count = {
+    type = integer, min = 1, max = 50, default = 5,
+    page = PongDu_Buff, translation = PongDu_FoodSupply_Count,
 }
 
 /* 스킬별 강화혈청 획득 등급 제한.

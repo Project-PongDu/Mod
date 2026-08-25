@@ -19,6 +19,7 @@ local firesupport = require("features/firesupport")
 local serum      = require("features/skillpotion")
 local hordenight = require("features/hordenight")
 local medicalbox = require("features/medicalbox")
+local foodsupply = require("features/foodsupply")
 local bloodmoon  = require("features/bloodmoon")
 local global     = require("global")
 local fx         = require("utils/fx")
@@ -273,6 +274,13 @@ local rewardHandlers = {
             -- 50/50: 근접무기상자 / 원거리무기상자. 상자를 열면 t3RandomWeapon 확률표로 무기 1개.
             local boxId = (ZombRand(100) < 50) and "weapon_box_melee" or "weapon_box_ranged"
             giveSupply(boxId, sender)
+            global.processingEvent = false
+        end,
+    },
+    ["food_supply"] = {
+        immediate = true,
+        fn = function(sender)
+            foodsupply.a(sender)                          -- Food supply (Crisps xN)
             global.processingEvent = false
         end,
     },

@@ -138,6 +138,13 @@ Sandbox_KO = {
 	Sandbox_PongDu_VehicleDrop_MaxDistance = "차량 드랍 최대 거리",
 	Sandbox_PongDu_VehicleDrop_MaxDistance_tooltip = "이 거리(타일) 안에서 소환 위치를 찾습니다. 자리를 못 찾으면 플레이어 발밑에 강제 소환됩니다.",
 
+	Sandbox_PongDu_Divider_FoodSupply = "_________________ 식량 보급 _________________",
+	Sandbox_PongDu_Divider_FoodSupply_tooltip = "이것은 단순한 구분선일 뿐이며 선택해도 영향을 미치지 않습니다.",
+	Sandbox_PongDu_Delay_food_supply = "발동 대기시간: 식량 보급 (초)",
+	Sandbox_PongDu_Delay_food_supply_tooltip = "식량 보급 후원이 대기열에 올라간 뒤 발동되기까지의 카운트다운(0~60초). 0이면 즉시 발동합니다.",
+	Sandbox_PongDu_FoodSupply_Count = "식량 보급 지급 개수",
+	Sandbox_PongDu_FoodSupply_Count_tooltip = "식량 보급 후원 1건당 지급할 개수(1~50). 인벤토리 무게를 넘겨도 강제로 들어가므로 너무 크게 잡지 마세요.",
+
 	Sandbox_PongDu_Divider_InvSaveTicket = "____________ 인벤토리 세이브 티켓 ____________",
 	Sandbox_PongDu_Divider_InvSaveTicket_tooltip = "이것은 단순한 구분선일 뿐이며 선택해도 영향을 미치지 않습니다.",
 	Sandbox_PongDu_Delay_inv_save_ticket = "발동 대기시간: 인벤토리 세이브 티켓 (초)",
@@ -238,6 +245,8 @@ Sandbox_KO = {
 	Sandbox_PongDu_Tier_inv_save_ticket_tooltip = "인벤토리 세이브 티켓 후원이 발동하는 금액입니다. 0으로 두면 이 서버에서는 해당 기능을 사용하지 않으며, 퐁듀 런처의 리워드 목록에도 표시되지 않습니다. 다른 기능과 같은 금액을 지정하면 위쪽 기능이 우선합니다.",
 	Sandbox_PongDu_Tier_fire_support = "화력 지원 (원)",
 	Sandbox_PongDu_Tier_fire_support_tooltip = "화력 지원 후원이 발동하는 금액입니다. 0으로 두면 이 서버에서는 해당 기능을 사용하지 않으며, 퐁듀 런처의 리워드 목록에도 표시되지 않습니다. 다른 기능과 같은 금액을 지정하면 위쪽 기능이 우선합니다.",
+	Sandbox_PongDu_Tier_food_supply = "식량 보급 (원)",
+	Sandbox_PongDu_Tier_food_supply_tooltip = "식량 보급 후원이 발동하는 금액입니다. 0으로 두면 이 서버에서는 해당 기능을 사용하지 않으며, 퐁듀 런처의 리워드 목록에도 표시되지 않습니다. 다른 기능과 같은 금액을 지정하면 위쪽 기능이 우선합니다.",
 	Sandbox_PongDu_Tier_missile = "미사일 폭격 (원)",
 	Sandbox_PongDu_Tier_missile_tooltip = "미사일 폭격 후원이 발동하는 금액입니다. 0으로 두면 이 서버에서는 해당 기능을 사용하지 않으며, 퐁듀 런처의 리워드 목록에도 표시되지 않습니다. 다른 기능과 같은 금액을 지정하면 위쪽 기능이 우선합니다.",
 	Sandbox_PongDu_Tier_zombie_rain = "좀비 레인 (원)",

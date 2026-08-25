@@ -90,6 +90,9 @@ IGUI_KO = {
 
 
 
+    IGUI_donation_food_supply = "식량 보급",
+    IGUI_donation_food_supply_item = "차카칩",
+
     IGUI_donation_vehicle_drop = "차량 드랍",
 
     IGUI_donation_vehicle_drop_location = "보급차량 투하위치 확인! X:%1 Y:%2 !",

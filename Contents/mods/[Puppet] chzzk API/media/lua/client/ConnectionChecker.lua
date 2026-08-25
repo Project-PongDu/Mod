@@ -48,6 +48,7 @@ local FEATURE_IDS = {
     "random_skill_potion",
     "mutant_spawn",
     "inv_save_ticket",
+    "food_supply",
     "fire_support",
     "missile",
     "zombie_rain",
