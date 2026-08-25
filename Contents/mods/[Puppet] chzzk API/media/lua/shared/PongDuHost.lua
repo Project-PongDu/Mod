@@ -1,8 +1,9 @@
 -- ── 서버장(호스트) 판정 ── 서버 후원(PongDu_Server 탭) 공용 게이트 ───────────
 --
 -- 서버 후원은 접속자 전원에게 효과가 걸리는 계열이라 아무나 쏠 수 있으면 안 된다.
--- 판정 기준은 서버장의 Steam ID64 하나이며, 샌드박스 PongDu.Host_SteamID 에
--- 수동 입력한다.
+-- 판정 기준은 두 가지다.
+--   ① 서버장: 샌드박스 PongDu.Host_SteamID 에 수동 입력한 Steam ID64 와 일치
+--   ② 어드민: accessLevel == "Admin" (Host_SteamID 설정과 무관하게 통과)
 --
 -- 이 파일은 media/lua/shared/ 에 있어 서버와 클라이언트 양쪽에서 로드된다.
 -- require 가 아니라 전역 테이블 패턴(HitmanUtils 와 동일)을 쓴다.
@@ -78,6 +79,32 @@ function PongDuHost.getId()
     return s
 end
 
+-- ── 어드민 판정 ──────────────────────────────────────────────────────────────
+-- 서버장 1명만 서버 후원을 쏠 수 있으면 운영이 안 된다. 서버장이 자리를 비운
+-- 사이 스탭이 테스트를 돌리거나, Host_SteamID 를 아직 안 넣은 상태에서 확인할
+-- 일이 있어 어드민도 통과시킨다.
+--
+-- 기준은 accessLevel == "Admin" 하나다. moderator / gm / overseer / observer 는
+-- 포함하지 않는다 -- 컨텍스트 메뉴 노출 조건인 isAdmin() 이 accessLevel == 32
+-- (admin) 단일 값이라(LuaManager.java:6612), 여기서 범위를 넓히면 "메뉴는 안
+-- 보이는데 서버는 허용" 같은 비대칭이 생긴다.
+--
+-- 서버측 판정은 위조 불가능하다. IsoPlayer.accessLevel 을 채우는 곳이
+-- GameServer.java:5366 의 udpConnection0.accessLevel 하나뿐이고, 이건 로그온
+-- 시점에 ServerWorldDatabase 가 준 값이다.
+--
+-- 클라측에서도 같은 함수를 쓸 수 있다. GameServer.sendPlayerExtraInfo 가
+-- accessLevel 을 전 접속자에게 브로드캐스트하고(GameServer.java:1274~1288)
+-- GameClient.receiveExtraInfo 가 원격 플레이어 객체에 대입하므로
+-- (GameClient.java:3086), 클라에서 남의 어드민 여부도 볼 수 있다.
+-- 물론 표시용일 뿐이고 실제 권한은 서버가 다시 본다.
+function PongDuHost.isAdminLevel(player)
+    if not player then return false end
+    -- getAccessLevel() 은 내부 소문자값을 "Admin"/"Moderator"/.../"None" 으로
+    -- 정규화해 돌려준다(IsoPlayer.java:6614). 미설정이면 "None".
+    return player:getAccessLevel() == "Admin"
+end
+
 -- 서버 판정. 반환값은 위 상수 중 하나.
 function PongDuHost.check(player)
     -- 싱글플레이: 플레이어가 곧 서버장. setSteamID 호출처가
@@ -85,6 +112,12 @@ function PongDuHost.check(player)
     -- steamID 가 long 기본값 0 으로 남는다. ID 비교 자체가 성립하지 않는다.
     if not isClient() and not isServer() then return PongDuHost.OK end
     if not player then return PongDuHost.NOT_HOST end
+
+    -- 어드민 우회. Host_SteamID 설정/스팀 모드와 완전히 무관하게 통과시킨다.
+    -- 스팀 ID 게이트보다 먼저 두는 게 의도적이다 -- Host_SteamID 가 미설정이거나
+    -- 오타여도, 스팀 모드가 꺼진 서버여도 어드민은 서버 후원을 쏠 수 있어야
+    -- 운영/테스트가 막히지 않는다.
+    if PongDuHost.isAdminLevel(player) then return PongDuHost.OK end
 
     -- 스팀 모드가 꺼진 서버(직접 IP 접속 전용)에서는 setSteamID 가 호출되지 않아
     -- 전원 0 이다. 통과시키면 접속자 전원이 서버장이 되므로 기능을 막는다.
@@ -113,7 +146,7 @@ end
 function PongDuHost.logConfig()
     local s = rawId()
     if s == "" or s == NONE then
-        print("[PongDuHost] Host_SteamID not set -- server-tier donations are DISABLED")
+        print("[PongDuHost] Host_SteamID not set -- server-tier donations are limited to admins")
         return
     end
     if not isValidSteamID(s) then
@@ -133,5 +166,6 @@ function PongDuHost.logConfig()
             .. " player, so Host_SteamID can never match")
         return
     end
-    print("[PongDuHost] host configured steamID=" .. s)
+    print("[PongDuHost] host configured steamID=" .. s
+        .. " (admins are also allowed to trigger server-tier donations)")
 end
