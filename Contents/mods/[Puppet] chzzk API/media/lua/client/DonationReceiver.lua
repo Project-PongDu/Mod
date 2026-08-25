@@ -119,6 +119,7 @@ local iconTexPath = {
     ["zombie_rain"]          = "media/textures/donation/zombie_rain.png",
     ["random_skill_potion"]  = "media/textures/donation/random_skill_potion.png",
     ["fire_support"]         = "media/textures/donation/fire_support.png",
+    ["food_supply"]          = "media/textures/donation/food_supply.png",
     
     
     ["medical_box"]          = "media/textures/donation/medical_box.png",
