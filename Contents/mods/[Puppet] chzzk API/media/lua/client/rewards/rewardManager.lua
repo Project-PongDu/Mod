@@ -259,20 +259,13 @@ local rewardHandlers = {
         immediate = function()
             return not SandboxVars.PongDu.RiseUp_SafeZoneBlock
         end,
-        -- 최소 시체 수 락 (RiseUp_MinCorpses). 반경 안 시체가 하한선에 못 미치면
-        -- 발동시켜봐야 아무 일도 안 일어나므로(후원자 입장에선 먹통), 안전지대
-        -- 락과 같은 방식으로 슬롯을 자물쇠 상태로 붙잡아둔다. 시체를 더 쌓거나
-        -- 시체가 있는 곳으로 이동해 하한선을 넘기는 순간 락이 풀린다.
-        -- 옵션이 0이면 게이트 자체가 꺼져 항상 false.
-        --
-        -- 대기 중임을 알리는 표시는 큐박스가 아니라 무들 인디케이터가 맡는다
-        -- (호드나이트/블러드문과 같은 moodleStack 슬롯). 큐박스 자물쇠는
-        -- 안전지대 락과 모양이 같아서 사유 구분이 안 되기 때문이다.
-        -- 인디케이터의 표시/숨김 판정은 riseup.lua 가 이 훅의 호출 자체를
-        -- 신호로 삼아 처리하므로 여기서 따로 할 일은 없다.
-        blocked = function(player)
-            return riseup.isBelowMinimum(player)
-        end,
+        -- 최소 시체 수(RiseUp_MinCorpses) 대기는 여기서 처리하지 않는다.
+        -- blocked 훅을 쓰면 카운트다운 자체가 멈춰서 "3초 딜레이 후 발동"이라는
+        -- 후원 규약이 깨진다(시체가 없으면 딜레이가 흐르지도 않고 슬롯만 잠긴다).
+        -- 그래서 카운트다운은 시체 유무와 무관하게 정상적으로 끝내고, fn 이
+        -- 불린 시점부터 riseup.lua 가 스캔/대기/발동을 스스로 관리한다.
+        -- 큐박스 슬롯은 카운트다운이 끝나면 그냥 사라지고, 이후 대기 상태는
+        -- 무들 인디케이터가 표시한다.
         fn = function(sender)
             riseup.a(global.player)
             global.processingEvent = false

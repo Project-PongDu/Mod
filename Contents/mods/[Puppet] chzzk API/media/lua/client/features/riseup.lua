@@ -7,6 +7,7 @@ local fx    = require("utils/fx")
 local moodleStack = require("utils/moodleStack")
 local colorMap    = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local zone        = require("utils/zone")
 
 -- 라이즈 업 데드 맨: 도네 플레이어 기준 반경 내 모든 시체(IsoDeadBody)를
 -- 좀비로 되살린다.
@@ -32,7 +33,7 @@ local MARKER_DURATION_MS = 3000   -- 반경 표시 유지 시간
 -- 받는다 (기존엔 본인만 necromance, 나머지는 alert 였다).
 -- 반경 표시 자체는 샌드박스 RiseUp_ShowRadius 를 따른다 — 꺼져 있으면
 -- markerRadius=0 으로 나가므로 누구에게도 안 뜬다.
-function _a.a(player)
+local function doFire(player)
     if not player then return end
     local radius = SandboxVars.PongDu.RiseUp_Radius
     local showRadius = SandboxVars.PongDu.RiseUp_ShowRadius
@@ -59,28 +60,42 @@ function _a.a(player)
 end
 
 -- ── 최소 시체 수 게이트 ───────────────────────────────────────────────────
--- 샌드박스 RiseUp_MinCorpses 이상의 시체가 반경 안에 없으면 강령술을 발동시키지
--- 않고 큐박스 슬롯을 자물쇠 상태로 묶어둔다 (rewardManager 의 blocked 훅).
--- 시체가 하한선을 넘는 순간 락이 풀리고 원래 카운트다운으로 복귀한다.
+-- 샌드박스 RiseUp_MinCorpses 이상의 시체가 반경 안에 있을 때만 강령술이 터진다.
+--
+-- ★ 타이밍 설계 (구버전에서 바뀐 부분):
+--   구버전은 rewardManager 의 blocked 훅을 썼다. 그러면 큐박스 카운트다운
+--   자체가 멈춰서, 시체가 없는 동안엔 3초 딜레이가 흐르지도 않고 슬롯만 자물쇠로
+--   잠겨 있다가, 시체가 채워지면 그제서야 남은 딜레이를 마저 세고 터졌다.
+--   "딜레이 후 발동"이라는 후원 규약이 깨지는 순서다.
+--   지금은 반대다. 카운트다운은 시체 유무와 무관하게 정상적으로 끝나고,
+--   그 시점(= rewardManager 가 fn 을 부르는 순간)에 비로소 스캔을 시작한다.
+--     · 하한선을 이미 만족 -> 스캔이 끝나는 즉시(보통 몇 틱) 발동
+--     · 미달              -> 대기 상태로 들어가 계속 재스캔, 채워지는 순간 즉시 발동
+--   즉 큐박스는 카운트다운만 담당하고, 그 뒤의 대기는 무들 인디케이터가 맡는다.
+--   (큐박스에서 강령술 슬롯은 카운트다운이 끝나면 정상적으로 사라진다.)
 --
 -- 왜 클라에서 세는가:
 --   시체는 서버 권위지만 "지금 이 반경에 몇 구 있나"는 클라 셀에도 그대로
 --   존재한다(클라가 시체를 렌더한다). 반경 최대 60타일은 클라 로드 반경 안이라
---   결과가 어긋날 여지가 없고, 락 판정 주체인 큐박스가 어차피 클라라서
+--   결과가 어긋날 여지가 없고, 발동 주체가 어차피 클라(sendClientCommand)라서
 --   서버 왕복(비동기 응답 대기)을 붙일 이유가 없다.
 --
 -- 왜 점진 스캔인가:
 --   r=30 기준 61x61x8층 = 29,768 스퀘어다. 매 틱 전수 조사하면 Kahlua Java 호출
---   오버헤드로 프레임이 갈린다. blocked() 는 매 틱 불리므로, 한 번 호출에
---   GATE_BUDGET 스퀘어만 처리하고 커서를 남긴 뒤 다음 호출에서 이어서 센다.
---   하한선을 채우는 순간 조기 종료하므로 통상은 몇 틱 안에 끝나고, 최악(시체가
---   정말 없을 때)에도 완주까지 60프레임 = 1초 남짓이다.
---   완주하면 결과를 캐시하고 GATE_COOLDOWN 뒤에 새 스윕을 시작한다.
---
--- 대기 중임을 알리는 표시는 아래 무들 인디케이터가 맡는다 (큐박스 자물쇠는
--- 안전지대 락과 모양이 같아 사유 구분이 안 된다).
-local GATE_BUDGET   = 600     -- blocked() 1회당 조사할 스퀘어 수
-local GATE_COOLDOWN = 1000    -- 스윕 완주 후 다음 스윕까지 대기 (ms)
+--   오버헤드로 프레임이 갈린다. 그래서 한 틱에 GATE_BUDGET 스퀘어만 처리하고
+--   커서를 남긴 뒤 다음 틱에서 이어서 센다. 하한선을 채우는 순간 조기 종료하므로
+--   통상은 몇 틱 안에 끝나고, 최악(시체가 정말 없을 때)에도 완주까지 60프레임 =
+--   1초 남짓이다. 완주하면 결과를 캐시하고 GATE_COOLDOWN 뒤에 새 스윕을 시작한다.
+--   대기분이 없으면(_pending == 0) 스캔 자체를 아예 돌리지 않아 평시 부하는 0이다.
+local GATE_BUDGET   = 600     -- 틱당 조사할 스퀘어 수
+local GATE_COOLDOWN = 500     -- 스윕 완주 후 다음 스윕까지 대기 (ms)
+-- 발동 직후 재스캔 유예. reanimateNow() 는 서버에서 다음 틱에 처리되고 시체
+-- 제거가 클라까지 동기화되는 데 시간이 걸린다. 곧바로 재스캔하면 이미 부활이
+-- 확정된 시체를 다시 세서, 대기분이 2개 이상일 때 같은 시체 더미로 연달아
+-- 터져버린다. 그 창을 건너뛰기 위한 값.
+local REFIRE_COOLDOWN = 3000
+
+local _pending = 0            -- 카운트다운을 마치고 시체를 기다리는 강령술 수
 
 local _gate = {
     active  = false,          -- 스윕 진행 중
@@ -89,10 +104,20 @@ local _gate = {
     count   = 0,
     need    = 0,
     pass    = false,          -- 최근 스윕 결과 (하한선 충족)
+    judged  = false,          -- 스윕을 한 번이라도 완주했는지 (표시 깜빡임 방지)
     seen    = 0,              -- 최근 스윕이 센 시체 수 (표시용)
     nextAt  = 0,              -- 다음 스윕 시작 가능 시각
-    lastQuery = 0,            -- isBelowMinimum 이 마지막으로 불린 시각 (인디케이터 판정)
 }
+
+-- 캐시 무효화. 새 요청이 들어왔거나 방금 발동해서 시체 구성이 바뀐 시점에
+-- 부른다. delayMs 를 주면 그만큼 재스캔을 미룬다.
+local function gateInvalidate(delayMs)
+    _gate.active = false
+    _gate.pass   = false
+    _gate.judged = false
+    _gate.seen   = 0
+    _gate.nextAt = getTimestampMs() + (delayMs or 0)
+end
 
 local function gateBeginSweep(player, need)
     _gate.active = true
@@ -148,39 +173,54 @@ local function gateStep()
     return false
 end
 
--- isBelowMinimum(player) -> true면 지금은 발동 불가 (큐박스 자물쇠 유지)
--- rewardManager 의 blocked 훅이 매 틱 호출한다. 첫 판정이 나오기 전에는
--- 비관적으로 true를 돌려준다 -- "몰라서 그냥 터뜨렸다"보다 몇 프레임 대기가 낫다.
-function _a.isBelowMinimum(player)
-    local need = SandboxVars.PongDu.RiseUp_MinCorpses
-    if need <= 0 then                      -- 하한선 없음: 게이트 자체를 끔
-        _gate.active = false
-        _gate.need   = 0
-        return false
-    end
-    if not player then return true end
-
+-- 한 틱 분량 스캔을 돌린다. 스윕이 완주하면 결과를 _gate.pass/seen 에 남긴다.
+local function gateTick(player, need)
     local now = getTimestampMs()
-    _gate.lastQuery = now                  -- 무들 인디케이터 표시 판정용 (아래 참조)
     if not _gate.active then
-        if now < _gate.nextAt then return not _gate.pass end
+        if now < _gate.nextAt then return end
         gateBeginSweep(player, need)
     end
-
     if gateStep() then
         _gate.active = false
         _gate.pass   = (_gate.count >= _gate.need)
+        _gate.judged = true
         _gate.seen   = _gate.count
         _gate.nextAt = now + GATE_COOLDOWN
         if not _gate.pass then
             print("[PongDu][RiseUp][Gate] below minimum: " .. tostring(_gate.count)
-                .. "/" .. tostring(_gate.need) .. " r=" .. tostring(_gate.r))
+                .. "/" .. tostring(_gate.need) .. " r=" .. tostring(_gate.r)
+                .. " pending=" .. tostring(_pending))
         else
             print("[PongDu][RiseUp][Gate] minimum met: " .. tostring(_gate.count)
                 .. "/" .. tostring(_gate.need))
         end
     end
-    return not _gate.pass
+end
+
+-- 안전지대 보류. 큐박스 단계의 immediate 훅이 이미 한 번 걸러주지만, 카운트다운을
+-- 마친 뒤 시체를 기다리는 동안 플레이어가 세이프하우스로 들어갈 수 있다.
+-- 그 상태로 터지면 SafeZoneBlock 옵션이 무의미해지므로 대기 조건에 포함한다.
+local function zoneHolding(player)
+    if not SandboxVars.PongDu.RiseUp_SafeZoneBlock then return false end
+    return zone.a(player) == true
+end
+
+-- rewardManager 가 카운트다운을 끝내고 부르는 진입점. 여기서 즉시 터뜨리지 않고
+-- 대기분으로 접수한 뒤 스캔을 시작한다 (위 타이밍 설계 주석 참조).
+-- 하한선 옵션이 0이면 게이트가 꺼진 것이므로 예전처럼 그 자리에서 발동한다.
+function _a.a(player)
+    if not player then return end
+    local need = SandboxVars.PongDu.RiseUp_MinCorpses
+    if need <= 0 then
+        doFire(player)
+        return
+    end
+    _pending = _pending + 1
+    -- 직전 스윕 결과는 카운트다운 이전 상태라 그대로 믿으면 안 된다. 무효화해서
+    -- "지금 이 순간"부터 새로 세게 한다.
+    gateInvalidate(0)
+    print("[PongDu][RiseUp][Gate] queued, need=" .. tostring(need)
+        .. " pending=" .. tostring(_pending))
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -201,34 +241,36 @@ end
 --   알지도 못한다. 따라서 커맨드 송수신이 아예 없고, 후원받은 본인 화면에만
 --   뜬다. 옆 스트리머 화면엔 아무것도 안 보인다.
 --
--- 표시 조건을 큐박스에서 끌어오지 않는 이유:
---   DonationReceiver 의 activeEntries 를 들여다보면 riseup 이 큐박스 내부
---   구조에 의존하게 된다(순환 require 도 생긴다). 대신 rewardManager 의
---   blocked 훅이 "강령술이 큐에 살아있는 동안 매 틱 호출된다"는 사실을 그대로
---   신호로 쓴다 -- isBelowMinimum() 이 최근 QUERY_STALE_MS 안에 불렸고 아직
---   하한 미달이면 인디케이터를 띄운다. 후원이 발동되거나 취소되면 호출이
---   끊기고, 그 순간 인디케이터가 알아서 사라진다.
+-- 표시 조건:
+--   _pending > 0 (카운트다운을 마친 강령술이 시체를 기다리는 중) 이고,
+--   스윕을 한 번이라도 완주했고(judged), 그 결과가 미달일 때만 뜬다.
+--   judged 를 보는 이유는 깜빡임 방지다 -- 요청 직후 첫 스윕이 도는 2~5틱 동안
+--   결과가 없는데 띄워버리면, 시체가 충분한 정상 상황에서도 인디케이터가
+--   한 번 번쩍이고 사라진다.
+--   대기분이 발동되거나 옵션이 꺼지면 _pending 이 0이 되고 인디케이터도 사라진다.
 local SLOT_PRIORITY     = 30
-local QUERY_STALE_MS    = 500   -- 이 시간 넘게 blocked 호출이 없으면 대기 종료로 간주
 local TEX_PATH          = "media/ui/Moodle_RiseUpWait.png"
 local IND_SIZE_FALLBACK = 32
 local BKG_PATHS         = moodleStack.BKG_BAD
 
 -- 인디케이터를 띄워야 하는 상태인가.
 local function gateWaiting()
-    if _gate.need <= 0 then return false end
-    if _gate.pass then return false end
-    if _gate.lastQuery == 0 then return false end
-    return (getTimestampMs() - _gate.lastQuery) < QUERY_STALE_MS
+    if _pending <= 0 then return false end
+    if not _gate.judged then return false end
+    return not _gate.pass
 end
 
--- 배경 심각도 1~4. 하한선에서 멀수록 높다(시체 0 -> 4, 거의 다 모임 -> 1).
--- 블러드문이 "얼마나 남았나"를 쓰는 것과 같은 발상이고, 여기서 남은 건 시체다.
+-- 배경 심각도 1~4. 하한선에 가까워질수록(=곧 대규모 부활이 터질수록) 높다.
+-- 시체 0마리면 아직 여유 있는 상태라 1단계, 하한선 문턱까지 쌓이면 4단계로
+-- 치솟는다 -- "곧 터진다"는 긴급도를 배경으로 표현한다. 조건이 실제로
+-- 충족되는 순간엔 인디케이터 자체가 사라지므로(gateWaiting() = false),
+-- 4단계는 사실상 "문턱 직전"의 짧은 구간에서만 보인다.
 local function bkgLevel()
     if _gate.need <= 0 then return 1 end
-    local lack = _gate.need - _gate.seen
-    if lack < 0 then lack = 0 end
-    local n = math.ceil(lack / _gate.need * 4)
+    local progress = _gate.seen / _gate.need
+    if progress < 0 then progress = 0 end
+    if progress > 1 then progress = 1 end
+    local n = math.ceil(progress * 4)
     if n < 1 then n = 1 end
     if n > 4 then n = 4 end
     return n
@@ -325,6 +367,34 @@ Events.OnTick.Add(function()
     -- 중복 호출돼도 멱등이다 -- 호드나이트/블러드문도 각자 호출한다.
     moodleStack.sync()
     _osc:update(bkgLevel())
+
+    if _pending > 0 then
+        local player = getPlayer()
+        if player then
+            local need = SandboxVars.PongDu.RiseUp_MinCorpses
+            if need <= 0 then
+                -- 대기 중에 관리자가 하한선을 0으로 내린 경우. 조건이 사라졌으니
+                -- 붙잡아둘 이유가 없다 -- 밀린 대기분을 전부 즉시 발동시킨다.
+                print("[PongDu][RiseUp][Gate] minimum disabled, flushing "
+                    .. tostring(_pending))
+                while _pending > 0 do
+                    doFire(player)
+                    _pending = _pending - 1
+                end
+                gateInvalidate(0)
+            elseif not zoneHolding(player) then
+                gateTick(player, need)
+                if _gate.pass then
+                    doFire(player)
+                    _pending = _pending - 1
+                    -- 방금 부활로 시체가 소모된다. 재스캔을 잠깐 미뤄야 남은
+                    -- 대기분이 같은 시체 더미로 연달아 터지지 않는다.
+                    gateInvalidate(REFIRE_COOLDOWN)
+                end
+            end
+        end
+    end
+
     refreshIndicator()
 end)
 
