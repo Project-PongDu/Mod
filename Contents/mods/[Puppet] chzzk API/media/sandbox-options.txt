@@ -209,7 +209,7 @@ option PongDu.VehicleDrop_Pool = {
 
 option PongDu.VehicleDrop_ExcludePool = {
     type = string,
-    default = Base.PongDuDrone;Base.PongDuHeli,
+    default = ,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_ExcludePool,
 }
 

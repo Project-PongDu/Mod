@@ -166,13 +166,82 @@ local function collectPoolVehicles()
     return list
 end
 
--- VehicleDrop_ExcludePool ("Base.A;Base.B") 파싱 -> lookup set.
+-- 코드 레벨 하드 차단 목록.
+-- 지상에 떨어뜨려봐야 못 쓰는 차량(수상 전용 보트), 차량 형태를 빌린 월드 오브젝트
+-- (난파선/보급상자), 그리고 우리 모드가 내부 연출용으로 쓰는 차량을 막는다.
+-- 샌드박스 옵션 default에 몰아넣으면 설정창이 지저분해지고 운영자가 실수로 지울 수 있어
+-- 코드로 고정한다. 운영자가 추가로 막고 싶은 건 VehicleDrop_ExcludePool에 적으면 되고,
+-- 그쪽 값은 이 목록에 얹혀서 같이 적용된다 (이 목록을 해제할 수단은 두지 않는다).
+--
+-- 여기 적힌 게 전부 실제로 풀에 들어올 수 있는 건 아니다. 승객석이 없는 항목
+-- (트레일러, 난파선 등)은 hasDriverSeat()에서 이미 걸러지지만, 판정을 스크립트 정의에
+-- 의존하고 있어 모드 업데이트로 좌석이 생기면 새어나올 수 있으므로 같이 못박아둔다.
+local HARD_EXCLUDED = {
+    -- PongDu 자체 화력 지원 차량 (드론/헬기 실체)
+    ["Base.PongDuDrone"] = true,
+    ["Base.PongDuHeli"] = true,
+
+    -- 헬기 계열 워크샵 차량 (동체/꼬리 파트 포함)
+    ["Base.UH60Green"] = true,
+    ["Base.UH60GreenFuselage"] = true,
+    ["Base.UH60GreenTail"] = true,
+    ["Base.UH60Desert"] = true,
+    ["Base.UH60DesertFuselage"] = true,
+    ["Base.UH60DesertTail"] = true,
+    ["Base.UH60Medevac"] = true,
+    ["Base.UH60MedevacFuselage"] = true,
+    ["Base.Bell206LBMW"] = true,
+    ["Base.Bell206LBMWFuselage"] = true,
+    ["Base.Bell206LBMWTail"] = true,
+    ["Base.Bell206Police"] = true,
+    ["Base.Bell206PoliceFuselage"] = true,
+    ["Base.Bell206PoliceTail"] = true,
+    ["Base.Bell206Survivalist"] = true,
+    ["Base.Bell206SurvivalistFuselage"] = true,
+    ["Base.Bell206SurvivalistTail"] = true,
+
+    -- 보급상자 오브젝트 (차량 스크립트로 정의돼 있음)
+    ["Base.FEMASupplyDrop"] = true,
+    ["Base.SurvivorSupplyDrop"] = true,
+
+    -- Autotsar Motorclub: 수상바이크 (AquaConfig.Boats 등록 = 수상 전용)
+    ["Base.AMC_Waverunner"] = true,
+    ["Base.AMC_Waverunner_Ground"] = true,
+
+    -- Aquatsar Yacht Club: 보트 본체 및 육상 변형체.
+    -- _Ground 변형체는 트레일러에서 내려 육지에 둔 상태를 표현하는 것이라
+    -- 그 자체로 주행 가능한 차량이 아니다.
+    ["Base.BoatMotor"] = true,
+    ["Base.BoatMotor_Ground"] = true,
+    ["Base.BoatSailingYacht"] = true,
+    ["Base.BoatSailingYacht_Ground"] = true,
+    ["Base.BoatZeroPatient"] = true,
+
+    -- Aquatsar Yacht Club: 난파선 오브젝트
+    ["Base.BoatSailingYacht_shipwreckland"] = true,
+    ["Base.BoatSailingYacht_shipwreckwater"] = true,
+
+    -- Aquatsar Yacht Club: 보트 운반용 트레일러
+    ["Base.TrailerForBoat"] = true,
+    ["Base.TrailerWithBoat"] = true,
+    ["Base.TrailerWithBoatMotor"] = true,
+    ["Base.TrailerWithBoatSailingYacht"] = true,
+
+    -- Autotsar Motorclub: 수상바이크 운반용 트레일러
+    ["Base.TrailerAMCWaverunner"] = true,
+    ["Base.TrailerAMCWaverunnerWithBody"] = true,
+}
+
+-- 하드 차단 목록 + VehicleDrop_ExcludePool("Base.A;Base.B") 파싱 결과 -> lookup set.
 -- 존재하지 않는 fullType을 적어도 에러 없이 무시(오타 방어 목적이 아니라
 -- 순수 차단 목록이므로 getVehicleScript/hasDriverSeat 검증은 하지 않는다).
 local function collectExcludePool()
-    local pool = SandboxVars.PongDu.VehicleDrop_ExcludePool
-
     local set = {}
+    for fullType, _ in pairs(HARD_EXCLUDED) do
+        set[fullType] = true
+    end
+
+    local pool = SandboxVars.PongDu.VehicleDrop_ExcludePool
     if pool ~= "" then
         for token in string.gmatch(pool, "[^;]+") do
             local trimmed = token:match("^%s*(.-)%s*$")
@@ -295,8 +364,9 @@ end
 -- 수동 입력(VehicleDrop_Pool)은 드롭다운 필터를 타지 않는다 -- "큰 범위는 드롭다운으로
 -- 정하고, 거기 없는 특정 차를 손으로 더 얹는다"가 이 옵션의 용도이기 때문.
 -- 제외 목록(VehicleDrop_ExcludePool)은 반대로 드롭다운/수동 입력 둘 다보다 우선한다 --
--- 화력 지원용 드론/헬기 차량(PongDuDrone/PongDuHeli)처럼 "모드 차량만"에 걸려도
--- 절대 일반 소환 풀에 섞이면 안 되는 항목을 막기 위한 안전장치이기 때문.
+-- 화력 지원용 드론/헬기, 수상 전용 보트처럼 "모드 차량만"에 걸려도 절대 일반 소환
+-- 풀에 섞이면 안 되는 항목은 HARD_EXCLUDED로 코드에서 못박아뒀고, 운영자가 적은
+-- VehicleDrop_ExcludePool은 거기에 얹혀서 함께 적용된다.
 -- 후보가 0개면 nil을 반환하고, 호출부(OpenKit)가 소환을 취소한다.
 local function pickVehicleType()
     local source = SandboxVars.PongDu.VehicleDrop_Source
