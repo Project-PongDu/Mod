@@ -183,6 +183,9 @@ IGUI_KO = {
     IGUI_donation_horde_night_tip_m = "%1분",
 
 
+    IGUI_donation_riseup_wait = "강령술 대기",
+    IGUI_donation_riseup_wait_tip = "주변 시체 %1/%2",
+
     IGUI_donation_blood_moon_tip_end = "종료까지: %1",
     IGUI_donation_blood_moon_tip_hm = "%1시간 %2분",
     IGUI_donation_blood_moon_tip_m = "%1분",

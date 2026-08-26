@@ -2,6 +2,11 @@ local _a = {}
 
 local aggro = require("features/aggro")
 local fx    = require("utils/fx")
+-- 대기 인디케이터용. 셋 다 leaf 모듈(서로/features 를 require 하지 않음)이라
+-- 순환 의존이 생기지 않는다 -- hordenight/bloodmoon 과 동일한 조합.
+local moodleStack = require("utils/moodleStack")
+local colorMap    = require("utils/colorMap")
+local textOutline = require("utils/textOutline")
 
 -- 라이즈 업 데드 맨: 도네 플레이어 기준 반경 내 모든 시체(IsoDeadBody)를
 -- 좀비로 되살린다.
@@ -72,7 +77,8 @@ end
 --   정말 없을 때)에도 완주까지 60프레임 = 1초 남짓이다.
 --   완주하면 결과를 캐시하고 GATE_COOLDOWN 뒤에 새 스윕을 시작한다.
 --
--- 대기 중엔 큐박스에 "현재/필요" 카운터를 띄운다 (gateNote -> rewardManager.note).
+-- 대기 중임을 알리는 표시는 아래 무들 인디케이터가 맡는다 (큐박스 자물쇠는
+-- 안전지대 락과 모양이 같아 사유 구분이 안 된다).
 local GATE_BUDGET   = 600     -- blocked() 1회당 조사할 스퀘어 수
 local GATE_COOLDOWN = 1000    -- 스윕 완주 후 다음 스윕까지 대기 (ms)
 
@@ -85,6 +91,7 @@ local _gate = {
     pass    = false,          -- 최근 스윕 결과 (하한선 충족)
     seen    = 0,              -- 최근 스윕이 센 시체 수 (표시용)
     nextAt  = 0,              -- 다음 스윕 시작 가능 시각
+    lastQuery = 0,            -- isBelowMinimum 이 마지막으로 불린 시각 (인디케이터 판정)
 }
 
 local function gateBeginSweep(player, need)
@@ -154,6 +161,7 @@ function _a.isBelowMinimum(player)
     if not player then return true end
 
     local now = getTimestampMs()
+    _gate.lastQuery = now                  -- 무들 인디케이터 표시 판정용 (아래 참조)
     if not _gate.active then
         if now < _gate.nextAt then return not _gate.pass end
         gateBeginSweep(player, need)
@@ -175,13 +183,150 @@ function _a.isBelowMinimum(player)
     return not _gate.pass
 end
 
--- gateNote() -> 큐박스 자물쇠 슬롯에 겹쳐 그릴 짧은 문자열 ("3/5"). 게이트가
--- 꺼져 있거나 아직 판정 전이면 nil.
-function _a.gateNote()
-    if _gate.need <= 0 then return nil end
-    if _gate.pass then return nil end
-    return tostring(_gate.seen) .. "/" .. tostring(_gate.need)
+-- ═══════════════════════════════════════════════════════════════════════════
+--  대기 인디케이터 (무들 슬롯)
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 호드 나이트 / 블러드문과 같은 방식으로 바닐라 무들 스택 위에 슬롯 하나를
+-- 끼워넣는다. 밀어내기/슬롯 좌표/등장 슬라이드/해상도 복원은 utils/moodleStack
+-- 담당이고, 여기서는 우선순위와 그리기, 그리고 표시 조건만 정한다.
+--
+-- 퐁듀 인디케이터 우선순위 (작을수록 화면 위):
+--   10 = 호드 나이트   20 = 블러드문   30 = 강령술 대기
+--
+-- ★ 앞의 둘과 결정적으로 다른 점: 이건 서버 브로드캐스트가 없다.
+--   호드나이트/블러드문은 서버가 PongDuHorde/State 같은 커맨드를 전 클라에
+--   뿌려서 접속자 전원이 같은 인디케이터를 본다(월드 이벤트니까 그게 맞다).
+--   강령술 대기는 "이 플레이어의 큐에 강령술이 물려 있고, 이 플레이어 주변
+--   시체가 모자라다"는 순수 개인 상태다. 판정도 클라 로컬 스캔이라 서버가
+--   알지도 못한다. 따라서 커맨드 송수신이 아예 없고, 후원받은 본인 화면에만
+--   뜬다. 옆 스트리머 화면엔 아무것도 안 보인다.
+--
+-- 표시 조건을 큐박스에서 끌어오지 않는 이유:
+--   DonationReceiver 의 activeEntries 를 들여다보면 riseup 이 큐박스 내부
+--   구조에 의존하게 된다(순환 require 도 생긴다). 대신 rewardManager 의
+--   blocked 훅이 "강령술이 큐에 살아있는 동안 매 틱 호출된다"는 사실을 그대로
+--   신호로 쓴다 -- isBelowMinimum() 이 최근 QUERY_STALE_MS 안에 불렸고 아직
+--   하한 미달이면 인디케이터를 띄운다. 후원이 발동되거나 취소되면 호출이
+--   끊기고, 그 순간 인디케이터가 알아서 사라진다.
+local SLOT_PRIORITY     = 30
+local QUERY_STALE_MS    = 500   -- 이 시간 넘게 blocked 호출이 없으면 대기 종료로 간주
+local TEX_PATH          = "media/ui/Moodle_RiseUpWait.png"
+local IND_SIZE_FALLBACK = 32
+local BKG_PATHS         = moodleStack.BKG_BAD
+
+-- 인디케이터를 띄워야 하는 상태인가.
+local function gateWaiting()
+    if _gate.need <= 0 then return false end
+    if _gate.pass then return false end
+    if _gate.lastQuery == 0 then return false end
+    return (getTimestampMs() - _gate.lastQuery) < QUERY_STALE_MS
 end
+
+-- 배경 심각도 1~4. 하한선에서 멀수록 높다(시체 0 -> 4, 거의 다 모임 -> 1).
+-- 블러드문이 "얼마나 남았나"를 쓰는 것과 같은 발상이고, 여기서 남은 건 시체다.
+local function bkgLevel()
+    if _gate.need <= 0 then return 1 end
+    local lack = _gate.need - _gate.seen
+    if lack < 0 then lack = 0 end
+    local n = math.ceil(lack / _gate.need * 4)
+    if n < 1 then n = 1 end
+    if n > 4 then n = 4 end
+    return n
+end
+
+local _osc   = moodleStack.newOscillator()
+local _panel = nil
+
+local RiseUpWaitIndicator = ISPanel:derive("RiseUpWaitIndicator")
+
+-- 위치는 생성 시점에 정하지 않는다. moodleStack.sync() 가 매 틱 갱신한다.
+function RiseUpWaitIndicator:new()
+    local o = ISPanel:new(0, 0, IND_SIZE_FALLBACK, IND_SIZE_FALLBACK)
+    setmetatable(o, self)
+    self.__index = self
+    o:noBackground()
+    o.tex = getTexture(TEX_PATH)
+    o.bkg = {}
+    for i = 1, #BKG_PATHS do
+        o.bkg[i] = getTexture(BKG_PATHS[i])
+    end
+    return o
+end
+
+-- 바닐라 MoodlesUI 는 UIElement.DrawTexture 로 텍스처 네이티브 크기에 그리므로
+-- 상수로 박지 않고 매 프레임 텍스처에서 읽는다(텍스처팩 모드 자동 추종).
+function RiseUpWaitIndicator:iconSize()
+    local t = (self.bkg and self.bkg[bkgLevel()]) or self.tex
+    if t then
+        local w, h = t:getWidth(), t:getHeight()
+        if w and h and w > 0 and h > 0 then return w, h end
+    end
+    return IND_SIZE_FALLBACK, IND_SIZE_FALLBACK
+end
+
+function RiseUpWaitIndicator:render()
+    -- 바닐라와 동일하게 흔들림은 요소 위치가 아니라 "그리는 좌표"에만 먹인다
+    -- (MoodlesUI.render 의 float1 과 같은 역할). 툴팁은 흔들지 않는다.
+    local ox = _osc:offset()
+    local w, h = self:iconSize()
+
+    local bkg = self.bkg and self.bkg[bkgLevel()]
+    if bkg then
+        self:drawTexture(bkg, ox, 0, 1)
+    end
+    if self.tex then
+        self:drawTexture(self.tex, ox, 0, 1)
+    else
+        -- 아이콘 에셋 미배치 폴백. 배경만 뜨면 무슨 무들인지 알 수 없다.
+        local col = colorMap.get("rise_up_dead_man")
+        textOutline.drawCentre(self, "RU", w / 2 + ox, h / 2 - 8,
+            col[1], col[2], col[3], 1, UIFont.Small)
+    end
+
+    -- 진행 카운터 (우하단). 호드나이트가 예약 수를 같은 자리에 찍는 것과 동일.
+    -- 배경 심각도만으론 "몇 구 더 필요한지"를 알 수 없으므로 숫자를 함께 준다.
+    local col = colorMap.get("rise_up_dead_man")
+    textOutline.draw(self, tostring(_gate.seen) .. "/" .. tostring(_gate.need),
+        ox + 2, h - 14, col[1], col[2], col[3], 1, UIFont.Small)
+
+    if self:isMouseOver() then
+        moodleStack.drawTooltip(self,
+            getText("IGUI_donation_riseup_wait"),
+            getText("IGUI_donation_riseup_wait_tip",
+                tostring(_gate.seen), tostring(_gate.need)))
+    end
+end
+
+-- 표시/숨김. moodleStack 이 밀어내기와 좌표를 전부 처리하므로 여기는
+-- "언제 뜨고 언제 사라지는가"만 정한다.
+local function refreshIndicator()
+    local want = gateWaiting()
+    if want then
+        if not _panel then
+            _panel = RiseUpWaitIndicator:new()
+            _panel:addToUIManager()
+            moodleStack.register(_panel, SLOT_PRIORITY)
+            print("[PongDu][RiseUp][Gate] indicator shown " .. tostring(_gate.seen)
+                .. "/" .. tostring(_gate.need))
+        end
+        _panel:setVisible(true)
+    elseif _panel then
+        moodleStack.unregister(_panel)
+        _panel:setVisible(false)
+        _panel:removeFromUIManager()
+        _panel = nil
+        print("[PongDu][RiseUp][Gate] indicator hidden")
+    end
+end
+
+Events.OnTick.Add(function()
+    -- 무들박스 밀림/복귀와 아이콘 슬라이드는 패널이 없어도 계속 돌아야 한다
+    -- (사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 인디케이터가 여럿일 때
+    -- 중복 호출돼도 멱등이다 -- 호드나이트/블러드문도 각자 호출한다.
+    moodleStack.sync()
+    _osc:update(bkgLevel())
+    refreshIndicator()
+end)
 
 -- ── 부활 좀비 기상 모션 복원 ──────────────────────────────────────────────
 -- 강령술이 fakeDead 경로(옷 유지)를 타면서 부활 좀비의 isReanimatedPlayer가
