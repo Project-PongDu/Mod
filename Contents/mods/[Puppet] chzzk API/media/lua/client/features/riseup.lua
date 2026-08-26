@@ -97,6 +97,38 @@ local REFIRE_COOLDOWN = 3000
 
 local _pending = 0            -- 카운트다운을 마치고 시체를 기다리는 강령술 수
 
+-- ── 대기분 영속화 ─────────────────────────────────────────────────────────
+-- _pending 은 "큐박스에서는 이미 소진됐지만 아직 발동되지 않은 후원"이다.
+-- 순수 클라 메모리 변수라 재접속하면 통째로 날아간다 -- 후원자는 돈을 냈는데
+-- 스트리머가 잠깐 나갔다 오면 없던 일이 되는 셈이라 반드시 복구돼야 한다.
+--
+-- 블러드문처럼 서버 Sync 를 쓰지 않는 이유:
+--   블러드문은 애초에 서버가 상태를 들고 있는 월드 이벤트라 접속 직후 서버에
+--   물어보면 된다. 강령술 대기는 클라 로컬 스캔 결과라 서버가 알지도 못한다.
+--   그렇다고 이것 때문에 서버에 대기 상태를 새로 들이면, 클라에서만 판정되는
+--   값을 서버가 신뢰해야 하는 구조가 돼서 권위가 꼬인다.
+-- 플레이어 modData 를 쓰지 않는 이유:
+--   캐릭터가 죽으면 modData 가 같이 날아간다. 강령술 대기는 캐릭터가 아니라
+--   후원에 묶인 값이라 사망으로 소멸하면 안 된다.
+--   DonationReceiver 의 PongDuPendingQueue.txt 가 같은 이유로 파일을 쓴다.
+local PENDING_FILE = "PongDuRiseUpPending.txt"
+
+local function savePending()
+    local w = getFileWriter(PENDING_FILE, true, false)
+    if not w then return end
+    w:write(tostring(_pending) .. "\n")
+    w:close()
+end
+
+-- _pending 은 반드시 이걸 통해서만 바꾼다. 직접 대입하면 저장이 누락돼서
+-- 재접속 시 복구가 어긋난다.
+local function setPending(n)
+    if n < 0 then n = 0 end
+    if n == _pending then return end
+    _pending = n
+    savePending()
+end
+
 local _gate = {
     active  = false,          -- 스윕 진행 중
     dx = 0, dy = 0, floor = 0,
@@ -215,7 +247,7 @@ function _a.a(player)
         doFire(player)
         return
     end
-    _pending = _pending + 1
+    setPending(_pending + 1)
     -- 직전 스윕 결과는 카운트다운 이전 상태라 그대로 믿으면 안 된다. 무효화해서
     -- "지금 이 순간"부터 새로 세게 한다.
     gateInvalidate(0)
@@ -361,6 +393,25 @@ local function refreshIndicator()
     end
 end
 
+-- ── 접속 시 대기분 복구 ──────────────────────────────────────────────────
+-- 대기 중에 나갔다 들어와도 남은 강령술이 그대로 이어지게 한다.
+-- 복구 직후 gateInvalidate 로 캐시를 비워, 접속 시점의 실제 주변 시체를
+-- 기준으로 새로 스캔하게 만든다(이전 세션의 판정은 좌표가 달라 무의미하다).
+local function loadPending()
+    local r = getFileReader(PENDING_FILE, true)
+    if not r then return end
+    local line = r:readLine()
+    r:close()
+    local n = tonumber(line)
+    if n and n > 0 then
+        _pending = n
+        gateInvalidate(0)
+        print("[PongDu][RiseUp][Gate] restored pending=" .. tostring(_pending))
+    end
+end
+
+Events.OnGameStart.Add(loadPending)
+
 Events.OnTick.Add(function()
     -- 무들박스 밀림/복귀와 아이콘 슬라이드는 패널이 없어도 계속 돌아야 한다
     -- (사라진 뒤 다른 무들들이 스르륵 올라오는 구간). 인디케이터가 여럿일 때
@@ -377,16 +428,19 @@ Events.OnTick.Add(function()
                 -- 붙잡아둘 이유가 없다 -- 밀린 대기분을 전부 즉시 발동시킨다.
                 print("[PongDu][RiseUp][Gate] minimum disabled, flushing "
                     .. tostring(_pending))
+                -- 발동 -> 감소 순서를 지킨다. 반대로 하면 도중에 크래시했을 때
+                -- 이미 차감된 후원이 사라진다. 이 순서면 최악의 경우 하나가
+                -- 중복 발동되는데, 후원자 관점에선 유실보다 낫다.
                 while _pending > 0 do
                     doFire(player)
-                    _pending = _pending - 1
+                    setPending(_pending - 1)
                 end
                 gateInvalidate(0)
             elseif not zoneHolding(player) then
                 gateTick(player, need)
                 if _gate.pass then
                     doFire(player)
-                    _pending = _pending - 1
+                    setPending(_pending - 1)
                     -- 방금 부활로 시체가 소모된다. 재스캔을 잠깐 미뤄야 남은
                     -- 대기분이 같은 시체 더미로 연달아 터지지 않는다.
                     gateInvalidate(REFIRE_COOLDOWN)
