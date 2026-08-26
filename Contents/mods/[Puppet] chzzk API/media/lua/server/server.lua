@@ -733,6 +733,43 @@ end
 local FS_TELEPORT_DIST = 30   -- 1틱 이동량이 이 값(타일)을 넘으면 순간이동.
                               -- 걷기/달리기/차량 최고속 어느 쪽도 1틱에 못 넘는다.
 
+-- ── 소유 플레이어 상실 감지 (헬기/드론 공용) ──────────────────────────────
+--
+-- [왜 필요한가]
+--   화력지원 job 은 소유자가 죽어도 끝나지 않았다. job.player 는 시체가 된
+--   IsoPlayer 를 계속 가리키고 getX() 도 예외 없이 값을 돌려주므로, 남은
+--   duration 내내 시체 위에서 좀비 스캔이 돈다 -- 하필 좀비가 가장 몰린
+--   지점이라 서버 부하가 최악이 되는 구간이다.
+--   게다가 그렇게 지연된 HeliStop/DroneStop 은 클라가 이미 리스폰해서
+--   IsoPlayer 객체가 교체된 뒤에 도착한다. 그러면 클라의 루프 사운드 정지가
+--   옛 emitter 를 못 찾아 로터음/기관총음이 영구히 남는다
+--   (firesupport.lua loopSoundStart 주석 참조).
+--
+-- [판정 근거]
+--   ① isDead(): DeadPlayerPacket.parse() 가 서버에서 곧바로
+--      character.setHealth(0) + setOverallBodyHealth(0) 을 수행하고
+--      (DeadPlayerPacket.java:49-55), IsoGameCharacter.isDead() 는
+--      Health <= 0 || BodyDamage.getHealth() <= 0 이다
+--      (IsoGameCharacter.java:4504). 즉 사망 패킷 도착 즉시 true 가 된다.
+--   ② 접속 목록 이탈: 리스폰/재접속은 커넥션에 새 IsoPlayer 를 붙이므로
+--      옛 객체가 getPlayers() 에서 빠진다. 로그아웃/강제종료도 같이 잡힌다.
+--      SP 에서는 getOnlinePlayers() 가 nil 이므로(LuaManager 확인) 이 검사는
+--      건너뛴다 -- SP 는 ①만으로 충분하다.
+local function fsOwnerLost(job)
+    local okD, dead = pcall(function() return job.player:isDead() end)
+    if not okD then return "owner invalid" end
+    if dead then return "owner dead" end
+
+    local ps = getOnlinePlayers()
+    if ps and ps:size() > 0 then
+        for k = 0, ps:size() - 1 do
+            if ps:get(k) == job.player then return nil end
+        end
+        return "owner gone"
+    end
+    return nil
+end
+
 local function isOwnerTeleported(job, px, py)
     if not px then return false end
     local lx, ly = job.lastPx, job.lastPy
@@ -1001,11 +1038,13 @@ local function processHeliJobs()
         -- isOwnerTeleported는 lastPx/lastPy를 갱신하는 부수효과가 있어 매 틱
         -- 반드시 호출돼야 한다. 분기보다 먼저 평가해두는 이유다.
         local teleported = okP and isOwnerTeleported(job, px, py)
+        -- 사망/리스폰/접속이탈: 텔포와 같은 취급으로 즉시 종료한다.
+        local lost = fsOwnerLost(job)
 
         -- leg 롤오버: 헬기가 B에 도달했는데(now >= endAt) 아직 체류 시간이
         -- 남았으면, A = 기존 B로 이어서 새 leg를 만든다. 시작점이 직전 도착점과
         -- 같으므로 위치는 연속이고 방향만 꺾인다 -- 순간이동이 아니다.
-        if not teleported and now < job.expireAt and now >= job.endAt then
+        if not teleported and not lost and now < job.expireAt and now >= job.endAt then
             if heliNewLeg(job, job.bx, job.by, heliRandTurnRollover()) then
                 heliBroadcastStart(job)
                 print(string.format(
@@ -1016,14 +1055,17 @@ local function processHeliJobs()
             end
         end
 
-        if teleported then
-            heliRemoveVehicle(job, "owner teleported")
+        if teleported or lost then
+            local why = teleported and "owner teleported" or lost
+            heliRemoveVehicle(job, why)
             table.remove(_heliJobs, i)
             local playersT = getOnlinePlayers()
-            for k = 0, playersT:size() - 1 do
-                sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
+            if playersT then
+                for k = 0, playersT:size() - 1 do
+                    sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
+                end
             end
-            print("[PongDu][Heli] job aborted (owner teleported)")
+            print("[PongDu][Heli] job aborted (" .. why .. ")")
         elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
@@ -1079,13 +1121,21 @@ local function processHeliJobs()
                 job.missStreak = (job.missStreak or 0) + 1
             end
 
+            -- 확장반경 스캔은 셀 전체 좀비 리스트 1패스라 비싸다. 아래 두
+            -- 판정(무전 히스테리시스 / 무전 재무장)이 같은 결과를 쓰므로
+            -- 스캔은 이 자리에서 딱 한 번만 한다. target 이 있으면 단축평가로
+            -- 스캔 자체가 생략된다.
+            -- (구버전은 같은 스캔을 이 블록과 아래 재무장 블록에서 두 번
+            --  돌렸다 -- 대상이 없는 틱마다 pickHeliTarget 까지 합쳐 3패스.)
+            local nearby = (target ~= nil) or hasZombieInExtendedRadius(job)
+
             -- 무전("구역 정리") 전용 히스테리시스. LMG와 별개로, 확장반경
             -- (job.r + HELI_CLEAR_EXTRA_RADIUS) 안에 좀비가 남아있으면 계속
             -- 0으로 눌러서 "구역 이상무" 방송 자체를 보류한다 -- 헬기가 leg를
             -- 따라 이동하며 곧 그 좀비를 사격반경 안으로 다시 포착할 가능성이
             -- 높은데, 그 사이 무전이 뜨는 게 부자연스럽기 때문. LMG 판정과
             -- 분리했으므로 이 보류 기간 동안 총성은 이미 멈춰 있다.
-            if target or hasZombieInExtendedRadius(job) then
+            if nearby then
                 if job.radioMissStreak and job.radioMissStreak > 0 then
                     job.radioMissStreak = 0
                 end
@@ -1148,7 +1198,7 @@ local function processHeliJobs()
             end
             -- 좀비가 (사격반경이든 확장반경이든) 다시 감지되면 무전 방송 재무장
             -- -- 다음번 진짜로 이탈할 때 또 한 번 방송할 수 있게.
-            if target or hasZombieInExtendedRadius(job) then
+            if nearby then
                 job.radioCleared = false
             end
 
@@ -2073,8 +2123,14 @@ local function processDroneJobs()
         local alive, cx, cy = pcall(function()
             return job.player:getX(), job.player:getY()
         end)
+        local lost = alive and fsOwnerLost(job) or nil
         if not alive then
             droneFinish(job, "player gone")
+            table.remove(_droneJobs, i)
+        elseif lost then
+            -- 사망/리스폰/접속이탈. 헬기와 동일한 이유로 즉시 종료한다
+            -- (fsOwnerLost 주석 참조).
+            droneFinish(job, lost)
             table.remove(_droneJobs, i)
         elseif isOwnerTeleported(job, cx, cy) then
             droneFinish(job, "owner teleported")

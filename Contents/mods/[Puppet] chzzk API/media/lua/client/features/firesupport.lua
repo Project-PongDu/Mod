@@ -500,6 +500,77 @@ local function tcount(t)
     return n
 end
 
+-- ── 루프 사운드 핸들 관리 (플레이어 객체 교체 대비) ────────────────────────
+--
+-- [왜 emitter 객체를 같이 들고 있어야 하는가]
+--   IsoGameCharacter.emitter 는 final 필드라 생성자에서 한 번 만들어진다
+--   (IsoGameCharacter.java:340, 626). 즉 플레이어 객체가 교체되면 emitter 도
+--   통째로 새것이 된다.
+--   CharacterSoundEmitter.stopSound(handle) 는 "자기 소유" 의 vocals/footsteps/
+--   extra FMODSoundEmitter 3개에만 정지를 넘긴다(CharacterSoundEmitter.java:263).
+--   따라서 A 의 emitter 에서 얻은 핸들을 B 의 emitter 에 걸면 조용히 no-op 이다.
+--   그리고 SoundManager.unregisterEmitter 는 리스트에서 빼기만 하고 재생을
+--   멈추지 않으므로(SoundManager.java:374), loop = true 인 로터음/기관총음이
+--   영원히 남는다. 이게 "화력지원이 끝나도 소리가 잔존" 의 정체다.
+--
+--   -> 재생한 emitter 객체를 핸들과 한 쌍으로 보관했다가, 정지할 때 반드시
+--      "그 emitter" 로 끈다. getSpecificPlayer(0) 을 정지 시점에 다시 조회하면
+--      안 된다.
+--
+-- [이름 기준 정지를 한 번 더 거는 이유]
+--   핸들이 이미 무효화된 경우(FMOD 인스턴스 재활용 등)에도 alias 로는 잡힌다.
+--   stopSoundByName 은 BaseSoundEmitter 의 public 추상 메서드이며
+--   CharacterSoundEmitter 가 3개 하위 emitter 로 그대로 위임한다
+--   (CharacterSoundEmitter.java:299). 이 모듈은 alias 하나당 루프를 최대 1개만
+--   유지하므로 이름으로 싹 끄는 게 안전하다.
+local function loopSoundStart(alias, vol)
+    local pl = getSpecificPlayer(0)
+    if not pl then return nil, nil end
+    local okE, em = pcall(function() return pl:getEmitter() end)
+    if not okE or not em then return nil, nil end
+    local okH, handle = pcall(function() return em:playSound(alias) end)
+    if not okH or not handle or handle == 0 then return nil, nil end
+    pcall(function() em:setVolume(handle, vol) end)
+    return handle, em
+end
+
+local function loopSoundStop(emitter, handle, alias)
+    if emitter then
+        pcall(function() emitter:stopSound(handle) end)
+        pcall(function() emitter:stopSoundByName(alias) end)
+    end
+    -- 저장본과 현재 플레이어 emitter 가 다를 수 있으므로 현재 쪽도 이름으로 정리.
+    local pl = getSpecificPlayer(0)
+    if pl then
+        pcall(function() pl:getEmitter():stopSoundByName(alias) end)
+    end
+end
+
+-- 이 모듈이 유지하는 loop = true 사운드 전부. t3_rewards_sounds.txt 에서
+-- loop 이 걸린 건 이 4개뿐이다.
+local FS_LOOP_ALIASES = {
+    "pongdu_heli", "pongdu_heli_lmg", "pongdu_drone", "pongdu_drone_smg",
+}
+
+-- 로드 직후 1회 스윕. /reloadlua 나 모드 핫리로드로 Lua state 가 재생성되면
+-- _heliSound/_heliEmitter 같은 전역이 통째로 날아가서, 이미 돌고 있던 루프
+-- 사운드를 끌 수단이 완전히 사라진다(게임 재시작 전까지 영구 잔존).
+-- 핸들이 없어도 alias 로는 잡히므로, 새 state 의 첫 틱에 4종을 이름으로
+-- 한 번 쓸어준다. 이 시점엔 _helis/_drones 가 반드시 비어 있으므로
+-- 정상 재생 중인 소리를 잘못 끄는 경우는 없다.
+local _sndSwept = false
+local function fsSweepStaleLoops()
+    if _sndSwept then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    _sndSwept = true
+    for i = 1, #FS_LOOP_ALIASES do
+        local alias = FS_LOOP_ALIASES[i]
+        pcall(function() pl:getEmitter():stopSoundByName(alias) end)
+    end
+    print("[PongDu] fire_support: stale loop sound sweep done")
+end
+
 -- ── 저격 남은시간 패널 (내 화력지원 전용) ──────────────────────────────────
 -- 헬기/드론 패널과 동시 표시될 수 있으므로 timerStack이 배치한다.
 local _sniperEndAt = nil
@@ -555,8 +626,9 @@ local HELI_VOL_FAR      = 0.20   -- 최원거리 시 로터음 볼륨
 local HELI_LMG_VOL_NEAR = 0.40   -- 기관총음은 로터음보다 살짝 낮게
 local HELI_LMG_VOL_FAR  = 0.15
 
-local _heliSound = nil       -- 로터음 emitter 핸들 (전체 공유 1개)
-local _lmgSound  = nil       -- 기관총 루프 핸들 (전체 공유 1개)
+-- 핸들은 반드시 "재생한 emitter" 와 한 쌍으로 보관한다 (loopSoundStart 주석 참조).
+local _heliSound,   _heliEmitter = nil, nil   -- 로터음 (전체 공유 1개)
+local _lmgSound,    _lmgEmitter  = nil, nil   -- 기관총 루프 (전체 공유 1개)
 
 -- ── 헬기 남은시간 패널 (내 화력지원 전용) ──────────────────────────────────
 -- 레인(h-180), 폭격(h-150)과 동시 표시될 수 있으므로 timerStack이 배치한다.
@@ -786,30 +858,24 @@ end
 -- (Sound.volume에 저장되고 FileSound.tick이 매 틱 volume * clip볼륨으로 반영 --
 --  VehicleDropCraftSound.lua가 이미 쓰는 검증된 경로).
 local function heliSoundStopAll(reason)
-    local pl = getSpecificPlayer(0)
     if _heliSound then
-        if pl then pcall(function() pl:getEmitter():stopSound(_heliSound) end) end
+        loopSoundStop(_heliEmitter, _heliSound, "pongdu_heli")
         print("[PongDu] fire_support/heli: rotor sound stopped (" .. tostring(reason) .. ")")
     end
     if _lmgSound then
-        if pl then pcall(function() pl:getEmitter():stopSound(_lmgSound) end) end
+        loopSoundStop(_lmgEmitter, _lmgSound, "pongdu_heli_lmg")
         print("[PongDu] fire_support/heli: LMG loop stopped (" .. tostring(reason) .. ")")
     end
-    _heliSound = nil
-    _lmgSound  = nil
+    _heliSound, _heliEmitter = nil, nil
+    _lmgSound,  _lmgEmitter  = nil, nil
 end
 
 local function heliRotorEnsure()
     if _heliSound then return end
-    local pl = getSpecificPlayer(0)
-    if not pl then return end
-    local ok, handle = pcall(function()
-        return pl:getEmitter():playSound("pongdu_heli")
-    end)
-    if ok and handle and handle ~= 0 then
-        _heliSound = handle
-        -- 원거리 볼륨으로 시작. 이후 매 틱 거리 기반 갱신.
-        pcall(function() pl:getEmitter():setVolume(handle, HELI_VOL_FAR) end)
+    -- 원거리 볼륨으로 시작. 이후 매 틱 거리 기반 갱신.
+    local handle, em = loopSoundStart("pongdu_heli", HELI_VOL_FAR)
+    if handle then
+        _heliSound, _heliEmitter = handle, em
     else
         print("[PongDu] fire_support/heli: rotor sound start FAILED")
     end
@@ -817,14 +883,9 @@ end
 
 local function heliLmgEnsure()
     if _lmgSound then return end
-    local pl = getSpecificPlayer(0)
-    if not pl then return end
-    local ok, handle = pcall(function()
-        return pl:getEmitter():playSound("pongdu_heli_lmg")
-    end)
-    if ok and handle and handle ~= 0 then
-        _lmgSound = handle
-        pcall(function() pl:getEmitter():setVolume(handle, HELI_LMG_VOL_FAR) end)
+    local handle, em = loopSoundStart("pongdu_heli_lmg", HELI_LMG_VOL_FAR)
+    if handle then
+        _lmgSound, _lmgEmitter = handle, em
         print("[PongDu] fire_support/heli: LMG loop ENGAGE")
     else
         print("[PongDu] fire_support/heli: LMG loop start FAILED")
@@ -833,9 +894,8 @@ end
 
 local function heliLmgStop(reason)
     if not _lmgSound then return end
-    local pl = getSpecificPlayer(0)
-    if pl then pcall(function() pl:getEmitter():stopSound(_lmgSound) end) end
-    _lmgSound = nil
+    loopSoundStop(_lmgEmitter, _lmgSound, "pongdu_heli_lmg")
+    _lmgSound, _lmgEmitter = nil, nil
     print("[PongDu] fire_support/heli: LMG loop stopped (" .. tostring(reason) .. ")")
 end
 
@@ -843,6 +903,15 @@ end
 -- 하나라도 있는가"로 판정한다. 인스턴스마다 루프를 틀면 8중첩이 되므로
 -- 각각 1개만 유지하고 볼륨/on-off만 집계로 결정한다.
 local function heliSoundTick()
+    -- 워치독: 인스턴스가 하나도 없는데 핸들이 살아있으면 무조건 정리한다.
+    -- heliRemove 를 거치지 않고 _helis 가 비는 경로(테이블 순회 중 삭제,
+    -- 예외로 중단된 정리 등)가 생겨도 여기서 확실히 끊긴다. 아래 "if not best
+    -- then return end" 가 바로 그 상태에서 사운드를 손대지 않고 빠져나가므로
+    -- 반드시 함수 최상단이어야 한다.
+    if (_heliSound or _lmgSound) and tcount(_helis) == 0 then
+        heliSoundStopAll("watchdog: no instance")
+    end
+
     local pl = getSpecificPlayer(0)
     if not pl then return end
     local px, py = pl:getX(), pl:getY()
@@ -861,23 +930,24 @@ local function heliSoundTick()
 
     -- 경로 기하 기준 거리 범위: 머리 위 통과 경로라 최근접 ~0, 최원 = D(r+25)
     local dmax = SandboxVars.PongDu.Heli_Radius + 25
-    local emitter = pl:getEmitter()
+    -- 볼륨도 반드시 "재생한 emitter" 에 걸어야 한다. pl:getEmitter() 를 다시
+    -- 조회하면 플레이어 교체 후엔 엉뚱한 emitter 를 만진다.
 
-    if _heliSound then
+    if _heliSound and _heliEmitter then
         local k = 1 - math.sqrt(best) / dmax
         if k < 0 then k = 0 elseif k > 1 then k = 1 end
         pcall(function()
-            emitter:setVolume(_heliSound, HELI_VOL_FAR + (HELI_VOL_NEAR - HELI_VOL_FAR) * k)
+            _heliEmitter:setVolume(_heliSound, HELI_VOL_FAR + (HELI_VOL_NEAR - HELI_VOL_FAR) * k)
         end)
     end
 
     if bestEng then
         heliLmgEnsure()
-        if _lmgSound then
+        if _lmgSound and _lmgEmitter then
             local k = 1 - math.sqrt(bestEng) / dmax
             if k < 0 then k = 0 elseif k > 1 then k = 1 end
             pcall(function()
-                emitter:setVolume(_lmgSound,
+                _lmgEmitter:setVolume(_lmgSound,
                     HELI_LMG_VOL_FAR + (HELI_LMG_VOL_NEAR - HELI_LMG_VOL_FAR) * k)
             end)
         end
@@ -898,7 +968,13 @@ local function heliRemove(own, reason)
 end
 
 local function heliRemoveAll(reason)
-    for own in pairs(_helis) do _helis[own] = nil end
+    -- pairs 순회 중 원본을 지우면 Kahlua 에서 일부 키가 남을 수 있다.
+    -- 남으면 tcount(_helis) 가 영영 0 이 안 돼서 이후 어떤 heliRemove 도
+    -- 사운드를 끄지 못한다(=영구 잔존). 키를 먼저 모으고 나서 지운다 --
+    -- OnTick 의 _expired 버퍼와 같은 패턴.
+    local keys, n = {}, 0
+    for own in pairs(_helis) do n = n + 1; keys[n] = own end
+    for i = 1, n do _helis[keys[i]] = nil end
     heliTimerHide()
     heliSoundStopAll(reason)
 end
@@ -986,8 +1062,9 @@ local DRONE_VOL_FAR     = 0.0333
 local DRONE_SMG_VOL_NEAR = 0.3
 local DRONE_SMG_VOL_FAR  = 0.075
 
-local _droneSound    = nil   -- 모터음 emitter 핸들 (전체 공유 1개)
-local _droneSmgSound = nil   -- 사격음 emitter 핸들 (전체 공유 1개)
+-- 헬기와 동일하게 핸들 + emitter 쌍으로 보관한다 (loopSoundStart 주석 참조).
+local _droneSound,    _droneEmitter    = nil, nil   -- 모터음 (전체 공유 1개)
+local _droneSmgSound, _droneSmgEmitter = nil, nil   -- 사격음 (전체 공유 1개)
 
 -- ── 드론 남은시간 패널 (내 화력지원 전용, 헬기와 동형) ─────────────────────
 local _droneEndAt = nil
@@ -1193,29 +1270,23 @@ end
 
 -- ── 공유 사운드 (헬기와 동형) ──────────────────────────────────────────────
 local function droneSoundStopAll(reason)
-    local pl = getSpecificPlayer(0)
     if _droneSound then
-        if pl then pcall(function() pl:getEmitter():stopSound(_droneSound) end) end
+        loopSoundStop(_droneEmitter, _droneSound, "pongdu_drone")
         print("[PongDu] fire_support/drone: motor sound stopped (" .. tostring(reason) .. ")")
     end
     if _droneSmgSound then
-        if pl then pcall(function() pl:getEmitter():stopSound(_droneSmgSound) end) end
+        loopSoundStop(_droneSmgEmitter, _droneSmgSound, "pongdu_drone_smg")
         print("[PongDu] fire_support/drone: SMG loop stopped (" .. tostring(reason) .. ")")
     end
-    _droneSound    = nil
-    _droneSmgSound = nil
+    _droneSound,    _droneEmitter    = nil, nil
+    _droneSmgSound, _droneSmgEmitter = nil, nil
 end
 
 local function droneMotorEnsure()
     if _droneSound then return end
-    local pl = getSpecificPlayer(0)
-    if not pl then return end
-    local ok, handle = pcall(function()
-        return pl:getEmitter():playSound("pongdu_drone")
-    end)
-    if ok and handle and handle ~= 0 then
-        _droneSound = handle
-        pcall(function() pl:getEmitter():setVolume(handle, DRONE_VOL_FAR) end)
+    local handle, em = loopSoundStart("pongdu_drone", DRONE_VOL_FAR)
+    if handle then
+        _droneSound, _droneEmitter = handle, em
     else
         print("[PongDu] fire_support/drone: motor sound start FAILED")
     end
@@ -1223,14 +1294,9 @@ end
 
 local function droneSmgEnsure()
     if _droneSmgSound then return end
-    local pl = getSpecificPlayer(0)
-    if not pl then return end
-    local ok, handle = pcall(function()
-        return pl:getEmitter():playSound("pongdu_drone_smg")
-    end)
-    if ok and handle and handle ~= 0 then
-        _droneSmgSound = handle
-        pcall(function() pl:getEmitter():setVolume(handle, DRONE_SMG_VOL_FAR) end)
+    local handle, em = loopSoundStart("pongdu_drone_smg", DRONE_SMG_VOL_FAR)
+    if handle then
+        _droneSmgSound, _droneSmgEmitter = handle, em
         print("[PongDu] fire_support/drone: SMG loop ENGAGE")
     else
         print("[PongDu] fire_support/drone: SMG loop start FAILED")
@@ -1239,15 +1305,19 @@ end
 
 local function droneSmgStop(reason)
     if not _droneSmgSound then return end
-    local pl = getSpecificPlayer(0)
-    if pl then pcall(function() pl:getEmitter():stopSound(_droneSmgSound) end) end
-    _droneSmgSound = nil
+    loopSoundStop(_droneSmgEmitter, _droneSmgSound, "pongdu_drone_smg")
+    _droneSmgSound, _droneSmgEmitter = nil, nil
     print("[PongDu] fire_support/drone: SMG loop stopped (" .. tostring(reason) .. ")")
 end
 
 -- 모터음 거리 볼륨. 헬기와 달리 dmax를 detR+50(스폰 거리)로 잡는다 --
 -- 접근 시작점이 정확히 그 거리이므로 페이드인이 0에서 자연스럽게 시작한다.
 local function droneSoundTick()
+    -- 헬기 heliSoundTick 과 동일한 워치독. 이유는 그쪽 주석 참조.
+    if (_droneSound or _droneSmgSound) and tcount(_drones) == 0 then
+        droneSoundStopAll("watchdog: no instance")
+    end
+
     local pl = getSpecificPlayer(0)
     if not pl then return end
     local px, py = pl:getX(), pl:getY()
@@ -1265,24 +1335,24 @@ local function droneSoundTick()
     if not best then return end
 
     local dmax = SandboxVars.PongDu.Drone_DetectRadius + 50
-    local emitter = pl:getEmitter()
+    -- 볼륨도 "재생한 emitter" 에 건다 (헬기 heliSoundTick 과 동일한 이유).
 
-    if _droneSound then
+    if _droneSound and _droneEmitter then
         local k = 1 - math.sqrt(best) / dmax
         if k < 0 then k = 0 elseif k > 1 then k = 1 end
         pcall(function()
-            emitter:setVolume(_droneSound,
+            _droneEmitter:setVolume(_droneSound,
                 DRONE_VOL_FAR + (DRONE_VOL_NEAR - DRONE_VOL_FAR) * k)
         end)
     end
 
     if bestEng then
         droneSmgEnsure()
-        if _droneSmgSound then
+        if _droneSmgSound and _droneSmgEmitter then
             local k = 1 - math.sqrt(bestEng) / dmax
             if k < 0 then k = 0 elseif k > 1 then k = 1 end
             pcall(function()
-                emitter:setVolume(_droneSmgSound,
+                _droneSmgEmitter:setVolume(_droneSmgSound,
                     DRONE_SMG_VOL_FAR + (DRONE_SMG_VOL_NEAR - DRONE_SMG_VOL_FAR) * k)
             end)
         end
@@ -1302,7 +1372,10 @@ local function droneRemove(own, reason)
 end
 
 local function droneRemoveAll(reason)
-    for own in pairs(_drones) do _drones[own] = nil end
+    -- 헬기 heliRemoveAll 과 동일한 이유로 키를 먼저 모은다.
+    local keys, n = {}, 0
+    for own in pairs(_drones) do n = n + 1; keys[n] = own end
+    for i = 1, n do _drones[keys[i]] = nil end
     droneTimerHide()
     droneSoundStopAll(reason)
 end
@@ -1480,6 +1553,7 @@ end
 local _expired = {}
 
 Events.OnTick.Add(function()
+    fsSweepStaleLoops()
     local now = getTimestampMs()
 
     local n = 0
@@ -1710,5 +1784,45 @@ function _a.b()
     droneRemoveAll("cleanup")
     sniperTimerHide()
 end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  플레이어 생명주기 훅
+--
+--  루프 사운드는 "재생한 emitter" 에 묶여 있는데, IsoGameCharacter.emitter 는
+--  final 이라 플레이어 객체가 교체되면 그 emitter 도 같이 버려진다
+--  (loopSoundStart 주석 참조). 사망/리스폰/접속종료 시점을 직접 잡아서
+--  버려지기 "전에" 정리하고, 필요하면 새 emitter 에 다시 건다.
+--
+--  ※ _a.b() 는 외부에서 호출되지 않고 있었다. 정리 책임을 이 모듈 안으로
+--    가져오는 게 이 훅들의 목적이다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 사망: 아직 옛 emitter 가 유효한 시점이라 여기서 끊어야 확실히 멈춘다.
+-- 인스턴스(_helis/_drones)는 지우지 않는다 -- 남의 화력지원이 진행 중일 수
+-- 있고, 그건 리스폰 후에도 계속 보여야 한다. 리스폰 시 새 emitter 로 다시 건다.
+Events.OnPlayerDeath.Add(function(player)
+    if not player or player ~= getSpecificPlayer(0) then return end
+    heliSoundStopAll("player death")
+    droneSoundStopAll("player death")
+end)
+
+-- 리스폰/접속: 새 IsoPlayer = 새 emitter. 사망 이벤트를 놓친 경로(강제 종료,
+-- 사망 처리 순서 등)를 대비해 한 번 더 정리한 뒤, 아직 살아있는 인스턴스가
+-- 있으면 새 emitter 에 루프를 다시 건다. 기관총/SMG 루프는 교전 상태를 보고
+-- OnTick 집계(heliSoundTick/droneSoundTick)가 알아서 다시 켜므로 손대지 않는다.
+Events.OnCreatePlayer.Add(function(index, player)
+    if index ~= 0 then return end
+    heliSoundStopAll("player recreated")
+    droneSoundStopAll("player recreated")
+    if tcount(_helis)  > 0 then heliRotorEnsure()  end
+    if tcount(_drones) > 0 then droneMotorEnsure() end
+end)
+
+-- 접속 종료: 세션이 끝났으므로 인스턴스까지 통째로 비운다. 이게 없으면
+-- 재접속 시(게임 재시작 없이) 옛 인스턴스가 engaged=true 로 남아 있어
+-- heliSoundTick 이 다음 틱에 곧바로 기관총 루프를 다시 켠다.
+Events.OnDisconnect.Add(function()
+    _a.b()
+end)
 
 return _a
