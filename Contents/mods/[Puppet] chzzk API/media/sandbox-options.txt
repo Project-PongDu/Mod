@@ -648,6 +648,23 @@ option PongDu.RiseUp_SafeZoneBlock = {
     page = PongDu_Debuff, translation = PongDu_RiseUp_SafeZoneBlock,
 }
 
+option PongDu.RiseUp_MinCorpses = {
+    type = integer, min = 0, max = 200, default = 10,
+    page = PongDu_Debuff, translation = PongDu_RiseUp_MinCorpses,
+}
+
+option PongDu.RiseUp_MaxRevive = {
+    type = integer, min = 0, max = 500, default = 100,
+    page = PongDu_Debuff, translation = PongDu_RiseUp_MaxRevive,
+}
+
+option PongDu.RiseUp_Priority = {
+    type = enum, numValues = 2, default = 2,
+    page = PongDu_Debuff,
+    translation = PongDu_RiseUp_Priority,
+    valueTranslation = PongDu_RiseUp_Priority,
+}
+
 option PongDu.Divider_Rain = {
     type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Divider_Rain,
@@ -679,7 +696,7 @@ option PongDu.Rain_SprinterPercent = {
 }
 
 option PongDu.Rain_ShowRadius = {
-    type = boolean, default = false,
+    type = boolean, default = true,
     page = PongDu_Debuff, translation = PongDu_Rain_ShowRadius,
 }
 

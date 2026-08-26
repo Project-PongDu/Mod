@@ -53,6 +53,136 @@ function _a.a(player)
     end
 end
 
+-- ── 최소 시체 수 게이트 ───────────────────────────────────────────────────
+-- 샌드박스 RiseUp_MinCorpses 이상의 시체가 반경 안에 없으면 강령술을 발동시키지
+-- 않고 큐박스 슬롯을 자물쇠 상태로 묶어둔다 (rewardManager 의 blocked 훅).
+-- 시체가 하한선을 넘는 순간 락이 풀리고 원래 카운트다운으로 복귀한다.
+--
+-- 왜 클라에서 세는가:
+--   시체는 서버 권위지만 "지금 이 반경에 몇 구 있나"는 클라 셀에도 그대로
+--   존재한다(클라가 시체를 렌더한다). 반경 최대 60타일은 클라 로드 반경 안이라
+--   결과가 어긋날 여지가 없고, 락 판정 주체인 큐박스가 어차피 클라라서
+--   서버 왕복(비동기 응답 대기)을 붙일 이유가 없다.
+--
+-- 왜 점진 스캔인가:
+--   r=30 기준 61x61x8층 = 29,768 스퀘어다. 매 틱 전수 조사하면 Kahlua Java 호출
+--   오버헤드로 프레임이 갈린다. blocked() 는 매 틱 불리므로, 한 번 호출에
+--   GATE_BUDGET 스퀘어만 처리하고 커서를 남긴 뒤 다음 호출에서 이어서 센다.
+--   하한선을 채우는 순간 조기 종료하므로 통상은 몇 틱 안에 끝나고, 최악(시체가
+--   정말 없을 때)에도 완주까지 60프레임 = 1초 남짓이다.
+--   완주하면 결과를 캐시하고 GATE_COOLDOWN 뒤에 새 스윕을 시작한다.
+--
+-- 대기 중엔 큐박스에 "현재/필요" 카운터를 띄운다 (gateNote -> rewardManager.note).
+local GATE_BUDGET   = 600     -- blocked() 1회당 조사할 스퀘어 수
+local GATE_COOLDOWN = 1000    -- 스윕 완주 후 다음 스윕까지 대기 (ms)
+
+local _gate = {
+    active  = false,          -- 스윕 진행 중
+    dx = 0, dy = 0, floor = 0,
+    cx = 0, cy = 0, r = 0, r2 = 0,
+    count   = 0,
+    need    = 0,
+    pass    = false,          -- 최근 스윕 결과 (하한선 충족)
+    seen    = 0,              -- 최근 스윕이 센 시체 수 (표시용)
+    nextAt  = 0,              -- 다음 스윕 시작 가능 시각
+}
+
+local function gateBeginSweep(player, need)
+    _gate.active = true
+    _gate.cx = math.floor(player:getX())
+    _gate.cy = math.floor(player:getY())
+    _gate.r  = SandboxVars.PongDu.RiseUp_Radius
+    _gate.r2 = _gate.r * _gate.r
+    _gate.dx = -_gate.r
+    _gate.dy = -_gate.r
+    _gate.floor = 0
+    _gate.count = 0
+    _gate.need  = need
+end
+
+-- 커서 한 칸 전진. 전 범위를 다 돌았으면 true.
+local function gateAdvance()
+    _gate.dx = _gate.dx + 1
+    if _gate.dx > _gate.r then
+        _gate.dx = -_gate.r
+        _gate.dy = _gate.dy + 1
+        if _gate.dy > _gate.r then
+            _gate.dy = -_gate.r
+            _gate.floor = _gate.floor + 1
+            if _gate.floor > 7 then return true end
+        end
+    end
+    return false
+end
+
+-- 예산만큼 스캔. 스윕이 끝났으면(하한 충족 또는 완주) true.
+local function gateStep()
+    local cell = getCell()
+    if not cell then return false end
+    local processed = 0
+    while processed < GATE_BUDGET do
+        local dx, dy = _gate.dx, _gate.dy
+        if dx * dx + dy * dy < _gate.r2 then
+            local sq = cell:getGridSquare(_gate.cx + dx, _gate.cy + dy, _gate.floor)
+            if sq then
+                local smo = sq:getStaticMovingObjects()
+                for i = 0, smo:size() - 1 do
+                    if instanceof(smo:get(i), "IsoDeadBody") then
+                        _gate.count = _gate.count + 1
+                    end
+                end
+                -- 하한선을 채우면 나머지는 셀 필요가 없다 (판정은 >= 하나뿐)
+                if _gate.count >= _gate.need then return true end
+            end
+        end
+        if gateAdvance() then return true end
+        processed = processed + 1
+    end
+    return false
+end
+
+-- isBelowMinimum(player) -> true면 지금은 발동 불가 (큐박스 자물쇠 유지)
+-- rewardManager 의 blocked 훅이 매 틱 호출한다. 첫 판정이 나오기 전에는
+-- 비관적으로 true를 돌려준다 -- "몰라서 그냥 터뜨렸다"보다 몇 프레임 대기가 낫다.
+function _a.isBelowMinimum(player)
+    local need = SandboxVars.PongDu.RiseUp_MinCorpses
+    if need <= 0 then                      -- 하한선 없음: 게이트 자체를 끔
+        _gate.active = false
+        _gate.need   = 0
+        return false
+    end
+    if not player then return true end
+
+    local now = getTimestampMs()
+    if not _gate.active then
+        if now < _gate.nextAt then return not _gate.pass end
+        gateBeginSweep(player, need)
+    end
+
+    if gateStep() then
+        _gate.active = false
+        _gate.pass   = (_gate.count >= _gate.need)
+        _gate.seen   = _gate.count
+        _gate.nextAt = now + GATE_COOLDOWN
+        if not _gate.pass then
+            print("[PongDu][RiseUp][Gate] below minimum: " .. tostring(_gate.count)
+                .. "/" .. tostring(_gate.need) .. " r=" .. tostring(_gate.r))
+        else
+            print("[PongDu][RiseUp][Gate] minimum met: " .. tostring(_gate.count)
+                .. "/" .. tostring(_gate.need))
+        end
+    end
+    return not _gate.pass
+end
+
+-- gateNote() -> 큐박스 자물쇠 슬롯에 겹쳐 그릴 짧은 문자열 ("3/5"). 게이트가
+-- 꺼져 있거나 아직 판정 전이면 nil.
+function _a.gateNote()
+    if _gate.need <= 0 then return nil end
+    if _gate.pass then return nil end
+    return tostring(_gate.seen) .. "/" .. tostring(_gate.need)
+end
+
 -- ── 부활 좀비 기상 모션 복원 ──────────────────────────────────────────────
 -- 강령술이 fakeDead 경로(옷 유지)를 타면서 부활 좀비의 isReanimatedPlayer가
 -- false가 됐다. 그런데 클라가 "이 좀비 지금 누워있다"를 아는 바닐라 경로

@@ -259,6 +259,19 @@ local rewardHandlers = {
         immediate = function()
             return not SandboxVars.PongDu.RiseUp_SafeZoneBlock
         end,
+        -- 최소 시체 수 락 (RiseUp_MinCorpses). 반경 안 시체가 하한선에 못 미치면
+        -- 발동시켜봐야 아무 일도 안 일어나므로(후원자 입장에선 먹통), 안전지대
+        -- 락과 같은 방식으로 슬롯을 자물쇠 상태로 붙잡아둔다. 시체를 더 쌓거나
+        -- 시체가 있는 곳으로 이동해 하한선을 넘기는 순간 락이 풀린다.
+        -- 옵션이 0이면 게이트 자체가 꺼져 항상 false.
+        blocked = function(player)
+            return riseup.isBelowMinimum(player)
+        end,
+        -- 자물쇠 슬롯에 "현재/필요" 카운터를 겹쳐 그린다 -- 안전지대 락과
+        -- 구분이 안 되면 왜 안 터지는지 알 수가 없다.
+        note = function(player)
+            return riseup.gateNote()
+        end,
         fn = function(sender)
             riseup.a(global.player)
             global.processingEvent = false
@@ -425,6 +438,17 @@ function rewardManager.isFeatureBlocked(featureId, player)
     local entry = rewardHandlers[featureId]
     if entry == nil or entry.blocked == nil then return false end
     return entry.blocked(player) == true
+end
+
+-- lockNote(featureId, player) -> 자물쇠 슬롯 위에 겹쳐 그릴 짧은 문자열 | nil
+-- 락이 걸린 이유가 기능마다 다른데 자물쇠 아이콘만으론 구분이 안 된다.
+-- 핸들러가 note 훅을 제공하면 큐박스가 그 문자열을 슬롯에 덧그린다
+-- (강령술: 반경 내 시체 "현재/필요"). 훅이 없는 기능은 항상 nil -> 기존 표시 유지.
+-- 매 프레임 render에서 불리므로 훅 구현은 캐시된 값만 돌려줘야 한다.
+function rewardManager.lockNote(featureId, player)
+    local entry = rewardHandlers[featureId]
+    if entry == nil or entry.note == nil then return nil end
+    return entry.note(player)
 end
 
 -- applyReward(featureId, sender, callback)  [public name: .a]

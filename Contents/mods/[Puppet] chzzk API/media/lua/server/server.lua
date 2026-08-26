@@ -1429,6 +1429,57 @@ local function markFakeDead(body)
     return body:isFakeDead()
 end
 
+-- ── 부활 대상 선별 (상한선 + 우선순위) ───────────────────────────────────────
+-- 상한선(RiseUp_MaxRevive)이 0이면 기존과 동일하게 전량 부활. 0보다 크고 후보가
+-- 그보다 많으면 여기서 잘라낸다. 자르는 방식은 RiseUp_Priority 를 따른다:
+--   1 = 완전 무작위    : 특좀/일반 구분 없이 전체에서 무작위 추출
+--   2 = 특수좀비 우선  : 특좀 후보를 먼저 채우고(특좀이 상한보다 많으면 특좀
+--                        중에서 무작위), 남는 자리만 일반 시체로 채운다
+-- ZombRand 사용: math.random 은 Kahlua 미등록. 셔플은 Fisher-Yates.
+--
+-- 왜 "먼저 전량 수집 -> 선별 -> 부활" 인가:
+--   스캔 도중 즉시 부활시키면 뽑기 모집단이 확정되기 전에 소비가 시작돼서
+--   좌표 순회 순서(북서쪽 우선)가 그대로 편향이 된다. 상한선이 걸리는 순간
+--   "반경 북서쪽 시체만 되살아난다"가 되므로 2패스가 필수다.
+local function shuffleList(t)
+    for i = #t, 2, -1 do
+        local j = ZombRand(i) + 1
+        t[i], t[j] = t[j], t[i]
+    end
+end
+
+local function selectRevivable(cands, cap, priority)
+    if cap <= 0 or #cands <= cap then return cands end
+    if priority == 2 then
+        local specials, normals = {}, {}
+        for _, c in ipairs(cands) do
+            if c.kind then specials[#specials + 1] = c
+            else normals[#normals + 1] = c end
+        end
+        shuffleList(specials)
+        local out = {}
+        for i = 1, #specials do
+            if #out >= cap then break end
+            out[#out + 1] = specials[i]
+        end
+        if #out < cap then
+            shuffleList(normals)
+            for i = 1, #normals do
+                if #out >= cap then break end
+                out[#out + 1] = normals[i]
+            end
+        end
+        srvlog("RiseUp cap: " .. #cands .. " -> " .. #out
+            .. " (mutant-first, specials=" .. #specials .. ")")
+        return out
+    end
+    shuffleList(cands)
+    local out = {}
+    for i = 1, cap do out[#out + 1] = cands[i] end
+    srvlog("RiseUp cap: " .. #cands .. " -> " .. #out .. " (random)")
+    return out
+end
+
 DOServer["PongDuRiseUp"]["RiseUp"] = function(player, data)
     local cx = tonumber(data["x"]) or player:getX()
     local cy = tonumber(data["y"]) or player:getY()
@@ -1439,109 +1490,125 @@ DOServer["PongDuRiseUp"]["RiseUp"] = function(player, data)
     local readable = 0
     local marked = 0
     local handled = {}                     -- 이번 RiseUp에서 이미 잡은 부활 좀비 onlineID
-    print("[PongDu][RiseUp] START x=" .. tostring(cx) .. " y=" .. tostring(cy) .. " r=" .. tostring(r))
+    local cap      = SandboxVars.PongDu.RiseUp_MaxRevive
+    local priority = SandboxVars.PongDu.RiseUp_Priority
+    print("[PongDu][RiseUp] START x=" .. tostring(cx) .. " y=" .. tostring(cy) .. " r=" .. tostring(r)
+        .. " cap=" .. tostring(cap) .. " priority=" .. tostring(priority))
+
+    -- ── 1패스: 후보 수집 ─────────────────────────────────────────────────────
+    -- 부활은 전혀 하지 않고 시체 + 좌표 + 특좀 종류만 모은다.
+    local cands = {}
     for floor = 0, 7 do                    -- 다층 건물 내부 시체까지 포함
         for dy = -r, r do
             for dx = -r, r do
                 if dx * dx + dy * dy < r2 then
                     local sq = cell:getGridSquare(cx + dx, cy + dy, floor)
                     if sq then
-                        -- reanimateNow()가 시체를 스퀘어에서 제거하므로
-                        -- 순회 중 리스트 변형을 피하려고 먼저 수집 후 발동
                         local smo = sq:getStaticMovingObjects()
-                        local bodies = nil
                         for i = 0, smo:size() - 1 do
                             local o = smo:get(i)
                             if instanceof(o, "IsoDeadBody") then
-                                bodies = bodies or {}
-                                bodies[#bodies + 1] = o
-                            end
-                        end
-                        if bodies then
-                            for _, b in ipairs(bodies) do
                                 -- ★이동-무관 판별: 시체(IsoDeadBody) 자신의 modData를
-                                -- 직독한다. 소환 때 서버가 박은 PuppetMutant/Sender가
-                                -- 좀비->시체 전환에 자동 계승됨(프로브로 확증:
-                                -- getOK=true, PuppetMutant=brute/roach). modData는
-                                -- 객체를 따라가므로 시체를 어디로 옮겨도 정확히 판별.
-                                local cmd = b:getModData()
-                                local kind = cmd and cmd["PuppetMutant"]
-                                local sender = cmd and (cmd["PuppetMutantSender"] or "")
-                                -- 좌표 death-mark 폴백 제거: 일반좀비 시체는 modData가
-                                -- 없어 폴백으로 넘어갔고, 그 자리에 남은 특좀 마크에 걸려
-                                -- 일반좀비가 특좀으로 부활하는 역방향 오탐이 났다(로그:
-                                -- kind=... from fallback). 시체 modData는 진짜 특좀이면
-                                -- 100% 계승되므로(from modData 검증됨) 폴백은 순수
-                                -- 오탐원이라 삭제. 일반좀비 시체 -> kind=nil -> 일반 부활.
-                                print("[PongDu][RiseUp] corpse @" .. tostring(sq:getX())
-                                    .. "," .. tostring(sq:getY())
-                                    .. " kind=" .. tostring(kind))
-                                if kind then readable = readable + 1 end
-                                -- 좀비 시체만 마킹. 플레이어 시체는 옷이 pid가 아닌
-                                -- 진짜 wornItems라 pid 재구성이 불가능하므로 원래대로
-                                -- 디스크립터 경로(setReanimatedPlayer)를 타야 맞다.
-                                if b:isZombie() and not markFakeDead(b) then
-                                    print("[PongDu][RiseUp] setFakeDead BLOCKED @"
-                                        .. tostring(sq:getX()) .. "," .. tostring(sq:getY())
-                                        .. " -> 알몸 부활 가능. DisableFakeDead 확인 필요")
-                                end
-                                b:reanimateNow()
-                                raised = raised + 1
-                                -- ── 방금 부활한 좀비 재등록 ──────────────────
-                                -- registerMutant(nz,...) : 서버 권위 pid로 즉시 재등록.
-                                -- 기존엔 클라가 MutantReregister로 재등록했는데, 클라가
-                                -- 본 부활좀비 pid와 서버가 다음 사이클에 시체에서 읽는
-                                -- pid가 어긋나면(동기화 레이스) 다음 부활이 일반좀비가
-                                -- 됐다. 등록·조회를 둘 다 서버 pid(mutantKey)로 통일해
-                                -- 구조적으로 일치시킨다 (버그①: 2회차 부활 일반화).
-                                --
-                                -- ★ setReanimateTimer(0) 제거됨: IsoZombie.ReanimateTimer는
-                                --   '부활 예약'이 아니라 ZombieOnGroundState의 기상
-                                --   카운트다운이다(ZombieOnGroundState:38이 유일한 writer).
-                                --   0으로 밀면 시체가 바닥에서 일어나는 모션이 사라진다.
-                                --   부활 예약(IsoDeadBody.reanimateTime) 방어는 아래
-                                --   LoadGridsquare 살균기가 담당한다.
-                                --
-                                -- ★ 알려진 결함: reanimateNow()는 setReanimateTime()만 하고
-                                --   실제 reanimate()는 다음 틱 IsoDeadBody.update()에서 돈다
-                                --   (IsoDeadBody:1240). 따라서 이 자리에서 findFreshZombie는
-                                --   항상 nil이다 (로그 확증: NOT FOUND 100/100).
-                                --   특좀 능력은 reanimate()의 modData 통째 복사로 계승되어
-                                --   결과적으로 동작하지만, 이 재등록은 안 걸린다.
-                                --   수집을 다음 틱으로 미루는 수정 필요 (별건).
-                                local nz = findFreshZombie(sq, handled)
-                                if nz then
-                                    print("[PongDu][RiseUp] fresh zombie zid=" .. tostring(nz:getOnlineID())
-                                        .. " newKey=" .. tostring(mutantKey(nz)))
-                                    if kind then registerMutant(nz, kind, sender) end
-                                else
-                                    print("[PongDu][RiseUp] fresh zombie NOT FOUND on sq "
-                                        .. tostring(sq:getX()) .. "," .. tostring(sq:getY()))
-                                end
-                                if kind then
-                                    marked = marked + 1
-                                    sendServerCommand("PongDuMutant", "MutantRevive", {
-                                        ["x"]      = sq:getX(),
-                                        ["y"]      = sq:getY(),
-                                        ["z"]      = floor,
-                                        ["kind"]   = kind,
-                                        ["sender"] = sender or "",
-                                        ["key"]    = nz and mutantKey(nz) or "N/A",
-                                    })
-                                    -- 서버측 재스탬프 마크: 이 자리에서 부활한 좀비는
-                                    -- staleSweep이 삭제 대신 zid 재스탬프하도록.
-                                    _reviveRestamp[#_reviveRestamp + 1] = {
-                                        x = sq:getX(), y = sq:getY(), z = floor,
-                                        kind = kind, sender = sender or "",
-                                        expire = getTimestampMs() + REVIVE_RESTAMP_MS,
-                                    }
-                                    srvlog("RiseUp revive-mark " .. kind .. " @" .. sq:getX() .. "," .. sq:getY())
-                                end
+                                -- 직독한다 (상세 근거는 2패스 주석 참조).
+                                local cmd = o:getModData()
+                                cands[#cands + 1] = {
+                                    body   = o,
+                                    sq     = sq,
+                                    floor  = floor,
+                                    kind   = cmd and cmd["PuppetMutant"],
+                                    sender = cmd and (cmd["PuppetMutantSender"] or "") or "",
+                                }
                             end
                         end
                     end
                 end
             end
+        end
+    end
+    print("[PongDu][RiseUp] candidates=" .. #cands)
+
+    -- ── 2패스: 선별 후 부활 ──────────────────────────────────────────────────
+    local picked = selectRevivable(cands, cap, priority)
+    for _, c in ipairs(picked) do
+        local sq     = c.sq
+        local floor  = c.floor
+        local b      = c.body
+        -- ★이동-무관 판별: 1패스에서 시체(IsoDeadBody) 자신의 modData를
+        -- 직독해 담아온 값이다. 소환 때 서버가 박은 PuppetMutant/Sender가
+        -- 좀비->시체 전환에 자동 계승됨(프로브로 확증:
+        -- getOK=true, PuppetMutant=brute/roach). modData는
+        -- 객체를 따라가므로 시체를 어디로 옮겨도 정확히 판별.
+        local kind   = c.kind
+        local sender = c.sender
+        -- 좌표 death-mark 폴백 제거: 일반좀비 시체는 modData가
+        -- 없어 폴백으로 넘어갔고, 그 자리에 남은 특좀 마크에 걸려
+        -- 일반좀비가 특좀으로 부활하는 역방향 오탐이 났다(로그:
+        -- kind=... from fallback). 시체 modData는 진짜 특좀이면
+        -- 100% 계승되므로(from modData 검증됨) 폴백은 순수
+        -- 오탐원이라 삭제. 일반좀비 시체 -> kind=nil -> 일반 부활.
+        print("[PongDu][RiseUp] corpse @" .. tostring(sq:getX())
+            .. "," .. tostring(sq:getY())
+            .. " kind=" .. tostring(kind))
+        if kind then readable = readable + 1 end
+        -- 좀비 시체만 마킹. 플레이어 시체는 옷이 pid가 아닌
+        -- 진짜 wornItems라 pid 재구성이 불가능하므로 원래대로
+        -- 디스크립터 경로(setReanimatedPlayer)를 타야 맞다.
+        if b:isZombie() and not markFakeDead(b) then
+            print("[PongDu][RiseUp] setFakeDead BLOCKED @"
+                .. tostring(sq:getX()) .. "," .. tostring(sq:getY())
+                .. " -> 알몸 부활 가능. DisableFakeDead 확인 필요")
+        end
+        b:reanimateNow()
+        raised = raised + 1
+        -- ── 방금 부활한 좀비 재등록 ──────────────────
+        -- registerMutant(nz,...) : 서버 권위 pid로 즉시 재등록.
+        -- 기존엔 클라가 MutantReregister로 재등록했는데, 클라가
+        -- 본 부활좀비 pid와 서버가 다음 사이클에 시체에서 읽는
+        -- pid가 어긋나면(동기화 레이스) 다음 부활이 일반좀비가
+        -- 됐다. 등록·조회를 둘 다 서버 pid(mutantKey)로 통일해
+        -- 구조적으로 일치시킨다 (버그①: 2회차 부활 일반화).
+        --
+        -- ★ setReanimateTimer(0) 제거됨: IsoZombie.ReanimateTimer는
+        --   '부활 예약'이 아니라 ZombieOnGroundState의 기상
+        --   카운트다운이다(ZombieOnGroundState:38이 유일한 writer).
+        --   0으로 밀면 시체가 바닥에서 일어나는 모션이 사라진다.
+        --   부활 예약(IsoDeadBody.reanimateTime) 방어는 아래
+        --   LoadGridsquare 살균기가 담당한다.
+        --
+        -- ★ 알려진 결함: reanimateNow()는 setReanimateTime()만 하고
+        --   실제 reanimate()는 다음 틱 IsoDeadBody.update()에서 돈다
+        --   (IsoDeadBody:1240). 따라서 이 자리에서 findFreshZombie는
+        --   항상 nil이다 (로그 확증: NOT FOUND 100/100).
+        --   특좀 능력은 reanimate()의 modData 통째 복사로 계승되어
+        --   결과적으로 동작하지만, 이 재등록은 안 걸린다.
+        --   수집을 다음 틱으로 미루는 수정 필요 (별건).
+        local nz = findFreshZombie(sq, handled)
+        if nz then
+            print("[PongDu][RiseUp] fresh zombie zid=" .. tostring(nz:getOnlineID())
+                .. " newKey=" .. tostring(mutantKey(nz)))
+            if kind then registerMutant(nz, kind, sender) end
+        else
+            print("[PongDu][RiseUp] fresh zombie NOT FOUND on sq "
+                .. tostring(sq:getX()) .. "," .. tostring(sq:getY()))
+        end
+        if kind then
+            marked = marked + 1
+            sendServerCommand("PongDuMutant", "MutantRevive", {
+                ["x"]      = sq:getX(),
+                ["y"]      = sq:getY(),
+                ["z"]      = floor,
+                ["kind"]   = kind,
+                ["sender"] = sender or "",
+                ["key"]    = nz and mutantKey(nz) or "N/A",
+            })
+            -- 서버측 재스탬프 마크: 이 자리에서 부활한 좀비는
+            -- staleSweep이 삭제 대신 zid 재스탬프하도록.
+            _reviveRestamp[#_reviveRestamp + 1] = {
+                x = sq:getX(), y = sq:getY(), z = floor,
+                kind = kind, sender = sender or "",
+                expire = getTimestampMs() + REVIVE_RESTAMP_MS,
+            }
+            srvlog("RiseUp revive-mark " .. kind .. " @" .. sq:getX() .. "," .. sq:getY())
         end
     end
     srvlog("RiseUp: " .. raised .. " corpses, " .. readable .. " death-mark hits, " .. marked .. " special marks, around " .. cx .. "," .. cy .. " r=" .. r)

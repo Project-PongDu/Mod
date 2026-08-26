@@ -291,6 +291,15 @@ function DonationEntryPanel:render()
         self:drawRectBorder(cx - sc(4), bodyY - sc(7), sc(8), sc(8), 0.95, 0.95, 0.85, 0.4)
         -- 몸통 (채움)
         self:drawRect(cx - math.floor(bodyW / 2), bodyY, bodyW, bodyH, 0.95, 0.95, 0.85, 0.4)
+        -- 락 사유 카운터 (기능이 note 훅을 주는 경우만). 자물쇠 아래에 중앙 정렬.
+        -- 강령술의 "반경 내 시체 3/5"처럼, 안전지대 락과 구분이 안 되는 상황에서
+        -- 무엇을 기다리는 중인지 슬롯만 보고 알 수 있게 한다.
+        local note = rewardManager.lockNote(e.featureId, getPlayer())
+        if note then
+            local nw = getTextManager():MeasureStringX(UIFont.Small, note)
+            drawTextOutlined(self, note, math.floor(w / 2 - nw / 2), bodyY + bodyH + sc(2),
+                1, 0.85, 0.4, 1, UIFont.Small)
+        end
     elseif e.counting then
         -- 쿨다운 오버레이: 남은 비율만큼 위에서 어둡게 덮고, 시간이 지날수록
         -- 아래에서부터 원래 색이 드러난다 (게이지 아이콘처럼 슬롯 자체가 진행바 역할).
