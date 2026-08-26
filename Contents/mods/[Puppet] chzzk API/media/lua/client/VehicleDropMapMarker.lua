@@ -24,14 +24,15 @@ local QUEUE_LIMIT = 32 -- 훅이 어떤 이유로든 안 돌 때 modData가 무�
 local MARKER_SYMBOL = "Boat" -- 바닐라 MapSymbolDefinitions 등록 심볼
 local MARKER_R, MARKER_G, MARKER_B = 0.1, 0.3, 0.9
 
--- 심볼 스케일은 0 이하로 준다.
--- WorldMapSymbols.isSymbolVisible()의 조건이 (m_scale <= 0) or (zoomF >= 14.5) 라서,
--- 바닐라 ISMap.SCALE(0.666) 같은 양수 스케일이면 맵을 축소했을 때 마커가 렌더에서 빠진다.
--- 바닐라 펜 심볼은 플레이어가 직접 찍은 거라 위치를 알지만, 보급 마커는 어디 떨어졌는지
--- 모르는 상태로 찾는 거라 축소 상태에서도 보이는 편이 낫다.
--- scale <= 0 이면 줌과 무관하게 텍스처 원본 픽셀 크기로 고정 렌더된다
--- (WorldMapTextureSymbol.render의 else 분기 = DrawTextureColor).
-local MARKER_SCALE = 0
+-- 심볼 스케일은 바닐라 펜 심볼과 동일하게 ISMap.SCALE을 쓴다.
+-- 예전에 0으로 줬던 적이 있는데, scale <= 0 이면 WorldMapTextureSymbol.render가
+-- getDisplayScale을 안 타고 DrawTextureColor로 텍스처 원본 픽셀 크기 고정 렌더를 해서
+-- 줌을 바꿔도 아이콘 크기가 안 변한다. 양수 스케일이면 getLayoutWorldScale()이 곱해져
+-- 줌에 맞춰 커지고 작아진다 (대신 바닐라와 똑같이 줌 14.5 미만에서는 렌더에서 빠진다).
+-- ISMap이 아직 로드 안 된 상황을 대비해 바닐라 기본값(0.666)으로 폴백.
+local function getMarkerScale()
+    return (ISMap and ISMap.SCALE) or 0.666
+end
 
 -- 인스턴스가 살아있을 때만 성공. 큐로 넘길지 여부를 호출부가 판단할 수 있게 boolean 반환.
 local function addSymbolNow(x, y)
@@ -51,7 +52,7 @@ local function addSymbolNow(x, y)
     end
     sym:setRGBA(MARKER_R, MARKER_G, MARKER_B, 1.0)
     sym:setAnchor(0.5, 0.5)
-    sym:setScale(MARKER_SCALE)
+    sym:setScale(getMarkerScale())
 
     -- 플레이어가 월드맵 옵션에서 심볼 표시를 꺼놨으면 찍어도 화면에 안 나온다.
     -- 임의로 켜주는 건 월권이라 원인 추적용 로그만 남긴다.
