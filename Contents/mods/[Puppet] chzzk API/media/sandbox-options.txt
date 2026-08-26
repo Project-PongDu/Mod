@@ -214,7 +214,7 @@ option PongDu.VehicleDrop_ExcludePool = {
 }
 
 option PongDu.VehicleDrop_MinDistance = {
-    type = integer, min = 0, max = 300, default = 30,
+    type = integer, min = 0, max = 300, default = 10,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,
 }
 

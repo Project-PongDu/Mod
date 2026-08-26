@@ -330,42 +330,23 @@ local function pickVehicleType()
     return filtered[ZombRand(#filtered) + 1]
 end
 
--- 월드맵(M키)에 투하 지점 심볼을 그린다. (BATMAN_EHE_MILITARY_DROP의 drawSymbol 패턴)
+-- 월드맵(M키)에 투하 지점 심볼을 그린다.
 -- 심볼은 개봉한 플레이어 본인의 맵에만 표시되고, 바닐라 맵 심볼 저장 체계에 따라 영구 보존된다.
--- 이 파일은 shared라 데디 서버에서도 로드되지만, OpenKit 자체가 클라이언트에서만
--- 실행되므로 (레시피 OnCreate) ISWorldMap이 없는 환경 방어만 해두면 된다.
-local MARKER_SYMBOL = "Boat" -- 바닐라 MapSymbolDefinitions 등록 심볼
-local MARKER_R, MARKER_G, MARKER_B = 0.1, 0.3, 0.9
-
+--
+-- 실제 구현은 client/VehicleDropMapMarker.lua 로 옮겼다. 심볼 저장소를 건드리려면
+-- UIWorldMap 인스턴스가 필요한데, 플레이어가 월드맵을 아직 안 열었으면 인스턴스가 없어
+-- 마커가 통째로 유실됐기 때문(세션당 첫 개봉에서만 발생). 이제 인스턴스가 없으면
+-- 좌표를 큐에 쌓아두고 플레이어가 맵을 여는 시점에 반영한다.
+--
+-- 이 파일은 shared라 데디 서버에서도 로드되지만 client 파일은 서버에 없으므로,
+-- isServer() 가드와 네임스페이스 존재 확인을 둘 다 둔다.
 local function drawDropMarker(player, x, y)
     if isServer() then return end
-    if not ISWorldMap or not ISWorldMap.ShowWorldMap then
-        print("[t3VehicleDrop] ISWorldMap not available, skipping map symbol")
+    if not t3VehicleDropMarker then
+        print("[t3VehicleDrop] t3VehicleDropMarker not loaded, skipping map symbol")
         return
     end
-
-    local playerNum = player:getPlayerNum()
-    if not ISWorldMap_instance then
-        -- 최초 1회 인스턴스 강제 생성 트릭 (참고 모드와 동일 패턴)
-        ISWorldMap.ShowWorldMap(playerNum)
-        ISWorldMap.HideWorldMap(playerNum)
-    end
-    if not ISWorldMap_instance then
-        print("[t3VehicleDrop] Failed to create ISWorldMap_instance, skipping map symbol")
-        return
-    end
-
-    local symbolsAPI = ISWorldMap_instance.mapAPI and ISWorldMap_instance.mapAPI:getSymbolsAPI()
-    if not symbolsAPI then
-        print("[t3VehicleDrop] Failed to get symbolsAPI, skipping map symbol")
-        return
-    end
-
-    local sym = symbolsAPI:addTexture(MARKER_SYMBOL, x, y)
-    sym:setRGBA(MARKER_R, MARKER_G, MARKER_B, 1.0)
-    sym:setAnchor(0.5, 0.5)
-    sym:setScale((ISMap and ISMap.SCALE) or 0.666)
-    print("[t3VehicleDrop] Map symbol placed (" .. tostring(x) .. "," .. tostring(y) .. ")")
+    t3VehicleDropMarker.place(player, x, y)
 end
 
 -- 소모된 kit 아이템의 modData에 심어둔 후원자 이름을 읽는다 (t3RandomWeapon.lua와 동일 패턴).
