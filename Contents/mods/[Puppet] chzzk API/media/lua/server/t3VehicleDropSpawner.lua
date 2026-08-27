@@ -26,6 +26,7 @@ local PARACHUTE_MODEL_ANGLE_OFFSET = 180
 -- 이 게임 좌표계는 y가 작을수록 북쪽/화면 위쪽이다 (IsoGridSquare.java 기준:
 -- this.n = getGridSquare(this.x, this.y - 1, this.z)). 그래서 y만 뺀다.
 local PARACHUTE_CENTER_Y_OFFSET = 2 -- 타일 단위. 여전히 어긋나 보이면 이 값을 조절할 것.
+local PARACHUTE_CENTER_X_OFFSET = 1
 
 local function scatterParachutes(square)
     local cell = getCell()
