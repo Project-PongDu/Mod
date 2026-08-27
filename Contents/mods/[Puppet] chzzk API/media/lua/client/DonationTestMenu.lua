@@ -41,12 +41,12 @@ local labelKey       = require("utils/labelKey")
 local BUFF = {
     "buff_roulette", "vaccine", "random_skill_potion", "random_weapon",
     "vehicle_drop", "inv_save_ticket", "fire_support",
-    "food_supply",
+    "food_supply", "instant_heal",
 }
 
 local DEBUFF = {
     "debuff_roulette", "zombie_roulette", "sprinter5", "random_teleport",
-    "mutant_spawn", "rise_up_dead_man", "zombie_rain",
+    "mutant_spawn", "rise_up_dead_man", "zombie_rain", "random_injury",
 }
 
 -- missile(폭격)은 고정 카테고리가 아니다. DonationReceiver.lua의
