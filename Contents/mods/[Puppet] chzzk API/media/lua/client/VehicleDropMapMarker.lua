@@ -52,14 +52,36 @@ local function getMarkerScale()
     return (ISMap and ISMap.SCALE) or 0.666
 end
 
--- 월드맵 인스턴스가 살아있을 때만 심볼 API를 얻을 수 있다.
--- 플레이어가 이번 세션에 큰맵을 한 번도 안 열었으면 nil이고, 그때는 아무것도 하지 않는다
--- (좌표 목록은 modData에 남아 있으므로 처음 여는 순간 sync가 전부 반영한다).
-local function getSymbolsAPI()
-    if not ISWorldMap_instance then return nil end
-    local mapAPI = ISWorldMap_instance.mapAPI
+-- 심볼 API는 UIWorldMap 인스턴스를 거쳐야 얻을 수 있다.
+-- 큰맵(ISWorldMap_instance)은 플레이어가 M을 한 번 눌러야 생기지만, 미니맵은 접속
+-- 시점부터 살아있고 같은 MapItem.getSingleton() 심볼 저장소를 공유한다
+-- (ISMiniMap.lua / ISWorldMap.lua 양쪽 다 mapAPI:setMapItem(MapItem.getSingleton())).
+-- 그래서 큰맵이 없으면 미니맵 쪽 API로 대신 쓴다 -- 큰맵을 한 번도 안 연 세션에서도
+-- 마커가 바로 뜨고, 샌드박스에서 큰맵만 꺼둔 서버에서도 동작한다.
+--
+-- 우선순위를 큰맵 > 미니맵으로 고정하는 게 중요하다. WorldMapSymbolsV1은 UI마다 자기
+-- 미러 리스트를 따로 들고 있고 removeSymbolByIndex가 공유 리스트와 미러에 같은 인덱스를
+-- 쓰기 때문에, 두 API를 섞어 쓰면 인덱스가 어긋나 엉뚱한 심볼이 지워진다.
+-- 큰맵이 생긴 뒤로는 계속 큰맵 것만 쓴다. 큰맵 V1은 생성 시 reinit으로 공유 저장소를
+-- 스냅샷하므로, 미니맵으로 먼저 찍어둔 심볼도 동기 상태 그대로 인계받는다.
+-- 반대로 미니맵을 쓰는 구간에는 큰맵이 아예 없으므로 저장소를 건드릴 주체가 우리뿐이다
+-- (바닐라 펜/지우개도, 주석 동기화 모드도 전부 ISWorldMap_instance를 필요로 한다).
+--
+-- 반환값: 심볼 API, 맵 API, 큰맵을 쓰고 있는지 여부.
+local function getSymbolsAPI(player)
+    local mapAPI = ISWorldMap_instance and ISWorldMap_instance.mapAPI
+    if mapAPI then
+        return mapAPI:getSymbolsAPI(), mapAPI, true
+    end
+
+    -- 스플릿스크린 대응으로 호출자의 플레이어 번호를 쓴다.
+    local playerNum = player and player:getPlayerNum() or 0
+    local miniMap = getPlayerMiniMap(playerNum)
+    local inner = miniMap and miniMap.inner
+    mapAPI = inner and inner.mapAPI
     if not mapAPI then return nil end
-    return mapAPI:getSymbolsAPI(), mapAPI
+
+    return mapAPI:getSymbolsAPI(), mapAPI, false
 end
 
 ----------------------------------------------------------------------
@@ -143,7 +165,7 @@ function t3VehicleDropMarker.sync(player)
     if not player then return false end
     dropLegacyData(player)
 
-    local symbolsAPI, mapAPI = getSymbolsAPI()
+    local symbolsAPI, mapAPI, isWorldMap = getSymbolsAPI(player)
     if not symbolsAPI then return false end
 
     local points = getPoints(player)
@@ -190,11 +212,13 @@ function t3VehicleDropMarker.sync(player)
 
     if added > 0 or removed > 0 then
         print("[t3VehicleDrop] Map symbols synced (" .. added .. " added, " .. removed
-            .. " removed, " .. #points .. " active)")
+            .. " removed, " .. #points .. " active, via "
+            .. (isWorldMap and "world map" or "minimap") .. ")")
 
         -- 플레이어가 월드맵 옵션에서 심볼 표시를 꺼놨으면 찍어도 화면에 안 나온다.
         -- 임의로 켜주는 건 월권이라 원인 추적용 로그만 남긴다.
-        if added > 0 and mapAPI and not mapAPI:getBoolean("Symbols") then
+        -- 미니맵은 심볼 표시가 기본 꺼짐이라 정상 상태이므로 큰맵일 때만 경고한다.
+        if added > 0 and isWorldMap and mapAPI and not mapAPI:getBoolean("Symbols") then
             print("[t3VehicleDrop] World map 'Symbols' option is disabled, markers stay hidden until re-enabled")
         end
     end
@@ -226,7 +250,7 @@ function t3VehicleDropMarker.place(player, x, y)
     end
 
     if not t3VehicleDropMarker.sync(player) then
-        print("[t3VehicleDrop] Marker point registered but world map not open yet, will appear on open ("
+        print("[t3VehicleDrop] Marker point registered but no map UI available, will appear once one exists ("
             .. key .. ", " .. #points .. " active)")
     end
 end
@@ -250,7 +274,7 @@ function t3VehicleDropMarker.remove(player, x, y)
     end
 
     if not t3VehicleDropMarker.sync(player) then
-        print("[t3VehicleDrop] Marker point cleared but world map not open yet, will apply on open ("
+        print("[t3VehicleDrop] Marker point cleared but no map UI available, will apply once one exists ("
             .. key .. ", " .. #points .. " active)")
     end
 end
