@@ -9,21 +9,46 @@ t3VehicleDrop = t3VehicleDrop or {}
 local TARGET_CONDITION_MIN = 90 -- 기증 차량 컨디션 하한 (0~100)
 local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 
--- 차량 주변에 펼쳐진 낙하산 데코를 몇 개 뿌린다 (순수 연출용, 실패해도 무시).
+-- 차량 주변에 펼쳐진 낙하산 데코를 뿌린다 (순수 연출용, 실패해도 무시).
+-- 차량을 중심에 두고 등각으로 벌려 놓고, 각 낙하산이 바깥을 보도록 모델을 돌린다.
 -- 실제로 놓인 타일 좌표를 "x,y,z" 문자열 배열로 돌려주고, 호출부가 차량 modData에
 -- 심어둔다. 플레이어가 그 차량에 타는 순간 회수하기 위한 것.
-local PARACHUTE_OFFSETS = { {-2, 0}, {2, 0}, {0, 2} }
 local PARACHUTE_TYPE = "t3chzzkDonation.t3DeployedParachute"
+local PARACHUTE_COUNT = 3 -- 등각 분할 개수 (3이면 120도 간격)
+local PARACHUTE_RADIUS = 6 -- 차량 중심에서 띄울 거리 (타일)
+
+-- 낙하산 메쉬의 기준 방향 보정값 (도).
+local PARACHUTE_MODEL_ANGLE_OFFSET = 180
 
 local function scatterParachutes(square)
     local cell = getCell()
     local sx, sy, sz = square:getX(), square:getY(), square:getZ()
     local placed = {}
-    for _, offset in ipairs(PARACHUTE_OFFSETS) do
-        local sq = cell:getGridSquare(sx + offset[1], sy + offset[2], sz)
+
+    -- 매번 같은 방위로 고정되면 티가 나므로 시작 각도만 무작위로 돌린다.
+    -- (등각 간격 자체는 유지되므로 방사형 배치는 그대로)
+    local startAngle = ZombRand(360)
+    local step = 360 / PARACHUTE_COUNT
+
+    for i = 0, PARACHUTE_COUNT - 1 do
+        local angleDeg = (startAngle + step * i) % 360
+        local rad = math.rad(angleDeg)
+        local dx = math.floor(PARACHUTE_RADIUS * math.cos(rad) + 0.5)
+        local dy = math.floor(PARACHUTE_RADIUS * math.sin(rad) + 0.5)
+
+        local sq = cell:getGridSquare(sx + dx, sy + dy, sz)
         if sq and sq:isOutside() then
-            sq:AddWorldInventoryItem(PARACHUTE_TYPE, 0.5, 0.5, 0)
-            placed[#placed + 1] = sq:getX() .. "," .. sq:getY() .. "," .. sq:getZ()
+            -- 문자열 오버로드가 아니라 아이템 인스턴스를 먼저 만든다.
+            -- IsoWorldInventoryObject 생성자가 worldZRotation < 0 일 때만 랜덤값을
+            -- 채우므로, 미리 넣어두면 그 각도가 그대로 유지된다.
+            local item = instanceItem(PARACHUTE_TYPE)
+            if item then
+                item:setWorldZRotation(math.floor((angleDeg + PARACHUTE_MODEL_ANGLE_OFFSET) % 360))
+                sq:AddWorldInventoryItem(item, 0.5, 0.5, 0)
+                placed[#placed + 1] = sq:getX() .. "," .. sq:getY() .. "," .. sq:getZ()
+            else
+                print("[t3VehicleDrop] Failed to instance parachute item: " .. PARACHUTE_TYPE)
+            end
         end
     end
     return placed
