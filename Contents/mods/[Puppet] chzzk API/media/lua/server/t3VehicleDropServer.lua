@@ -5,5 +5,7 @@ Events.OnClientCommand.Add(function(module, command, player, args)
     if module ~= "PongDuVehicleDrop" then return end
     if command == "SpawnVehicleDrop" then
         t3VehicleDrop.spawnVehicle(player, args.x, args.y, args.z, args.vehicleType, args.sender)
+    elseif command == "ClearParachutes" then
+        t3VehicleDrop.clearParachutes(getVehicleById(args.vehicleId))
     end
 end)

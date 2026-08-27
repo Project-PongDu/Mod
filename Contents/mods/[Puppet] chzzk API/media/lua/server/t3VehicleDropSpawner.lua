@@ -10,17 +10,66 @@ local TARGET_CONDITION_MIN = 90 -- 기증 차량 컨디션 하한 (0~100)
 local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 
 -- 차량 주변에 펼쳐진 낙하산 데코를 몇 개 뿌린다 (순수 연출용, 실패해도 무시).
+-- 실제로 놓인 타일 좌표를 "x,y,z" 문자열 배열로 돌려주고, 호출부가 차량 modData에
+-- 심어둔다. 플레이어가 그 차량에 타는 순간 회수하기 위한 것.
 local PARACHUTE_OFFSETS = { {-2, 0}, {2, 0}, {0, 2} }
+local PARACHUTE_TYPE = "t3chzzkDonation.t3DeployedParachute"
 
 local function scatterParachutes(square)
     local cell = getCell()
     local sx, sy, sz = square:getX(), square:getY(), square:getZ()
+    local placed = {}
     for _, offset in ipairs(PARACHUTE_OFFSETS) do
         local sq = cell:getGridSquare(sx + offset[1], sy + offset[2], sz)
         if sq and sq:isOutside() then
-            sq:AddWorldInventoryItem("t3chzzkDonation.t3DeployedParachute", 0.5, 0.5, 0)
+            sq:AddWorldInventoryItem(PARACHUTE_TYPE, 0.5, 0.5, 0)
+            placed[#placed + 1] = sq:getX() .. "," .. sq:getY() .. "," .. sq:getZ()
         end
     end
+    return placed
+end
+
+-- 보급 차량에 처음 탑승했을 때 연출용 낙하산을 월드에서 지운다.
+-- 좌표는 스폰 시점에 차량 modData에 심어둔 값을 쓴다 (차량이 이동한 뒤여도 무관).
+-- 낙하산은 AddWorldInventoryItem으로 놓은 월드 인벤토리 아이템이라, 오브젝트용
+-- transmitRemoveItemFromSquare만으로는 부족하고 removeWorldObject까지 같이 불러야 한다
+-- (바닐라 ISMoveableSpriteProps가 월드아이템을 치울 때 쓰는 조합).
+function t3VehicleDrop.clearParachutes(vehicle)
+    if not vehicle then return end
+
+    -- 모든 차량 탑승에서 호출되므로, 우리 보급차가 아니면 조용히 빠진다 (로그 스팸 방지)
+    local modData = vehicle:getModData()
+    local coords = modData.t3ParachuteSquares
+    if type(coords) ~= "table" or #coords == 0 then return end
+
+    local cell = getCell()
+    local removed = 0
+    for i = 1, #coords do
+        local sx, sy, sz = string.match(coords[i], "^(-?%d+),(-?%d+),(-?%d+)$")
+        if sx then
+            local sq = cell:getGridSquare(tonumber(sx), tonumber(sy), tonumber(sz))
+            if sq then
+                local worldObjects = sq:getWorldObjects()
+                -- 역순 순회: 제거하면 리스트 인덱스가 당겨진다
+                for j = worldObjects:size() - 1, 0, -1 do
+                    local worldObject = worldObjects:get(j)
+                    local item = worldObject:getItem()
+                    if item and item:getFullType() == PARACHUTE_TYPE then
+                        sq:transmitRemoveItemFromSquare(worldObject)
+                        sq:removeWorldObject(worldObject)
+                        removed = removed + 1
+                    end
+                end
+            end
+        else
+            print("[t3VehicleDrop] Malformed parachute coord: " .. tostring(coords[i]))
+        end
+    end
+
+    -- 한 번 치웠으면 재진입 때 다시 훑지 않도록 마킹을 지운다
+    modData.t3ParachuteSquares = nil
+
+    print("[t3VehicleDrop] Parachutes cleared on vehicle entry: " .. removed)
 end
 
 -- 바닐라 trySpawnKey가 addToWorld 시점에 자동으로 뿌리는 키를 회수한다.
@@ -120,7 +169,7 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
         return
     end
 
-    scatterParachutes(square)
+    local parachuteSquares = scatterParachutes(square)
 
     -- addVehicleDebug 직후 반환값이 완전하지 않을 수 있어 재조회 (AirdroppedLUV와 동일 관례)
     local vehicleId = vehicle:getId()
@@ -128,6 +177,15 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     if not vehicle then
         print("[t3VehicleDrop] Failed to re-acquire vehicle after spawn: " .. tostring(vehicleType))
         return
+    end
+
+    -- 탑승 시 회수할 수 있도록 낙하산 위치를 차량에 심어둔다.
+    -- 재조회 이후에 세팅해야 modData가 실제 차량 인스턴스에 붙는다.
+    -- transmitModData는 부르지 않는다 -- IsoObject 구현이 square의 Objects 인덱스를
+    -- 전제하는데 차량은 거기 등록되지 않아 신뢰할 수 없다. 이 값은 서버에서만 읽으면 되고,
+    -- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
+    if #parachuteSquares > 0 then
+        vehicle:getModData().t3ParachuteSquares = parachuteSquares
     end
 
     -- 바닐라가 자동으로 뿌린 키 회수 (우리 키만 유일한 키가 되도록)
