@@ -15,14 +15,22 @@ local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 -- 심어둔다. 플레이어가 그 차량에 타는 순간 회수하기 위한 것.
 local PARACHUTE_TYPE = "t3chzzkDonation.t3DeployedParachute"
 local PARACHUTE_COUNT = 3 -- 등각 분할 개수 (3이면 120도 간격)
-local PARACHUTE_RADIUS = 6 -- 차량 중심에서 띄울 거리 (타일)
+local PARACHUTE_RADIUS = 5 -- 차량 중심에서 띄울 거리 (타일)
 
 -- 낙하산 메쉬의 기준 방향 보정값 (도).
 local PARACHUTE_MODEL_ANGLE_OFFSET = 180
 
+-- 등각 배치의 기준점을 차량 스폰 스퀘어에서 화면상 위(북쪽)로 살짝 밀어서 잡는다.
+-- 차량 모델이 아이소메트릭 투영상 타일 원점보다 위쪽으로 그려지는 만큼, 원점 그대로
+-- 쓰면 낙하산 고리 중심이 차량보다 아래로 처져 보인다 (실제 확인됨).
+-- 이 게임 좌표계는 y가 작을수록 북쪽/화면 위쪽이다 (IsoGridSquare.java 기준:
+-- this.n = getGridSquare(this.x, this.y - 1, this.z)). 그래서 y만 뺀다.
+local PARACHUTE_CENTER_Y_OFFSET = 2 -- 타일 단위. 여전히 어긋나 보이면 이 값을 조절할 것.
+
 local function scatterParachutes(square)
     local cell = getCell()
     local sx, sy, sz = square:getX(), square:getY(), square:getZ()
+    local cy = sy - PARACHUTE_CENTER_Y_OFFSET
     local placed = {}
 
     -- 매번 같은 방위로 고정되면 티가 나므로 시작 각도만 무작위로 돌린다.
@@ -36,7 +44,7 @@ local function scatterParachutes(square)
         local dx = math.floor(PARACHUTE_RADIUS * math.cos(rad) + 0.5)
         local dy = math.floor(PARACHUTE_RADIUS * math.sin(rad) + 0.5)
 
-        local sq = cell:getGridSquare(sx + dx, sy + dy, sz)
+        local sq = cell:getGridSquare(sx + dx, cy + dy, sz)
         if sq and sq:isOutside() then
             -- 문자열 오버로드가 아니라 아이템 인스턴스를 먼저 만든다.
             -- IsoWorldInventoryObject 생성자가 worldZRotation < 0 일 때만 랜덤값을
@@ -59,6 +67,37 @@ end
 -- 낙하산은 AddWorldInventoryItem으로 놓은 월드 인벤토리 아이템이라, 오브젝트용
 -- transmitRemoveItemFromSquare만으로는 부족하고 removeWorldObject까지 같이 불러야 한다
 -- (바닐라 ISMoveableSpriteProps가 월드아이템을 치울 때 쓰는 조합).
+--
+-- 낙하산을 다 치운 김에, 개봉자 본인 맵에 찍혀 있던 투하 지점 마커(파란 배 심볼)도
+-- 같이 지운다. 마커는 client/VehicleDropMapMarker.lua가 "개봉한 플레이어 본인의
+-- 맵에만" 찍어두는 것이라, 여기서도 그 사람(t3DropOwnerUsername) 앞으로만 알림을
+-- 보낸다 -- 지금 탑승한 사람이 개봉자와 다를 수 있기 때문(다른 사람이 먼저 타는 경우).
+local function findOnlinePlayerByUsername(username)
+    if not username or username == "" then return nil end
+    local players = getOnlinePlayers()
+    for i = 0, players:size() - 1 do
+        local p = players:get(i)
+        if p and p:getUsername() == username then return p end
+    end
+    return nil
+end
+
+local function notifyMarkerRemoval(ownerUsername, mx, my)
+    if not isClient() and not isServer() then
+        -- 솔로: client/VehicleDropMapMarker.lua도 같은 프로세스에 로드돼 있다.
+        if t3VehicleDropMarker then
+            t3VehicleDropMarker.remove(getPlayer(), mx, my)
+        end
+    elseif isServer() then
+        local owner = findOnlinePlayerByUsername(ownerUsername)
+        if owner then
+            sendServerCommand(owner, "PongDuVehicleDrop", "RemoveMapMarker", { x = mx, y = my })
+        end
+        -- 개봉자가 오프라인이면 알릴 방법이 없다 -- 그 사람 맵에 마커 하나가
+        -- 영구히 남는 정도의 사소한 흔적이라 별도 재시도 큐는 두지 않는다.
+    end
+end
+
 function t3VehicleDrop.clearParachutes(vehicle)
     if not vehicle then return end
 
@@ -93,6 +132,20 @@ function t3VehicleDrop.clearParachutes(vehicle)
 
     -- 한 번 치웠으면 재진입 때 다시 훑지 않도록 마킹을 지운다
     modData.t3ParachuteSquares = nil
+
+    -- 맵마커 정리 알림 (연출용, 실패해도 무시)
+    local center = modData.t3DropCenter
+    local ownerUsername = modData.t3DropOwnerUsername
+    modData.t3DropCenter = nil
+    modData.t3DropOwnerUsername = nil
+    if center then
+        local mx, my = string.match(center, "^(-?%d+),(-?%d+)$")
+        if mx then
+            notifyMarkerRemoval(ownerUsername, tonumber(mx), tonumber(my))
+        else
+            print("[t3VehicleDrop] Malformed drop center: " .. tostring(center))
+        end
+    end
 
     print("[t3VehicleDrop] Parachutes cleared on vehicle entry: " .. removed)
 end
@@ -211,6 +264,10 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     -- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
     if #parachuteSquares > 0 then
         vehicle:getModData().t3ParachuteSquares = parachuteSquares
+        -- 맵마커 정리 알림용. 마커는 개봉자 본인 맵에만 찍혀 있으므로 그 사람
+        -- 유저네임과, 마커를 찍을 때 쓴 것과 동일한 좌표(x,y)를 같이 심어둔다.
+        vehicle:getModData().t3DropCenter = tostring(x) .. "," .. tostring(y)
+        vehicle:getModData().t3DropOwnerUsername = player and player:getUsername() or ""
     end
 
     -- 바닐라가 자동으로 뿌린 키 회수 (우리 키만 유일한 키가 되도록)
