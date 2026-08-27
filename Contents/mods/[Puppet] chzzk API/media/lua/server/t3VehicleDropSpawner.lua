@@ -31,6 +31,7 @@ local PARACHUTE_CENTER_X_OFFSET = 1
 local function scatterParachutes(square)
     local cell = getCell()
     local sx, sy, sz = square:getX(), square:getY(), square:getZ()
+    local cx = sx - PARACHUTE_CENTER_X_OFFSET
     local cy = sy - PARACHUTE_CENTER_Y_OFFSET
     local placed = {}
 

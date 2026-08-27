@@ -92,6 +92,20 @@ IGUI_KO = {
     IGUI_donation_food_supply = "식량 보급",
     IGUI_donation_food_supply_item = "",
 
+    IGUI_donation_instant_heal = "즉시 치유",
+    IGUI_donation_instant_heal_say = "상처가 사라졌다!",
+
+    IGUI_donation_random_injury = "랜덤 부상",
+    IGUI_donation_injury_say = "%1에 %2!",
+    IGUI_donation_injury_scratch = "긁힌 상처",
+    IGUI_donation_injury_cut = "베인 상처",
+    IGUI_donation_injury_deep_wound = "깊은 상처",
+    IGUI_donation_injury_glass = "유리 파편",
+    IGUI_donation_injury_bite = "물린 상처",
+    IGUI_donation_injury_burn = "화상",
+    IGUI_donation_injury_bullet = "총알",
+    IGUI_donation_injury_fracture = "골절",
+
     IGUI_donation_vehicle_drop = "차량 드랍",
 
     IGUI_donation_vehicle_drop_location = "보급차량 투하위치 확인! X:%1 Y:%2 !",

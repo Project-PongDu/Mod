@@ -21,6 +21,8 @@ local hordenight = require("features/hordenight")
 local medicalbox = require("features/medicalbox")
 local foodsupply = require("features/foodsupply")
 local bloodmoon  = require("features/bloodmoon")
+local instantheal = require("features/instantheal")
+local randominjury = require("features/randominjury")
 local global     = require("global")
 local fx         = require("utils/fx")
 
@@ -281,6 +283,26 @@ local rewardHandlers = {
             -- 50/50: 근접무기상자 / 원거리무기상자. 상자를 열면 t3RandomWeapon 확률표로 무기 1개.
             local boxId = (ZombRand(100) < 50) and "weapon_box_melee" or "weapon_box_ranged"
             giveSupply(boxId, sender)
+            global.processingEvent = false
+        end,
+    },
+    ["instant_heal"] = {
+        -- 즉시 치유. 전신 부상/부위 체력만 복구하고 좀비 감염은 샌드박스
+        -- Heal_CureBiteInfection 이 켜져 있을 때만 같이 치료한다.
+        -- 자기 몸 회복 계열이라 안전지대와 무관하게 즉시 발동한다.
+        immediate = true,
+        fn = function(sender)
+            instantheal.a(sender)
+            global.processingEvent = false
+        end,
+    },
+    ["random_injury"] = {
+        -- 랜덤 부위 랜덤 부상. 머리/목은 제외하고, 부상 종류는 샌드박스에서
+        -- 종류별로 켜고 끈다. 좀비 소환 계열이 아니라 본인 몸에만 적용되므로
+        -- 안전지대 대기 없이 즉시 발동한다(디버프 룰렛과 동일).
+        immediate = true,
+        fn = function(sender)
+            randominjury.a(sender)
             global.processingEvent = false
         end,
     },

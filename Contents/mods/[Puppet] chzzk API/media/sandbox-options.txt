@@ -68,6 +68,11 @@ option PongDu.Tier_food_supply = {
     page = PongDu_Main, translation = PongDu_Tier_food_supply,
 }
 
+option PongDu.Tier_instant_heal = {
+    type = integer, min = 0, max = 1000000, default = 4000,
+    page = PongDu_Main, translation = PongDu_Tier_instant_heal,
+}
+
 option PongDu.Divider_DebuffTier = {
     type = boolean, default = false,
     page = PongDu_Main, translation = PongDu_Divider_DebuffTier,
@@ -91,6 +96,11 @@ option PongDu.Tier_sprinter5 = {
 option PongDu.Tier_random_teleport = {
     type = integer, min = 0, max = 1000000, default = 15000,
     page = PongDu_Main, translation = PongDu_Tier_random_teleport,
+}
+
+option PongDu.Tier_random_injury = {
+    type = integer, min = 0, max = 1000000, default = 4500,
+    page = PongDu_Main, translation = PongDu_Tier_random_injury,
 }
 
 option PongDu.Tier_mutant_spawn = {
@@ -209,12 +219,12 @@ option PongDu.VehicleDrop_Pool = {
 
 option PongDu.VehicleDrop_ExcludePool = {
     type = string,
-    default = ,
+    default = Base.PongDuDrone;Base.PongDuHeli,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_ExcludePool,
 }
 
 option PongDu.VehicleDrop_MinDistance = {
-    type = integer, min = 0, max = 300, default = 10,
+    type = integer, min = 0, max = 300, default = 30,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,
 }
 
@@ -236,6 +246,21 @@ option PongDu.Delay_food_supply = {
 option PongDu.FoodSupply_Count = {
     type = integer, min = 1, max = 50, default = 5,
     page = PongDu_Buff, translation = PongDu_FoodSupply_Count,
+}
+
+option PongDu.Divider_InstantHeal = {
+    type = boolean, default = false,
+    page = PongDu_Buff, translation = PongDu_Divider_InstantHeal,
+}
+
+option PongDu.Delay_instant_heal = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Buff, translation = PongDu_Delay_instant_heal,
+}
+
+option PongDu.Heal_CureBiteInfection = {
+    type = boolean, default = false,
+    page = PongDu_Buff, translation = PongDu_Heal_CureBiteInfection,
 }
 
 /* 스킬별 강화혈청 획득 등급 제한.
@@ -521,6 +546,66 @@ option PongDu.Delay_sprinter5 = {
 option PongDu.Sprinter_Count = {
     type = integer, min = 1, max = 10, default = 2,
     page = PongDu_Debuff, translation = PongDu_Sprinter_Count,
+}
+
+option PongDu.Divider_RandomInjury = {
+    type = boolean, default = false,
+    page = PongDu_Debuff, translation = PongDu_Divider_RandomInjury,
+}
+
+option PongDu.Delay_random_injury = {
+    type = integer, min = 0, max = 60, default = 3,
+    page = PongDu_Debuff, translation = PongDu_Delay_random_injury,
+}
+
+option PongDu.Injury_Count = {
+    type = integer, min = 1, max = 10, default = 1,
+    page = PongDu_Debuff, translation = PongDu_Injury_Count,
+}
+
+option PongDu.Injury_Infection = {
+    type = boolean, default = false,
+    page = PongDu_Debuff, translation = PongDu_Injury_Infection,
+}
+
+option PongDu.Injury_Scratch = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Scratch,
+}
+
+option PongDu.Injury_Cut = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Cut,
+}
+
+option PongDu.Injury_DeepWound = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_DeepWound,
+}
+
+option PongDu.Injury_Glass = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Glass,
+}
+
+option PongDu.Injury_Bite = {
+    type = boolean, default = false,
+    page = PongDu_Debuff, translation = PongDu_Injury_Bite,
+}
+
+option PongDu.Injury_Burn = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Burn,
+}
+
+option PongDu.Injury_Bullet = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Bullet,
+}
+
+option PongDu.Injury_Fracture = {
+    type = boolean, default = true,
+    page = PongDu_Debuff, translation = PongDu_Injury_Fracture,
 }
 
 option PongDu.Divider_RandomTeleport = {

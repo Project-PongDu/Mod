@@ -35,4 +35,6 @@ return {
     ["zombie_rain"]          = "IGUI_donation_zombie_rain",
     ["fire_support"]         = "IGUI_donation_fire_support",
     ["food_supply"]          = "IGUI_donation_food_supply",
+    ["instant_heal"]         = "IGUI_donation_instant_heal",
+    ["random_injury"]        = "IGUI_donation_random_injury",
 }
