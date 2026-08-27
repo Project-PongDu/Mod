@@ -24,9 +24,9 @@ local PARACHUTE_MODEL_ANGLE_OFFSET = 180
 -- 차량 모델이 아이소메트릭 투영상 타일 원점보다 위쪽으로 그려지는 만큼, 원점 그대로
 -- 쓰면 낙하산 고리 중심이 차량보다 아래로 처져 보인다 (실제 확인됨).
 -- 이 게임 좌표계는 y가 작을수록 북쪽/화면 위쪽이다 (IsoGridSquare.java 기준:
+local PARACHUTE_CENTER_X_OFFSET = 4
+local PARACHUTE_CENTER_Y_OFFSET = 1
 -- this.n = getGridSquare(this.x, this.y - 1, this.z)). 그래서 y만 뺀다.
-local PARACHUTE_CENTER_Y_OFFSET = 2 -- 타일 단위. 여전히 어긋나 보이면 이 값을 조절할 것.
-local PARACHUTE_CENTER_X_OFFSET = 1
 
 local function scatterParachutes(square)
     local cell = getCell()
