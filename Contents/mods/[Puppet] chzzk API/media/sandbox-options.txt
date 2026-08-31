@@ -584,12 +584,12 @@ option PongDu.Injury_Cut = {
 }
 
 option PongDu.Injury_DeepWound = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Injury_DeepWound,
 }
 
 option PongDu.Injury_Glass = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Injury_Glass,
 }
 
@@ -599,17 +599,17 @@ option PongDu.Injury_Bite = {
 }
 
 option PongDu.Injury_Burn = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Injury_Burn,
 }
 
 option PongDu.Injury_Bullet = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Injury_Bullet,
 }
 
 option PongDu.Injury_Fracture = {
-    type = boolean, default = true,
+    type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Injury_Fracture,
 }
 
