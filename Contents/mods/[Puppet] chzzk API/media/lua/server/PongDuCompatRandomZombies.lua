@@ -135,7 +135,11 @@ function PongDuCompat.bltStamp(zombie)
     local sq = zombie:getCurrentSquare()
     if not sq then return end
     local md = zombie:getModData()
-    md.BLTgen = gen
+    -- BLT가 이미 더 높은 세대를 찍어놨으면 절대 낮추지 않는다.
+    -- 낮추면 다음 패스의 세대 관측(non-nil BLTgen 최댓값)이 우리 도장에
+    -- 오염돼서 영구히 한 세대 뒤처지고, 스킵이 완전히 무력화된다.
+    local cur = md.BLTgen
+    if cur == nil or gen > cur then md.BLTgen = gen end
     md.BLTx = sq:getX()
     md.BLTy = sq:getY()
     md.BLTz = sq:getZ()
