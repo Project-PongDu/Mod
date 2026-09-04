@@ -102,6 +102,27 @@ function _a.a(sender)
     end
 end
 
+-- ── 종류별 체력 ──────────────────────────────────────────────────────────────
+-- 종류별 체력 샌드박스 옵션. 값을 못 찾는 종류(sprinter)는 nil -> setHealth를
+-- 아예 하지 않고 바닐라 기본 체력(ZombieLore.Toughness 기준)을 그대로 쓴다.
+-- 참고: 바닐라 기본은 Normal=1.8~2.1 / Tough=3.5~3.8 / Fragile=0.5~0.8
+-- (IsoZombie.DoZombieStats). 예전 하드코딩 값(브루트 3.0, 스크리머·로치 1.0)은
+-- CDDA 원본 수치를 그대로 가져온 것이라 일반좀비보다 오히려 약했다.
+local HEALTH_OPT = {
+    brute    = "PongDu.Mutant_Health_Brute",
+    screamer = "PongDu.Mutant_Health_Screamer",
+    roach    = "PongDu.Mutant_Health_Roach",
+    tracer   = "PongDu.Mutant_Health_Tracer",
+}
+
+local function mutantHealth(kind)
+    local name = HEALTH_OPT[kind]
+    if not name then return nil end
+    local opt = getSandboxOptions():getOptionByName(name)
+    if not opt then return nil end
+    return opt:getValue()
+end
+
 -- ── 1회 초기화 (클라별) ───────────────────────────────────────────────────────
 -- 스탯류는 매 틱 재적용하면 안 되는 것들이라 PuppetMutantInit 애님 변수로
 -- 가드. 변수는 좀비가 스트림 아웃되면 리셋 -> 다시 로드될 때 자동 재초기화.
@@ -113,11 +134,9 @@ local function initMutant(zombie, kind)
         zombie:DoZombieStats()
         getSandboxOptions():set("ZombieLore.Strength", origStr)
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
-        zombie:setHealth(3.0)          -- CDDA Brute HP=3. DoZombieStats 뒤에 설정
     elseif kind == "screamer" then
-        zombie:setHealth(1.0)          -- CDDA Screamer HP=1. 걸음은 기본값 유지
+        -- 걸음은 기본값 유지
     elseif kind == "roach" then
-        zombie:setHealth(1.0)
         zombie:setVariable("PuppetRoach", true)
     elseif kind == "sprinter" then
         -- 부활한 뛰좀 재적용 경로 (원 스폰은 서버 makeSprinter가 처리)
@@ -131,7 +150,14 @@ local function initMutant(zombie, kind)
         -- m_SpeedScale 오버라이드로만 가능(TR locomotion 노드, 별도 작업).
         zombie:setWalkType("sprint" .. tostring(ZombRand(5) + 1))
     end
-    print("[PuppetMutant] init " .. tostring(kind) .. " zid=" .. tostring(zombie:getOnlineID()))
+    -- 체력은 분기 뒤에 일괄 적용한다. 브루트는 위에서 DoZombieStats()를 부르는데
+    -- 그 안에서 Toughness 기준으로 setHealth가 다시 걸리므로(IsoZombie.java:3350)
+    -- 반드시 그 뒤여야 한다.
+    local hp = mutantHealth(kind)
+    if hp then zombie:setHealth(hp) end
+    print("[PuppetMutant] init " .. tostring(kind)
+        .. " hp=" .. tostring(hp or zombie:getHealth())
+        .. " zid=" .. tostring(zombie:getOnlineID()))
     zombie:setVariable("PuppetMutantInit", true)
 end
 
@@ -860,7 +886,7 @@ local function applyMutant(zombie)
     guardStats(zombie, kind)                           -- 최후 방어선(사후 복구)
     if not zombie:getVariableBoolean("PuppetMutantInit") then
         initMutant(zombie, kind)
-        -- 재적용은 initMutant의 초기 체력(브루트 3.0 등)을 다시 씌우므로,
+        -- 재적용은 initMutant의 초기 체력(샌드박스 설정값)을 다시 씌우므로,
         -- 그동안 입은 전투 피해가 회복돼버린다. 마지막 정상 스냅샷이 더 낮으면
         -- 그 값으로 되돌려 피해를 보존한다(최초 초기화 시엔 스냅샷이 없다).
         local lastHP = _hpSnap[curZid]

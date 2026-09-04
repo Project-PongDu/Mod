@@ -713,6 +713,26 @@ option PongDu.Mutant_Tracer = {
     page = PongDu_Debuff, translation = PongDu_Mutant_Tracer,
 }
 
+option PongDu.Mutant_Health_Screamer = {
+    type = double, min = 0.50, max = 100.00, default = 3.50,
+    page = PongDu_Debuff, translation = PongDu_Mutant_Health_Screamer,
+}
+
+option PongDu.Mutant_Health_Brute = {
+    type = double, min = 0.50, max = 100.00, default = 6.00,
+    page = PongDu_Debuff, translation = PongDu_Mutant_Health_Brute,
+}
+
+option PongDu.Mutant_Health_Roach = {
+    type = double, min = 0.50, max = 100.00, default = 3.50,
+    page = PongDu_Debuff, translation = PongDu_Mutant_Health_Roach,
+}
+
+option PongDu.Mutant_Health_Tracer = {
+    type = double, min = 0.50, max = 100.00, default = 6.00,
+    page = PongDu_Debuff, translation = PongDu_Mutant_Health_Tracer,
+}
+
 option PongDu.Divider_RiseUp = {
     type = boolean, default = false,
     page = PongDu_Debuff, translation = PongDu_Divider_RiseUp,
