@@ -267,7 +267,8 @@ local function drawOverlay()
 		else
 			local speed     = 0.3 + ZombieLevel * 0.15;
 			local peakAlpha = 0.08 + (ZombieLevel - 1) * 0.12;
-			blendAmountZombieCurrent = (math.sin(os.clock() * speed * math.pi) * 0.5 + 0.5) * peakAlpha * blendCapZombie;
+			local nowSec    = getTimestampMs() / 1000;
+			blendAmountZombieCurrent = (math.sin(nowSec * speed * math.pi) * 0.5 + 0.5) * peakAlpha * blendCapZombie;
 		end
 
 
