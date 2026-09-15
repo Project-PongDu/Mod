@@ -25,6 +25,8 @@ local instantheal = require("features/instantheal")
 local randominjury = require("features/randominjury")
 local global     = require("global")
 local fx         = require("utils/fx")
+-- 외부(서버 전용) 애드온 모드가 등록한 기능. 조회는 전부 getEntry()를 거친다.
+local addon      = require("PongDuAddon")
 
 -- Spawn zombies, queueing the request if the player is still in a safe zone.
 local function handleZombieSpawn(amount, sprint, sender)
@@ -407,9 +409,17 @@ local rewardHandlers = {
     },
 }
 
+-- getEntry(featureId) -> 내장 핸들러 우선, 없으면 애드온(PongDuAddon) 핸들러.
+-- 내장 featureId와 같은 id를 애드온이 등록해도 내장 기능이 이긴다.
+local function getEntry(featureId)
+    local entry = rewardHandlers[featureId]
+    if entry ~= nil then return entry end
+    return addon.getHandler(featureId)
+end
+
 -- isValid(featureId) -> true if this featureId maps to a real reward.
 function rewardManager.isValid(featureId)
-    return rewardHandlers[featureId] ~= nil
+    return getEntry(featureId) ~= nil
 end
 
 -- getFeatureIds() -> 등록된 featureId 전체를 알파벳순 배열로 반환.
@@ -419,6 +429,14 @@ function rewardManager.getFeatureIds()
     local ids = {}
     for id, _ in pairs(rewardHandlers) do
         table.insert(ids, id)
+    end
+    -- 애드온 기능도 같이 노출 (내장과 겹치는 id는 내장이 이기므로 한 번만).
+    for _, id in ipairs(addon.getFeatureIds()) do
+        if rewardHandlers[id] == nil then
+            table.insert(ids, id)
+        else
+            print("[PongDu] WARNING: addon featureId '" .. id .. "' is shadowed by a built-in reward")
+        end
     end
     table.sort(ids)
     return ids
@@ -439,7 +457,7 @@ end
 -- isZoneBlocked(featureId) -> true면 안전지대 안에서는 발동 불가(immediate=false).
 -- 도네큐박스가 슬롯에 자물쇠(락) 표시를 할지 판단할 때 쓴다.
 function rewardManager.isZoneBlocked(featureId)
-    local entry = rewardHandlers[featureId]
+    local entry = getEntry(featureId)
     if entry == nil then return false end
     return not isImmediate(entry)
 end
@@ -451,7 +469,7 @@ end
 -- "순차로 하나씩" 이 목적이라, 락 해제 시 병렬 승격을 하지 않는다
 -- (DonationReceiver.onTick 참조).
 function rewardManager.isFeatureBlocked(featureId, player)
-    local entry = rewardHandlers[featureId]
+    local entry = getEntry(featureId)
     if entry == nil or entry.blocked == nil then return false end
     return entry.blocked(player) == true
 end
@@ -468,7 +486,7 @@ function rewardManager.a(featureId, sender, callback)
     global.stats = global.player:getStats()
     global.processingEvent = true
 
-    local entry = rewardHandlers[featureId]
+    local entry = getEntry(featureId)
     local skipZoneWait = isImmediate(entry)
 
     if not skipZoneWait and zone.a(global.player) then

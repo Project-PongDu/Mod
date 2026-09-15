@@ -4,6 +4,9 @@
 -- server's reward tier table, for the external Puppet launcher.
 ------------------------------------------------------------
 
+-- 외부 애드온 모드가 등록한 기능도 티어 덤프에 싣는다 (leaf 모듈, 순환 없음).
+local PongDuAddon = require("PongDuAddon")
+
 local function WritePuppetStatus(state)
     local writer = getFileWriter("pz_status.txt", false, false)
     if not writer then
@@ -35,6 +38,8 @@ local TIER_FILE = "pongdu_tiers.txt"
 
 -- Must stay in sync with rewardHandlers in client/rewards/rewardManager.lua.
 -- Order matters: on a duplicate amount the entry listed first wins.
+-- Addon features (PongDuAddon) are appended after these, so a built-in
+-- feature always wins a duplicate amount against an addon.
 local FEATURE_IDS = {
     "buff_roulette",
     "debuff_roulette",
@@ -84,8 +89,7 @@ local function WriteTierTable()
     local pairsOut = {}
     local count = 0
 
-    for i = 1, #FEATURE_IDS do
-        local fid = FEATURE_IDS[i]
+    local function addTier(fid)
         local amount = sv["Tier_" .. fid]
         if amount == nil then
             print("[PongDu] tier dump: missing sandbox option Tier_" .. fid)
@@ -101,15 +105,48 @@ local function WriteTierTable()
         end
     end
 
+    local builtin = {}
+    for i = 1, #FEATURE_IDS do
+        builtin[FEATURE_IDS[i]] = true
+        addTier(FEATURE_IDS[i])
+    end
+
+    -- 애드온: 금액 매핑(tiers)에 더해, 런처가 모르는 featureId를 받아들일 수
+    -- 있도록 표시명/카테고리를 "addons"에 같이 싣는다. 표시명은 번역 키를
+    -- getText로 풀어서 넣는다 (getFileWriter는 UTF-8로 쓴다 -- 41.78.20
+    -- LuaManager.getFileWriter 의 OutputStreamWriter(UTF_8) 확인).
+    local addonOut = {}
+    local addonCount = 0
+    local addonIds = PongDuAddon.getFeatureIds()
+    for i = 1, #addonIds do
+        local fid = addonIds[i]
+        if builtin[fid] then
+            print("[PongDu] tier dump: addon featureId " .. fid .. " is shadowed by a built-in feature - skipped")
+        else
+            local meta = PongDuAddon.getMeta(fid)
+            addTier(fid)
+            addonCount = addonCount + 1
+            addonOut[addonCount] = "\"" .. fid .. "\":{\"label\":\"" .. jsonEscape(getText(meta.labelKey))
+                .. "\",\"category\":\"" .. meta.category .. "\"}"
+        end
+    end
+
     local body = ""
     for i = 1, count do
         if i > 1 then body = body .. "," end
         body = body .. pairsOut[i]
     end
 
+    local addonBody = ""
+    for i = 1, addonCount do
+        if i > 1 then addonBody = addonBody .. "," end
+        addonBody = addonBody .. addonOut[i]
+    end
+
     local json = "{\"server\":\"" .. jsonEscape(getServerName())
               .. "\",\"ts\":" .. tostring(os.time())
-              .. ",\"tiers\":{" .. body .. "}}"
+              .. ",\"tiers\":{" .. body .. "}"
+              .. ",\"addons\":{" .. addonBody .. "}}"
 
     local writer = getFileWriter(TIER_FILE, true, false)   -- create, overwrite
     if not writer then
@@ -118,7 +155,8 @@ local function WriteTierTable()
     end
     writer:write(json)
     writer:close()
-    print("[PongDu] tier dump written: " .. tostring(count) .. " tiers -> " .. TIER_FILE)
+    print("[PongDu] tier dump written: " .. tostring(count) .. " tiers, "
+          .. tostring(addonCount) .. " addons -> " .. TIER_FILE)
 end
 
 ------------------------------------------------------------

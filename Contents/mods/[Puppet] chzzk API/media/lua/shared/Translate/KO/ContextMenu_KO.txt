@@ -8,4 +8,5 @@ ContextMenu_KO = {
 	ContextMenu_PongDu_Server = "서버",
 	ContextMenu_PongDu_Dev = "dev",
 	ContextMenu_PongDu_Misc = "(미분류)",
+	ContextMenu_PongDu_Addon = "애드온",
 }

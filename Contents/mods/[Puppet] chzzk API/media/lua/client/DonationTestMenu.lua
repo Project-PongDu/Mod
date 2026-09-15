@@ -37,6 +37,7 @@ DonationTestMenu = DonationTestMenu or {}
 
 local rewardManager = require("rewards/rewardManager")
 local labelKey       = require("utils/labelKey")
+local PongDuAddon    = require("PongDuAddon")
 
 local BUFF = {
     "buff_roulette", "vaccine", "random_skill_potion", "random_weapon",
@@ -248,6 +249,25 @@ function DonationTestMenu.WorldContextMenuPre(playerID, context, worldobjects, t
             and catMenusByKey["debuff"] or catMenusByKey["buff"]
         missileCatMenu:addOption(displayLabel("missile"), player, DonationTestMenu.Fire, "missile", target)
         uncategorized["missile"] = nil
+    end
+
+    -- 애드온(PongDuAddon) 기능: 서버 전용 모드가 등록한 것들이라 퐁듀 분류표에
+    -- 없는 게 정상이다. 미분류 경고로 새지 않게 전용 서브메뉴로 묶는다.
+    -- category=server 인 애드온은 내장 서버후원과 같은 노출 기준을 따른다.
+    local addonMenu = nil
+    for _, featureId in ipairs(PongDuAddon.getFeatureIds()) do
+        if uncategorized[featureId] then
+            uncategorized[featureId] = nil
+            local meta = PongDuAddon.getMeta(featureId)
+            if meta.category ~= "server" or showServerTier then
+                if addonMenu == nil then
+                    local addonOption = rootMenu:addOption(getText("ContextMenu_PongDu_Addon"))
+                    addonMenu = rootMenu:getNew(rootMenu)
+                    rootMenu:addSubMenu(addonOption, addonMenu)
+                end
+                addonMenu:addOption(displayLabel(featureId), player, DonationTestMenu.Fire, featureId, target)
+            end
+        end
     end
 
     -- 분류를 깜빡한 신규 featureId는 dev 서브메뉴에 있던 catMenu 참조가
