@@ -19,6 +19,11 @@
 --          blocked   = function(player) ... end,     -- 선택. true 반환 시 큐박스 슬롯 잠금
 --          color     = {r, g, b},                    -- 선택. 큐박스 색 (0~1)
 --          category  = "personal",                   -- 선택. "personal"(기본) / "server"
+--          icon      = "media/textures/donation/my_feature.png",
+--                                                    -- 선택. 큐박스 아이콘 텍스처 경로.
+--                                                    --       애드온 모드 자기 media 아래에 두면 된다
+--                                                    --       (퐁듀 아이콘과 같게 1024x1024, 투명 배경 흰색).
+--                                                    --       없거나 못 읽으면 색상 슬롯으로 폴백.
 --      })
 --
 --  애드온 모드가 직접 선언해야 하는 샌드박스 옵션 (퐁듀 규약, 이름 고정):
@@ -103,6 +108,13 @@ function PongDuAddon.register(featureId, def)
         return false
     end
 
+    local icon = def.icon
+    if icon ~= nil and (type(icon) ~= "string" or icon == "") then
+        print(LOG .. "WARNING: " .. featureId .. " - def.icon ignored (expected texture path string, got "
+            .. type(icon) .. ")")
+        icon = nil
+    end
+
     local effect = def.fn
     handlers[featureId] = {
         immediate = immediate,
@@ -116,7 +128,7 @@ function PongDuAddon.register(featureId, def)
             global.processingEvent = false
         end,
     }
-    metas[featureId] = { labelKey = def.labelKey, category = category }
+    metas[featureId] = { labelKey = def.labelKey, category = category, icon = icon }
     table.insert(order, featureId)
 
     -- 큐박스 라벨 / 테스트 메뉴 표시명 / 큐박스 색은 퐁듀 공용 leaf 테이블을
@@ -135,7 +147,8 @@ function PongDuAddon.register(featureId, def)
     end
 
     print(LOG .. "registered: " .. featureId .. " category=" .. category
-        .. " immediate=" .. tostring(immediate) .. " labelKey=" .. def.labelKey)
+        .. " immediate=" .. tostring(immediate) .. " labelKey=" .. def.labelKey
+        .. " icon=" .. tostring(icon))
     return true
 end
 
@@ -144,7 +157,7 @@ function PongDuAddon.getHandler(featureId)
     return handlers[featureId]
 end
 
--- getMeta(featureId) -> { labelKey, category } | nil
+-- getMeta(featureId) -> { labelKey, category, icon } | nil
 function PongDuAddon.getMeta(featureId)
     return metas[featureId]
 end

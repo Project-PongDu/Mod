@@ -93,6 +93,7 @@ local labelKey = require("utils/labelKey")
 
 local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local PongDuAddon = require("PongDuAddon")
 
 -- featureId -> 도네 큐박스 색상. 봄바드/좀비레인/화력지원/랜텔 등 타이머큐 UI가
 -- 큐박스와 같은 색을 쓰도록 외부에도 노출한다 (module 하단 return 참조).
@@ -168,11 +169,20 @@ end
 
 local function getIconTexture(featureId)
     local path = iconTexPath[featureId]
+    if not path then
+        -- 내장 기능에 없으면 애드온이 register(def.icon)로 넘긴 경로를 쓴다.
+        local meta = PongDuAddon.getMeta(featureId)
+        path = meta and meta.icon
+    end
     if not path then return nil end
     local cached = iconTexCache[featureId]
     if cached == nil then
         cached = getTexture(path) or false
         iconTexCache[featureId] = cached
+        if cached == false then
+            print("[PongDu] queue icon texture not found: " .. path
+                .. " (featureId=" .. tostring(featureId) .. ") -- using colour slot")
+        end
     end
     if cached == false then return nil end
     return cached
