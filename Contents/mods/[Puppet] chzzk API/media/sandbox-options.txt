@@ -248,6 +248,12 @@ option PongDu.Delay_food_supply = {
     page = PongDu_Buff, translation = PongDu_Delay_food_supply,
 }
 
+option PongDu.FoodSupply_Item = {
+    type = string,
+    default = Base.Crisps,
+    page = PongDu_Buff, translation = PongDu_FoodSupply_Item,
+}
+
 option PongDu.FoodSupply_Count = {
     type = integer, min = 1, max = 50, default = 5,
     page = PongDu_Buff, translation = PongDu_FoodSupply_Count,

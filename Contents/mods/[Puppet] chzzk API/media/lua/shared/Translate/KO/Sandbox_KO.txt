@@ -169,6 +169,8 @@ Sandbox_KO = {
 	Sandbox_PongDu_Divider_FoodSupply_tooltip = "이것은 단순한 구분선일 뿐이며 선택해도 영향을 미치지 않습니다.",
 	Sandbox_PongDu_Delay_food_supply = "발동 대기시간: 식량 보급 (초)",
 	Sandbox_PongDu_Delay_food_supply_tooltip = "식량 보급 후원이 대기열에 올라간 뒤 발동되기까지의 카운트다운(0~60초). 0이면 즉시 발동합니다.",
+	Sandbox_PongDu_FoodSupply_Item = "식량 보급 지급 아이템",
+	Sandbox_PongDu_FoodSupply_Item_tooltip = "식량 보급 후원 시 지급할 아이템의 풀네임 (예: Base.Crisps, Base.TinnedBeans). 다른 모드의 아이템도 입력할 수 있습니다. 존재하지 않는 아이템이거나 해당 모드가 적용되지 않았다면 감자칩(Base.Crisps)으로 대체 지급됩니다.",
 	Sandbox_PongDu_FoodSupply_Count = "식량 보급 지급 개수",
 	Sandbox_PongDu_FoodSupply_Count_tooltip = "식량 보급 후원 1건당 지급할 개수(1~50). 인벤토리 무게를 넘겨도 강제로 들어가므로 너무 크게 잡지 마세요.",
 

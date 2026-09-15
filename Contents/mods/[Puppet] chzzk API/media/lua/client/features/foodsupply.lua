@@ -2,8 +2,14 @@ local _a = {}
 
 -- ── 식량 보급 (food_supply) 클라이언트 ───────────────────────────────────────
 --
--- 후원자 개인 버프 계열. 후원이 발동하면 바닐라 감자칩(Base.Crisps)을
--- 샌드박스 FoodSupply_Count 개수만큼 인벤토리에 넣는다.
+-- 후원자 개인 버프 계열. 후원이 발동하면 샌드박스 FoodSupply_Item 에 적힌
+-- 아이템(기본값 Base.Crisps)을 FoodSupply_Count 개수만큼 인벤토리에 넣는다.
+--
+-- FoodSupply_Item 은 서버 운영자가 직접 입력하는 문자열이라 오타나 애드온 모드
+-- 미적용(예: 스트리머 전용 모드의 아이템을 적어놓고 그 모드를 안 켠 경우)이
+-- 생길 수 있다. 이건 "값이 nil" 문제가 아니라 "값이 틀림" 문제라서 sandbox
+-- default 가 막아주지 못한다. 스크립트 매니저에서 찾을 수 없으면 후원이 증발하지
+-- 않도록 바닐라 감자칩으로 대체 지급하고 WARN 로그를 남긴다.
 --
 -- 표시명은 번역키 IGUI_donation_food_supply_item 이 있을 때만 덮어쓴다.
 -- 키가 없으면(번역 파일에서 지웠거나 다른 언어팩에 없는 경우) 아이템 기본
@@ -29,8 +35,33 @@ local _a = {}
 
 local global = require("global")
 
-local LOG       = "[PongDu][FoodSupply] "
-local ITEM_TYPE = "Base.Crisps"
+local LOG               = "[PongDu][FoodSupply] "
+-- FoodSupply_Item 이 잘못 입력됐을 때만 쓰는 대체 아이템 (nil fallback 아님).
+local INVALID_ITEM_TYPE = "Base.Crisps"
+
+-- FoodSupply_Item 문자열을 실제 아이템 full type("Module.Type")으로 해석한다.
+-- 모듈을 생략하면 ScriptManager.FindItem 이 Base 로 간주한다.
+local function resolveItemType()
+    local raw     = SandboxVars.PongDu.FoodSupply_Item
+    local trimmed = raw:match("^%s*(.-)%s*$")
+    if trimmed == "" then
+        print(LOG .. "WARN FoodSupply_Item is empty -- using " .. INVALID_ITEM_TYPE)
+        return INVALID_ITEM_TYPE
+    end
+
+    local script = getScriptManager():FindItem(trimmed)
+    if not script then
+        print(LOG .. "WARN FoodSupply_Item '" .. trimmed
+            .. "' has no item script (typo or addon mod not loaded) -- using " .. INVALID_ITEM_TYPE)
+        return INVALID_ITEM_TYPE
+    end
+
+    local fullType = script:getFullName()
+    if fullType ~= trimmed then
+        print(LOG .. "FoodSupply_Item '" .. trimmed .. "' resolved to " .. fullType)
+    end
+    return fullType
+end
 
 function _a.a(sender)
     local player = global.player
@@ -40,7 +71,8 @@ function _a.a(sender)
     end
 
     -- 샌드박스는 파일 로드 시점이 아니라 사용 시점에 읽는다.
-    local count = SandboxVars.PongDu.FoodSupply_Count
+    local count    = SandboxVars.PongDu.FoodSupply_Count
+    local itemType = resolveItemType()
 
     local inventory = player:getInventory()
     local label     = getTextOrNull("IGUI_donation_food_supply_item")
@@ -53,9 +85,9 @@ function _a.a(sender)
     local delivered = 0
 
     for i = 1, count do
-        local item = inventory:AddItem(ITEM_TYPE)
+        local item = inventory:AddItem(itemType)
         if not item then
-            print(LOG .. "AddItem returned nil (item=" .. ITEM_TYPE
+            print(LOG .. "AddItem returned nil (item=" .. itemType
                 .. ", index=" .. i .. "/" .. tostring(count) .. ")")
             break
         end
@@ -79,7 +111,7 @@ function _a.a(sender)
     if audio then audio:setVolume(0.5) end
 
     print(LOG .. "delivered " .. delivered .. "/" .. tostring(count)
-        .. " (item=" .. ITEM_TYPE .. ", sender=" .. tostring(sender) .. ")")
+        .. " (item=" .. itemType .. ", sender=" .. tostring(sender) .. ")")
 end
 
 return _a
