@@ -40,6 +40,7 @@ local map = {
     ["zombie_rain"]          = {0.15, 0.4, 0.95},
     ["fire_support"]         = {0.22, 0.52, 0.18},
     ["food_supply"]          = {0.95, 0.65, 0.15},
+    ["instant_heal"]         = {0.4, 0.95, 0.5},
 }
 
 local function get(featureId)
