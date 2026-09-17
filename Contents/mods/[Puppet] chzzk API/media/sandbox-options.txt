@@ -629,6 +629,13 @@ option PongDu.Delay_random_teleport = {
     page = PongDu_Debuff, translation = PongDu_Delay_random_teleport,
 }
 
+option PongDu.RT_Mode = {
+    type = enum, numValues = 3, default = 1,
+    page = PongDu_Debuff,
+    translation = PongDu_RT_Mode,
+    valueTranslation = PongDu_RT_Mode,
+}
+
 option PongDu.RT_MinDist = {
     type = integer, min = 10, max = 1000, default = 100,
     page = PongDu_Debuff, translation = PongDu_RT_MinDist,
@@ -637,11 +644,6 @@ option PongDu.RT_MinDist = {
 option PongDu.RT_MaxDist = {
     type = integer, min = 20, max = 2000, default = 200,
     page = PongDu_Debuff, translation = PongDu_RT_MaxDist,
-}
-
-option PongDu.RT_Return = {
-    type = boolean, default = false,
-    page = PongDu_Debuff, translation = PongDu_RT_Return,
 }
 
 option PongDu.RT_SurviveMinutes = {
