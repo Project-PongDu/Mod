@@ -229,12 +229,12 @@ option PongDu.VehicleDrop_BlockModNaturalSpawn = {
 }
 
 option PongDu.VehicleDrop_MinDistance = {
-    type = integer, min = 0, max = 300, default = 30,
+    type = integer, min = 0, max = 300, default = 10,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MinDistance,
 }
 
 option PongDu.VehicleDrop_MaxDistance = {
-    type = integer, min = 0, max = 300, default = 50,
+    type = integer, min = 0, max = 300, default = 20,
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MaxDistance,
 }
 
@@ -442,7 +442,7 @@ option PongDu.Sniper_Pierce = {
 }
 
 option PongDu.Sniper_PierceChance = {
-    type = integer, min = 0, max = 100, default = 50,
+    type = integer, min = 0, max = 100, default = 80,
     page = PongDu_Buff, translation = PongDu_Sniper_PierceChance,
 }
 
@@ -462,12 +462,12 @@ option PongDu.Heli_Radius = {
 }
 
 option PongDu.Heli_Interval = {
-    type = integer, min = 10, max = 2000, default = 100,
+    type = integer, min = 10, max = 2000, default = 50,
     page = PongDu_Buff, translation = PongDu_Heli_Interval,
 }
 
 option PongDu.Heli_KillChance = {
-    type = integer, min = 1, max = 100, default = 70,
+    type = integer, min = 1, max = 100, default = 80,
     page = PongDu_Buff, translation = PongDu_Heli_KillChance,
 }
 
@@ -492,12 +492,12 @@ option PongDu.Drone_Interval = {
 }
 
 option PongDu.Drone_KillChance = {
-    type = integer, min = 1, max = 100, default = 5,
+    type = integer, min = 1, max = 100, default = 10,
     page = PongDu_Buff, translation = PongDu_Drone_KillChance,
 }
 
 option PongDu.Drone_KnockdownChance = {
-    type = integer, min = 0, max = 100, default = 70,
+    type = integer, min = 0, max = 100, default = 80,
     page = PongDu_Buff, translation = PongDu_Drone_KnockdownChance,
 }
 
