@@ -101,7 +101,7 @@ local PARA_DESCENT   = 1.2      -- 낙하산 하강 속도 (층/초). 4층에서
 local PARA_LOG_MAX   = 5        -- 공습 1회당 부착/재부착 상세 로그 상한
 local _paraScriptOk  = nil      -- 아이템 스크립트 존재 여부 캐시
 local _paraLogLeft   = PARA_LOG_MAX
-local _paraStats     = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
+local _paraStats     = { attach = 0, reattach = 0, detach = 0, noAsset = 0, crawl = 0 }
 
 local function paraEnabled()
     return SandboxVars.PongDu.Rain_Parachute
@@ -455,10 +455,10 @@ end)
 -- 낙하산 공습 결과 요약 (대기열이 비는 시점에 1회)
 local function paraStatsFlush()
     local s = _paraStats
-    if s.attach + s.reattach + s.detach + s.noAsset == 0 then return end
+    if s.attach + s.reattach + s.detach + s.noAsset + s.crawl == 0 then return end
     print("[PongDuRain] parachute summary attach=" .. s.attach .. " reattach=" .. s.reattach
-        .. " detach=" .. s.detach .. " noAsset=" .. s.noAsset)
-    _paraStats = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
+        .. " detach=" .. s.detach .. " noAsset=" .. s.noAsset .. " crawlFreeFall=" .. s.crawl)
+    _paraStats = { attach = 0, reattach = 0, detach = 0, noAsset = 0, crawl = 0 }
     _paraLogLeft = PARA_LOG_MAX
 end
 
@@ -501,14 +501,26 @@ local function onTick()
                     -- 선택되므로 착지 전(공중)에 세워둬야 한다. 바닐라도 fallTime>80(약 2층
                     -- 이상)이면 100% 넘어지므로 7층 낙하에서 항상 세우는 게 바닐라와 같다.
                     -- 낙하산은 사뿐히 내려오므로 넘어짐 없음. 기어다니는 좀비는 바닐라도 제외.
+                    -- 낙하산 대상: 옵션이 켜져 있어도 엎드린 좀비(기어다니는 좀비, 로치)는
+                    -- 낙하산 모델이 누운 몸에 붙어 어색하므로 자유낙하시킨다.
+                    local crawl = z:isCrawling() or p.k == "roach"
+                    local usePara = p.para and not crawl
+                    if p.para and crawl and not p.crawlLogged then
+                        p.crawlLogged = true
+                        _paraStats.crawl = _paraStats.crawl + 1
+                        if p.chute then
+                            chuteDetach(z)
+                            p.chute = false
+                        end
+                    end
                     if not z:isRemoteZombie() then
                         z:setFallTime(0)
-                        if not p.para and not p.hard and not z:isCrawling() then
+                        if not usePara and not p.hard and not crawl then
                             z:setVariable("bHardFall", true)
                             p.hard = true
                         end
                     end
-                    if p.para then
+                    if usePara then
                         -- 부착/재부착: 엔진이 옷을 다시 입히며 지웠으면 다시 씌운다
                         if not chuteHas(z) then
                             if chuteAttach(z) then
