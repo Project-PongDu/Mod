@@ -40,6 +40,15 @@ local BATCH_MS           = 500                              -- RainMark 브로�
 local PICK_TRIES         = 20                               -- 컬럼 후보 탐색 시도 횟수
 local PREP_DELAY_MS      = 1000                             -- 클라 스퀘어 생성 대기 (클라 zombierain.lua SERVER_PREP_MS 와 동일값 유지)
 
+-- ── 투하 모드 (Rain_AirdropMode) ──
+-- 수송기가 플레이어 근처를 직선으로 한 번 지나가며 경로 양옆 띠 안에 떨어뜨린다.
+-- 경로 구간 [-r, +r]를 지속시간 동안 등속으로 통과하고, 각 컬럼은 비행기가 그
+-- 지점을 지나는 시각에 스폰된다. 그림자 연출은 클라(zombierain.lua)가 같은 비행
+-- 정보(Flight)로 그린다.
+local AIR_BAND_RATIO     = 0.35                             -- 띠 반폭 = 반경 x 비율
+local AIR_BAND_MIN       = 4                                -- 띠 반폭 최소 (타일)
+local AIR_PASS_OFFSET    = 0.5                              -- 경로가 플레이어에서 비켜나는 최대 거리 (띠 반폭 대비)
+
 local _sessions = {}
 
 -- 건물 없는 야외 지상(z=0) 컬럼 선정.
@@ -48,6 +57,19 @@ local _sessions = {}
 --  ③ 물 스퀘어 제외             : 강/호수 수장 방지
 --  ④ 위층(z=1..DROP_Z) 바닥 없음: 플레이어 건축물 지붕/2층 바닥 방지.
 --     스퀘어가 존재해도 바닥이 없으면 통과 (이전 레인이 만든 빈 스퀘어 재사용)
+local function isRainColumn(cell, x, y)
+    local sq = cell:getGridSquare(x, y, 0)
+    if not sq or not sq:isOutside() or sq:getBuilding() ~= nil
+        or sq:Is(IsoFlagType.water) then
+        return false
+    end
+    for zz = 1, RAIN_DROP_Z do
+        local up = cell:getGridSquare(x, y, zz)
+        if up and up:getFloor() ~= nil then return false end
+    end
+    return true
+end
+
 local function pickRainColumn(cell, px, py, radius)
     for _ = 1, PICK_TRIES do
         local angle = ZombRand(628) / 100.0
@@ -56,18 +78,26 @@ local function pickRainColumn(cell, px, py, radius)
             + math.sqrt(ZombRand(10000) / 10000.0) * (radius - RAIN_MIN_DIST)
         local x  = math.floor(px + math.cos(angle) * dist)
         local y  = math.floor(py + math.sin(angle) * dist)
-        local sq = cell:getGridSquare(x, y, 0)
-        if sq and sq:isOutside() and sq:getBuilding() == nil
-            and not sq:Is(IsoFlagType.water) then
-            local blocked = false
-            for zz = 1, RAIN_DROP_Z do
-                local up = cell:getGridSquare(x, y, zz)
-                if up and up:getFloor() ~= nil then
-                    blocked = true
-                    break
-                end
-            end
-            if not blocked then return x, y end
+        if isRainColumn(cell, x, y) then return x, y end
+    end
+    return nil
+end
+
+-- 투하 모드 컬럼: 경로 위치 s가 [sLo, sHi) 구간, 경로에서 옆으로 ±halfW 안.
+-- 시도 절반을 넘기면 띠를 2배로 넓혀 다시 찾는다 (도심/물가 대비).
+-- 반환 s는 스폰 시각 계산용 (비행기가 s를 지나는 순간 떨어진다).
+local function pickAirdropColumn(cell, px, py, f, sLo, sHi, halfW)
+    for try = 1, PICK_TRIES do
+        local w = halfW
+        if try > PICK_TRIES / 2 then w = halfW * 2 end
+        local s   = sLo + (ZombRand(10000) / 10000.0) * (sHi - sLo)
+        local off = (ZombRand(20001) / 10000.0 - 1.0) * w
+        local x = math.floor(f.cx + f.ux * s - f.uy * off)
+        local y = math.floor(f.cy + f.uy * s + f.ux * off)
+        local dx, dy = x + 0.5 - px, y + 0.5 - py
+        if dx * dx + dy * dy >= RAIN_MIN_DIST * RAIN_MIN_DIST
+            and isRainColumn(cell, x, y) then
+            return x, y, s
         end
     end
     return nil
@@ -164,10 +194,12 @@ local function onTick()
         elseif now >= s.readyAt then
             if not s.startMs then s.startMs = now end
             local elapsed = now - s.startMs
-            -- 경과시간 기준 목표 마리수와의 차분만큼 스폰 (틱당 상한으로 폭주 방지)
-            local target = math.floor(elapsed / s.intervalMs)
-            if target > #s.cols then target = #s.cols end
-            local n = target - s.spawned
+            -- 컬럼별 스폰 시각(t)이 지난 만큼 스폰 (틱당 상한으로 폭주 방지).
+            -- 일반 모드는 t = i x 간격(균등), 투하 모드는 비행기 통과 시각.
+            local n = 0
+            while s.spawned + n < #s.cols and s.cols[s.spawned + n + 1].t <= elapsed do
+                n = n + 1
+            end
             if n > SPAWN_CAP_PER_TICK then n = SPAWN_CAP_PER_TICK end
             for _ = 1, n do
                 s.spawned = s.spawned + 1
@@ -199,6 +231,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local r      = tonumber(data and data["r"]) or 55
     local durS   = tonumber(data and data["dur"]) or RAIN_DUR_DEFAULT_S
     local sender = tostring(data and data["sender"] or "")
+    local air    = data and data["air"] == true
     if r < 10 then r = 10 elseif r > 100 then r = 100 end
     if durS < RAIN_DUR_MIN_S then durS = RAIN_DUR_MIN_S
     elseif durS > RAIN_DUR_MAX_S then durS = RAIN_DUR_MAX_S end
@@ -227,13 +260,46 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local px, py = player:getX(), player:getY()
     local cols, payload = {}, {}
     local missedPick = 0
-    for _ = 1, cnt do
-        local x, y = pickRainColumn(cell, px, py, r)
-        if x then
-            cols[#cols + 1]       = { x = x, y = y }
-            payload[#payload + 1] = { ["x"] = x, ["y"] = y }
-        else
-            missedPick = missedPick + 1
+    local flight = nil
+    if air then
+        -- 비행 경로: 방향 무작위 직선, 플레이어 옆으로 살짝 비켜 지나간다.
+        local halfW = math.max(AIR_BAND_MIN, r * AIR_BAND_RATIO)
+        local ang   = ZombRand(628) / 100.0
+        local ux, uy = math.cos(ang), math.sin(ang)
+        local pass  = (ZombRand(20001) / 10000.0 - 1.0) * halfW * AIR_PASS_OFFSET
+        flight = {
+            cx = px - uy * pass, cy = py + ux * pass,
+            ux = ux, uy = uy, halfW = halfW,
+        }
+        -- 층화 추출: 경로 [-r, r]를 cnt 칸으로 나눠 칸마다 1마리. s가 이미 오름차순이라
+        -- 정렬 없이 스폰 시각이 단조 증가한다 (투하가 경로를 따라 순서대로 진행).
+        local span = 2 * r
+        for i = 1, cnt do
+            local sLo = -r + span * (i - 1) / cnt
+            local sHi = -r + span * i / cnt
+            local x, y, sv = pickAirdropColumn(cell, px, py, flight, sLo, sHi, halfW)
+            if x then
+                cols[#cols + 1]       = { x = x, y = y, t = (sv + r) / span * durMs }
+                payload[#payload + 1] = { ["x"] = x, ["y"] = y }
+            else
+                missedPick = missedPick + 1
+            end
+        end
+    else
+        for _ = 1, cnt do
+            local x, y = pickRainColumn(cell, px, py, r)
+            if x then
+                cols[#cols + 1]       = { x = x, y = y }
+                payload[#payload + 1] = { ["x"] = x, ["y"] = y }
+            else
+                missedPick = missedPick + 1
+            end
+        end
+        -- 균등 간격. 간격은 요청 마리수(cnt)가 아니라 실제 확보된 컬럼 수 기준 --
+        -- cnt 기준이면 missedPick 발생 시 지속시간보다 일찍 끝난다.
+        if #cols > 0 then
+            local intervalMs = durMs / #cols
+            for i = 1, #cols do cols[i].t = i * intervalMs end
         end
     end
     local tPick1 = getTimestampMs()
@@ -259,6 +325,18 @@ Events.OnClientCommand.Add(function(module, command, player, data)
 
     sendServerCommand("PongDuRain", "Prep", { ["cols"] = payload, ["z"] = RAIN_DROP_Z })
 
+    -- 투하 모드: 그림자 연출용 비행 정보. 비행기는 PREP_DELAY_MS 뒤에 경로 -r 지점을
+    -- 지나 durMs 동안 +r까지 등속 비행한다 (서버 첫 스폰 시각과 같은 기준).
+    if flight then
+        sendServerCommand("PongDuRain", "Flight", {
+            ["cx"] = flight.cx, ["cy"] = flight.cy,
+            ["ux"] = flight.ux, ["uy"] = flight.uy,
+            ["r"] = r, ["prep"] = PREP_DELAY_MS, ["dur"] = durMs,
+        })
+        print(string.format("[PongDuRain] airdrop flight c=(%.1f,%.1f) dir=(%.2f,%.2f) halfW=%.1f speed=%.2f tiles/s",
+            flight.cx, flight.cy, flight.ux, flight.uy, flight.halfW, 2 * r / durS))
+    end
+
     -- 낙하 좀비 플레이어 어그로 창 (클라 features/aggro.lua 수신).
     -- 아래 spawnRainZombie의 서버측 setTarget은 좀비 클라 권한 구조상 소유
     -- 클라 동기화에 덮여 실효가 없다 — 실제 어그로는 이 브로드캐스트를 받은
@@ -282,9 +360,6 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         cols       = cols,
         kinds      = kindList,   -- cols[i] 에 떨어질 종류
         durMs      = durMs,
-        -- 간격은 요청 마리수(cnt)가 아니라 실제 확보된 컬럼 수 기준. cnt 기준이면
-        -- missedPick 발생 시 #cols 에서 스폰이 끊겨 지속시간보다 일찍 끝난다.
-        intervalMs = durMs / #cols,
         sender     = sender,
         readyAt   = getTimestampMs() + PREP_DELAY_MS,
         startMs   = nil,
@@ -294,7 +369,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         lastFlush = 0,
     }
     print("[PongDuRain] session start player=" .. tostring(player:getUsername())
-        .. " r=" .. tostring(r)
+        .. " mode=" .. (air and "airdrop" or "rain") .. " r=" .. tostring(r)
         .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
         .. " cols=" .. tostring(#cols) .. " intervalMs=" .. tostring(math.floor(durMs / #cols)))
 end)

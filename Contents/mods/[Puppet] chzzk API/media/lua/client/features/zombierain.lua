@@ -26,6 +26,11 @@ local mutantspawn = require("features/mutantspawn")
 -- 스캔을 쓴다 -- OnZombieUpdate는 ZombieFallDownState(착지 넘어짐) 동안
 -- 발화가 배제되므로(IsoZombie:2096) 착지 직후를 놓칠 수 있다.
 --
+-- 투하 모드(Rain_AirdropMode): 이름이 "좀비 투하"로 바뀌고, 서버가 보내는 비행
+-- 정보(Flight)로 바닥에 수송기 그림자를 그린다 (실제 차량 없음, 렌더만).
+-- 그림자는 OnPostFloorLayerDraw(z=0)에서 그려 바닥 위, 물체/캐릭터 아래에 깔린다
+-- (IsoCell 타일 렌더에서 WorldMarkers 바닥 마커 직후, IsoMarkers 직전에 발화).
+--
 -- [알려진 엣지] 낙하 도중 뒤늦게 스트림인한 클라는 컬럼 청크가 로드 전이라
 -- 스퀘어 생성이 스킵될 수 있다 -> 해당 좀비는 착지(z=0) 후 패킷부터 정상
 -- 재생성된다 (일시적 비표시만 발생, 유실 아님).
@@ -40,6 +45,16 @@ local SERVER_PREP_MS = 1000
 -- 반경(Rain_Radius), 지속시간(Rain_Duration, 초), 종류별 마리수(Rain_Count_<종류>)를
 -- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (실제 경과 ms 감산).
 -- kinds 키는 서버 RAIN_KINDS / 특좀 kind 이름과 같다.
+local function airdropEnabled()
+    return SandboxVars.PongDu.Rain_AirdropMode
+end
+
+-- 타이머/큐박스에 쓸 표시 이름 키 (투하 모드면 "좀비 투하")
+local function labelKeyNow()
+    if airdropEnabled() then return "IGUI_donation_zombie_airdrop" end
+    return "IGUI_donation_zombie_rain"
+end
+
 local function rainCfg()
     local sv = SandboxVars.PongDu
     local kinds = {
@@ -86,7 +101,7 @@ function RainTimerDisplay:render()
     local m = math.floor(totalSec / 60)
     local s = totalSec % 60
     local col = colorMap.get("zombie_rain")
-    textOutline.drawCentre(self, getText("IGUI_donation_zombie_rain") .. " " .. string.format("%02d:%02d", m, s),
+    textOutline.drawCentre(self, getText(labelKeyNow()) .. " " .. string.format("%02d:%02d", m, s),
         self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
@@ -97,6 +112,56 @@ function RainTimerDisplay:update()
         _panel = nil
     end
 end
+
+-- ── 투하 모드: 수송기 그림자 ─────────────────────────────────────────────────
+-- 위에서 본 수송기 실루엣(기수가 텍스처 위쪽). 경로 방향으로 회전한 정사각형
+-- 네 꼭짓점을 월드 좌표로 잡아 화면에 투영하므로 아이소 시점에 맞게 찌그러진다.
+-- renderPoly UV: 1=좌상, 2=우상, 3=우하, 4=좌하 (GenericSpriteRenderState.renderPoly).
+local SHADOW_TEX    = getTexture("media/textures/Shadows/shadowPongDuAirdrop.png")
+local SHADOW_SIZE   = 20     -- 그림자 한 변 (타일). 날개폭이 텍스처 폭을 거의 채운다
+local SHADOW_ALPHA  = 0.38
+local SHADOW_FADE   = 800    -- 등장/퇴장 페이드 (ms)
+local SHADOW_TAIL   = 2500   -- 마지막 투하 후 화면 밖으로 빠져나가는 시간 (ms)
+local FLIGHT_CULL   = 150    -- 비행 중심에서 이보다 멀면 수신 무시 (타일)
+local _flights = {}
+
+local function toScreen(x, y)
+    return IsoUtils.XToScreen(x, y, 0, 0) - IsoCamera.getOffX(),
+           IsoUtils.YToScreen(x, y, 0, 0) - IsoCamera.getOffY()
+end
+
+local function drawFlights(z)
+    if z ~= 0 or #_flights == 0 then return end
+    if not SHADOW_TEX then return end
+    local now = getTimestampMs()
+    local renderer = getRenderer()
+    for i = #_flights, 1, -1 do
+        local f = _flights[i]
+        local t = now - f.t0
+        local endT = f.prep + f.dur + SHADOW_TAIL
+        if t > endT then
+            table.remove(_flights, i)
+            print("[PongDuRain] airdrop shadow done")
+        else
+            -- 경로 위치: prep 시점에 -r, prep+dur 시점에 +r (서버 스폰 시각과 같은 식)
+            local s = -f.r + (t - f.prep) * f.v
+            local a = SHADOW_ALPHA
+            if t < SHADOW_FADE then a = a * t / SHADOW_FADE end
+            if endT - t < SHADOW_FADE then a = a * (endT - t) / SHADOW_FADE end
+            local h  = SHADOW_SIZE / 2
+            local mx = f.cx + f.ux * s
+            local my = f.cy + f.uy * s
+            local fx_, fy_ = f.ux * h, f.uy * h      -- 기수 방향
+            local rx, ry   = -f.uy * h, f.ux * h     -- 오른쪽 날개 방향
+            local x1, y1 = toScreen(mx + fx_ - rx, my + fy_ - ry)   -- 기수-왼쪽
+            local x2, y2 = toScreen(mx + fx_ + rx, my + fy_ + ry)   -- 기수-오른쪽
+            local x3, y3 = toScreen(mx - fx_ + rx, my - fy_ + ry)   -- 꼬리-오른쪽
+            local x4, y4 = toScreen(mx - fx_ - rx, my - fy_ - ry)   -- 꼬리-왼쪽
+            renderer:renderPoly(SHADOW_TEX, x1, y1, x2, y2, x3, y3, x4, y4, 0, 0, 0, a)
+        end
+    end
+end
+Events.OnPostFloorLayerDraw.Add(drawFlights)
 
 -- ── 착지 처리 대기열 ──────────────────────────────────────────────────────────
 -- [onlineID] = { h=서버 스폰 직후 체력, k=특좀 종류(nil=일반), e=만료(ms),
@@ -139,6 +204,35 @@ Events.OnServerCommand.Add(function(module, command, args)
         print("[PongDuRain] client prep ms=" .. tostring(getTimestampMs() - t0)
             .. " created=" .. tostring(created) .. " reused=" .. tostring(reused)
             .. " failed=" .. tostring(failed))
+        return
+    end
+
+    -- ── 투하 모드 비행 정보 (그림자 연출) ──
+    if command == "Flight" then
+        local cx, cy = tonumber(args["cx"]), tonumber(args["cy"])
+        local ux, uy = tonumber(args["ux"]), tonumber(args["uy"])
+        local r, dur = tonumber(args["r"]), tonumber(args["dur"])
+        if not (cx and cy and ux and uy and r and dur) or dur <= 0 then
+            print("[PongDuRain] airdrop flight ignored (bad args)")
+            return
+        end
+        local me = getPlayer()
+        if me then
+            local dx, dy = me:getX() - cx, me:getY() - cy
+            if dx * dx + dy * dy > (r + FLIGHT_CULL) * (r + FLIGHT_CULL) then return end
+        end
+        if not SHADOW_TEX then
+            print("[PongDuRain] WARN airdrop shadow texture missing")
+        end
+        _flights[#_flights + 1] = {
+            cx = cx, cy = cy, ux = ux, uy = uy, r = r,
+            prep = tonumber(args["prep"]) or SERVER_PREP_MS,
+            dur = dur,
+            v = 2 * r / dur,           -- 타일/ms
+            t0 = getTimestampMs(),
+        }
+        print(string.format("[PongDuRain] airdrop shadow start c=(%.1f,%.1f) dir=(%.2f,%.2f) r=%.0f durMs=%.0f",
+            cx, cy, ux, uy, r, dur))
         return
     end
 
@@ -242,11 +336,13 @@ end
 -- ── 시작 (rewardManager에서 호출) ────────────────────────────────────────────
 function _a.b(player, sender)
     local r, dur, kinds = rainCfg()
+    local air = airdropEnabled()
     sendClientCommand("PongDuRain", "Start", {
         ["r"] = r, ["dur"] = dur, ["kinds"] = kinds,
         ["sender"] = sender or "",
+        ["air"] = air,
     })
-    print("[PongDuRain] start request r=" .. tostring(r) .. " dur=" .. tostring(dur)
+    print("[PongDuRain] start request air=" .. tostring(air) .. " r=" .. tostring(r) .. " dur=" .. tostring(dur)
         .. " normal=" .. tostring(kinds["normal"]) .. " sprinter=" .. tostring(kinds["sprinter"])
         .. " screamer=" .. tostring(kinds["screamer"]) .. " brute=" .. tostring(kinds["brute"])
         .. " roach=" .. tostring(kinds["roach"]) .. " tracer=" .. tostring(kinds["tracer"]))
@@ -254,7 +350,9 @@ function _a.b(player, sender)
     -- 반경 표시는 Rain_ShowRadius 를 따르고(꺼져 있으면 markerRadius=0 -> 아무에게도
     -- 안 뜸), 마커는 낙하가 이어지는 지속시간 내내 유지된다.
     local px, py, pz = player:getX(), player:getY(), player:getZ()
-    local showRadius = showRadiusEnabled()
+    -- 투하 모드는 원형 반경이 실제 낙하 범위(경로 띠)와 달라 마커를 띄우지 않는다.
+    -- 그림자가 범위 표시를 대신한다.
+    local showRadius = showRadiusEnabled() and not air
     local totalMs = dur * 1000 + SERVER_PREP_MS   -- 서버 준비 대기 포함
     fx.playAt("zombie_rain", px, py)
     fx.broadcast({

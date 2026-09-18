@@ -843,6 +843,11 @@ option PongDu.Rain_SafeZoneBlock = {
     page = PongDu_Debuff, translation = PongDu_Rain_SafeZoneBlock,
 }
 
+option PongDu.Rain_AirdropMode = {
+    type = boolean, default = false,
+    page = PongDu_Debuff, translation = PongDu_Rain_AirdropMode,
+}
+
 
 
 
