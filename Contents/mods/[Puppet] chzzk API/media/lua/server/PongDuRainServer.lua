@@ -13,9 +13,10 @@
 --  Start 수신 → 컬럼 일괄 선정 → 서버 스퀘어 생성 → Prep 브로드캐스트(클라 생성)
 --  → PREP_DELAY 대기 → z=DROP_Z에 직접 스폰(페이스 유지) → RainMark(체력/스프린터)
 --
--- 낙하 데미지(DoLand, fallTime>50)는 좀비 체력이 클라 권한이라 서버에서 못 막는다
--- → 스폰 직후 체력을 RainMark로 브로드캐스트, 소유 클라가 착지(z<=0.05) 후 원복
--- (client/features/zombierain.lua). 검증된 기존 채널 그대로.
+-- 낙하 데미지(DoLand)는 좀비 체력이 클라 권한이라 서버에서 못 막는다
+-- → RainMark를 받은 소유 클라가 공중에 있는 동안 매 틱 fallTime을 0으로 돌려
+-- 착지 데미지/넘어짐 자체를 없앤다 (client/features/zombierain.lua).
+-- 체력은 따로 저장/원복하지 않는다 -- 서버 설정(좀비 강인함, 특좀 체력 옵션) 그대로.
 --
 -- [실험 유의] 생성된 빈 스퀘어는 지울 수 있는 API가 없어 월드에 잔류한다.
 -- 발동당 최대 (총 마리수) x DROP_Z개. 실험 월드에서 세이브 크기/부하 실측 후
@@ -33,10 +34,9 @@ local RAIN_CNT_MAX       = 500                              -- 전 종류 합계
 -- (sprinter = server.lua spawnZombies 뛰좀, 나머지 = features/mutantspawn.lua KINDS).
 -- 순서는 로그 출력 순서일 뿐, 실제 낙하 순서는 셔플된다.
 local RAIN_KINDS = { "normal", "sprinter", "screamer", "brute", "roach", "tracer" }
-local RAIN_DROP_Z        = 4                                -- 낙하 시작 높이 (4층)
+local RAIN_DROP_Z        = 7                                -- 낙하 시작 높이 (엔진 한계 z=7, IsoCell.MaxHeight=8)
 local RAIN_MIN_DIST      = 3                                -- 플레이어 직격 방지 최소 거리
 local SPAWN_CAP_PER_TICK = 5                                -- 랙 스파이크 후 몰아치기 상한
-local BATCH_MS           = 500                              -- RainMark 브로드캐스트 묶음 주기
 local PICK_TRIES         = 20                               -- 컬럼 후보 탐색 시도 횟수
 local PREP_DELAY_MS      = 1000                             -- 클라 스퀘어 생성 대기 (클라 zombierain.lua SERVER_PREP_MS 와 동일값 유지)
 
@@ -166,7 +166,6 @@ local function spawnRainZombie(session, col, kind)
     end
     session.batch[#session.batch + 1] = {
         ["id"] = zed:getOnlineID(),
-        ["h"]  = zed:getHealth(),   -- 착지 후 원복할 낙하 전 체력 (일반좀비 폴백용)
         ["k"]  = mutant and kind or nil,
     }
     return true
@@ -175,9 +174,8 @@ end
 local function flushBatch(session, force)
     if #session.batch == 0 then return end
     local now = getTimestampMs()
-    -- 낙하산 모드는 매 틱 즉시 보낸다: 클라가 RainMark를 받아야 낙하산을 씌우고
-    -- 낙하를 늦추므로, 500ms 묶음이면 그동안 일반 속도로 떨어져 버린다.
-    if not force and not session.para and now - session.lastFlush < BATCH_MS then return end
+    -- 매 틱 즉시 보낸다: 클라가 RainMark를 받아야 낙하 데미지 방지/방향 고정/
+    -- 낙하산을 적용하므로, 묶어 보내면 그동안 무방비로 떨어진다.
     session.lastFlush = now
     sendServerCommand("PongDuRain", "RainMark", {
         ["zeds"]   = session.batch,

@@ -15,16 +15,19 @@ local mutantspawn = require("features/mutantspawn")
 --     getGridSquare(realZ)를 보므로, 스퀘어가 없으면 서버 좀비가 아예 생성되지
 --     않는다. createNewGridSquare는 멱등(있으면 그대로 반환) -- 중복 안전.
 --  ③ 남은시간 UI: 폭격 타이머와 동일 스타일의 30초 카운트다운 패널
---  ④ 착지 처리: 서버 RainMark(zedId+체력+종류)를 받아, 소유 좀비가
---     착지(z<=0.05)하면 낙하 전 체력으로 원복 -> 낙하 부상 무효화.
---     종류(k)가 있으면 특좀 적용기(mutantspawn.mark)에 넘긴다 -- 스프린터 포함
---     전 특좀이 도네 특좀과 같은 경로로 능력/체력/이름표(Mutant_NameTag)를 받는다.
+--  ④ 낙하 처리: 서버 RainMark(zedId+종류)를 받아 공중에 있는 동안
+--     - 소유 클라: 매 틱 fallTime=0 -> 착지 데미지/넘어짐 없음 (DoLand는 fallTime<20이면 무시)
+--     - 전 클라: 바라보는 방향 고정 (플레이어 쪽으로 돌며 낙하산이 회전하는 것 방지)
+--     - 낙하산 연출이면 낙하산 부착 + 감속 (아래 Rain_Parachute 절)
+--     착지하면 대기열에서 뺀다. 체력은 건드리지 않는다 -- 서버 설정(좀비 강인함,
+--     특좀 체력 옵션) 그대로다. 종류(k)가 있으면 특좀 적용기(mutantspawn.mark)에
+--     넘긴다 -- 스프린터 포함 전 특좀이 도네 특좀과 같은 경로로 능력/이름표를 받는다.
 --
 -- 낙하 데미지는 엔진 DoLand가 착지 순간 소유 클라에서 넣는다 (fallTime>50 시
--- 체력 감소 + 80% 확률 bHardFall 넘어짐). 체력만 원복하고 넘어짐 연출은
--- 자연스러우므로 그대로 둔다. 착지 감지는 OnZombieUpdate가 아닌 좀비 리스트
--- 스캔을 쓴다 -- OnZombieUpdate는 ZombieFallDownState(착지 넘어짐) 동안
--- 발화가 배제되므로(IsoZombie:2096) 착지 직후를 놓칠 수 있다.
+-- 체력 감소, 한 층당 fallTime 약 48). 7층이면 최대 약 1.0이라 약함(0.5~0.8)
+-- 좀비가 즉사할 수 있어 원복이 아니라 발생 자체를 막는다. 공중 감지는
+-- OnZombieUpdate가 아닌 좀비 리스트 스캔을 쓴다 -- OnZombieUpdate는
+-- ZombieFallDownState 동안 발화가 배제되므로(IsoZombie:2096) 놓칠 수 있다.
 --
 -- 표시명은 "좀비 공습"(IGUI_donation_zombie_rain). 공습 방식은 Rain_Style 드롭다운:
 -- 1 = 좀비 레인(플레이어 중심 원), 2 = 수송기 투하. 투하는 서버가 보내는 비행
@@ -347,8 +350,8 @@ end
 Events.OnTick.Add(planeTick)
 
 -- ── 착지 처리 대기열 ──────────────────────────────────────────────────────────
--- [onlineID] = { h=서버 스폰 직후 체력, k=특좀 종류(nil=일반), e=만료(ms),
---               air=공중에서 마지막으로 본 체력 }
+-- [onlineID] = { k=특좀 종류(nil=일반), e=만료(ms), para=낙하산 대상,
+--               chute=낙하산 부착 여부, pz=감속 목표 높이, ang=고정할 방향(도) }
 local _pending      = {}
 local _pendingCount = 0
 local _sweepAcc     = 0
@@ -435,7 +438,6 @@ Events.OnServerCommand.Add(function(module, command, args)
             if not _pending[id] then _pendingCount = _pendingCount + 1 end
             local kind = e["k"]
             _pending[id] = {
-                h = tonumber(e["h"]) or 1.0,
                 k = kind,
                 e = now + PENDING_MS,
                 para = para,     -- 낙하산 대상
@@ -477,11 +479,23 @@ local function onTick()
             local id = z and z:getOnlineID()
             local p  = id and _pending[id]
             if p then
-                -- 낙하산: 공중이면 씌우고(전 클라) 소유 클라만 감속, 착지하면 벗긴다.
-                -- 체력 원복 체인과 독립이라 먼저 처리한다 (원격 좀비도 벗겨야 함).
-                if p.para then
-                    local zz = z:getZ()
-                    if zz > 0.05 and now <= p.e and not z:isDead() then
+                local zz = z:getZ()
+                if now > p.e then
+                    if p.chute then
+                        chuteDetach(z)
+                        print("[PongDuRain] WARN parachute expired in air zid=" .. tostring(id)
+                            .. " z=" .. tostring(zz))
+                    end
+                    _pending[id]  = nil
+                    _pendingCount = _pendingCount - 1
+                elseif zz > 0.05 and not z:isDead() then
+                    -- ── 공중 ──
+                    -- 방향 고정 (전 클라): 처음 본 방향을 매 틱 되돌린다
+                    if not p.ang then p.ang = z:getDirectionAngle() end
+                    z:setDirectionAngle(p.ang)
+                    -- 낙하 데미지 방지 (소유 클라)
+                    if not z:isRemoteZombie() then z:setFallTime(0) end
+                    if p.para then
                         -- 부착/재부착: 엔진이 옷을 다시 입히며 지웠으면 다시 씌운다
                         if not chuteHas(z) then
                             if chuteAttach(z) then
@@ -509,48 +523,14 @@ local function onTick()
                                 -- 엔진 낙하가 목표보다 빨랐다 -> 목표 높이로 되돌림 (감속)
                                 z:setZ(p.pz)
                             end
-                            z:setFallTime(0)
                         end
-                    elseif p.chute then
+                    end
+                else
+                    -- ── 착지 또는 사망 ──
+                    if p.chute then
                         chuteDetach(z)
                         p.chute = false
                         _paraStats.detach = _paraStats.detach + 1
-                    end
-                end
-                if now > p.e then
-                    if p.chute then
-                        chuteDetach(z)
-                        print("[PongDuRain] WARN parachute expired in air zid=" .. tostring(id)
-                            .. " z=" .. tostring(z:getZ()))
-                    end
-                    _pending[id]  = nil
-                    _pendingCount = _pendingCount - 1
-                elseif z:getZ() > 0.05 then
-                    -- 공중: 착지 직전 체력 기록. 특좀은 적용기 초기화(체력 설정)가
-                    -- 끝난 뒤의 값만 기록한다 -- 초기화 전 값(바닐라 체력)으로
-                    -- 원복하면 특좀 체력 설정이 날아간다.
-                    if not p.k or z:getVariableBoolean("PuppetMutantInit") then
-                        p.air = z:getHealth()
-                    end
-                elseif not z:isRemoteZombie() then
-                    -- 착지 시 체력 원복: 좀비 체력은 클라 권한 -> 소유 좀비만.
-                    -- 낙하 중 사살된 좀비는 원복하지 않고 소모만 한다.
-                    if not z:isDead() then
-                        if p.k then
-                            -- 특좀: 초기화 후 공중 체력이 있을 때만 원복. 스냅샷도
-                            -- 같이 갱신해야 guardStats가 "외부 덮어쓰기"로 되돌리지
-                            -- 않는다. 착지 전에 초기화가 안 됐으면 원복하지 않는다
-                            -- (이후 초기화가 설정 체력을 새로 씌우므로 불필요).
-                            if p.air then
-                                pcall(function() mutantspawn.restoreHealth(z, p.air) end)
-                            else
-                                print("[PongDuRain] landed before mutant init, skip restore kind="
-                                    .. tostring(p.k) .. " zid=" .. tostring(id))
-                            end
-                        else
-                            local hp = p.air or p.h
-                            pcall(function() z:setHealth(hp) end)
-                        end
                     end
                     _pending[id]  = nil
                     _pendingCount = _pendingCount - 1
