@@ -19,6 +19,7 @@ local mutantspawn = require("features/mutantspawn")
 --     - 소유 클라: 매 틱 fallTime=0 -> 착지 데미지 없음 (DoLand는 fallTime<20이면 무시).
 --       자유낙하는 bHardFall을 직접 세워 착지 넘어짐 연출은 유지
 --     - 전 클라: 바라보는 방향 고정 (플레이어 쪽으로 돌며 낙하산이 회전하는 것 방지)
+--     - 전 클라: 낙하 자세 고정 (아래 낙하 애니메이션 절)
 --     - 낙하산 연출이면 낙하산 부착 + 감속 (아래 Rain_Parachute 절)
 --     착지하면 대기열에서 뺀다. 체력은 건드리지 않는다 -- 서버 설정(좀비 강인함,
 --     특좀 체력 옵션) 그대로다. 종류(k)가 있으면 특좀 적용기(mutantspawn.mark)에
@@ -77,6 +78,30 @@ local function rainCfg()
     return sv.Rain_Radius, sv.Rain_Duration, kinds
 end
 
+-- ── 낙하 애니메이션 고정 ────────────────────────────────────────────────────
+-- 바닐라 낙하 자세(fall_loop = Bob_FallIdle, 두 팔을 든 Y자)는 액션 상태가 "falling"일
+-- 때만 나온다. 그런데 스폰 직후 좀비는 idle 상태이고 idle에는 falling 전이가 없으며,
+-- falling 전이 조건 bFalling(z>0 and fallTime>2)도 소유 클라가 낙하 데미지 방지로
+-- 매 틱 fallTime=0 을 넣어 거의 서지 않는다 -> 서 있는 자세/걷기/돌아보기 등이 나왔다.
+-- 해결: 공중에 있는 동안 전 클라가 로컬로 FALL_ANIM_VAR 를 세우고, 모드 AnimSets
+-- (media/AnimSets/zombie/<상태>/PongDuRainFall.xml)가 그 변수가 참이면 어느 상태에서든
+-- Bob_FallIdle 을 고른다 (조건 개수가 가장 많은 노드가 선택되므로 조건을 반복해 둠).
+-- 상태 전이는 건드리지 않으므로 피격/사망/착지 판정은 바닐라 그대로다.
+-- 착지/사망/만료 시 변수를 지운다. 기어다니는 좀비·로치는 zombie-crawler 애님셋을 쓰므로
+-- 같은 노드를 media/AnimSets/zombie-crawler/<상태>/ 에도 둔다 (바닐라 crawler에는
+-- falling 상태 자체가 없어 원래는 엎드린 채 떨어진다).
+local FALL_ANIM_VAR     = "PongDuRainFall"
+local FALL_ANIM_LOG_MAX = 3     -- 공습 1회당 상세 로그 상한
+local _fallAnimLogLeft  = FALL_ANIM_LOG_MAX
+local _fallAnimCount    = 0
+
+local function fallAnimOff(z, p)
+    if p.anim then
+        z:clearVariable(FALL_ANIM_VAR)
+        p.anim = false
+    end
+end
+
 -- ── 낙하산 연출 (Rain_Parachute) ────────────────────────────────────────────
 -- 낙하 좀비 등에 펼친 낙하산을 씌우고(ItemVisual, 전 클라 각자 로컬), 소유 클라는
 -- 낙하 속도를 PARA_DESCENT(층/초)로 늦춘다. 착지하면 낙하산을 벗긴다.
@@ -101,7 +126,7 @@ local PARA_DESCENT   = 1.2      -- 낙하산 하강 속도 (층/초). 4층에서
 local PARA_LOG_MAX   = 5        -- 공습 1회당 부착/재부착 상세 로그 상한
 local _paraScriptOk  = nil      -- 아이템 스크립트 존재 여부 캐시
 local _paraLogLeft   = PARA_LOG_MAX
-local _paraStats     = { attach = 0, reattach = 0, detach = 0, noAsset = 0, crawl = 0 }
+local _paraStats     = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
 
 local function paraEnabled()
     return SandboxVars.PongDu.Rain_Parachute
@@ -454,11 +479,16 @@ end)
 
 -- 낙하산 공습 결과 요약 (대기열이 비는 시점에 1회)
 local function paraStatsFlush()
+    if _fallAnimCount > 0 then
+        print("[PongDuRain] fall anim summary set=" .. _fallAnimCount)
+        _fallAnimCount   = 0
+        _fallAnimLogLeft = FALL_ANIM_LOG_MAX
+    end
     local s = _paraStats
-    if s.attach + s.reattach + s.detach + s.noAsset + s.crawl == 0 then return end
+    if s.attach + s.reattach + s.detach + s.noAsset == 0 then return end
     print("[PongDuRain] parachute summary attach=" .. s.attach .. " reattach=" .. s.reattach
-        .. " detach=" .. s.detach .. " noAsset=" .. s.noAsset .. " crawlFreeFall=" .. s.crawl)
-    _paraStats = { attach = 0, reattach = 0, detach = 0, noAsset = 0, crawl = 0 }
+        .. " detach=" .. s.detach .. " noAsset=" .. s.noAsset)
+    _paraStats = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
     _paraLogLeft = PARA_LOG_MAX
 end
 
@@ -483,6 +513,7 @@ local function onTick()
             if p then
                 local zz = z:getZ()
                 if now > p.e then
+                    fallAnimOff(z, p)
                     if p.chute then
                         chuteDetach(z)
                         print("[PongDuRain] WARN parachute expired in air zid=" .. tostring(id)
@@ -500,17 +531,22 @@ local function onTick()
                     -- land_heavy(AnimSets/zombie/falling)는 착지 순간 bFalling+bHardFall로
                     -- 선택되므로 착지 전(공중)에 세워둬야 한다. 바닐라도 fallTime>80(약 2층
                     -- 이상)이면 100% 넘어지므로 7층 낙하에서 항상 세우는 게 바닐라와 같다.
-                    -- 낙하산은 사뿐히 내려오므로 넘어짐 없음. 기어다니는 좀비는 바닐라도 제외.
-                    -- 낙하산 대상: 옵션이 켜져 있어도 엎드린 좀비(기어다니는 좀비, 로치)는
-                    -- 낙하산 모델이 누운 몸에 붙어 어색하므로 자유낙하시킨다.
+                    -- 낙하산은 사뿐히 내려오므로 넘어짐 없음. 기어다니는 좀비는 바닐라도 제외
+                    -- (crawler 애님셋에 land_heavy 가 없다).
+                    -- 기어다니는 좀비·로치도 공중에서는 Y자 낙하 자세라 낙하산을 그대로 씌운다.
                     local crawl = z:isCrawling() or p.k == "roach"
-                    local usePara = p.para and not crawl
-                    if p.para and crawl and not p.crawlLogged then
-                        p.crawlLogged = true
-                        _paraStats.crawl = _paraStats.crawl + 1
-                        if p.chute then
-                            chuteDetach(z)
-                            p.chute = false
+                    local usePara = p.para
+                    -- 낙하 자세 고정 (전 클라, 기어다니는 좀비 포함): 매 틱 세운다
+                    -- (엔진이 변수를 지워도 복구)
+                    z:setVariable(FALL_ANIM_VAR, true)
+                    if not p.anim then
+                        p.anim = true
+                        _fallAnimCount = _fallAnimCount + 1
+                        if _fallAnimLogLeft > 0 then
+                            _fallAnimLogLeft = _fallAnimLogLeft - 1
+                            print(string.format("[PongDuRain] fall anim on zid=%d z=%.2f state=%s crawl=%s remote=%s",
+                                id, zz, tostring(z:getActionStateName()), tostring(crawl),
+                                tostring(z:isRemoteZombie())))
                         end
                     end
                     if not z:isRemoteZombie() then
@@ -552,6 +588,7 @@ local function onTick()
                     end
                 else
                     -- ── 착지 또는 사망 ──
+                    fallAnimOff(z, p)
                     if p.chute then
                         chuteDetach(z)
                         p.chute = false
