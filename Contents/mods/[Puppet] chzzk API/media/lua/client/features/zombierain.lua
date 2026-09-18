@@ -453,11 +453,13 @@ function _a.b(player, sender)
     -- 그림자가 범위 표시를 대신한다.
     local showRadius = showRadiusEnabled() and style == STYLE_RAIN
     local totalMs = dur * 1000 + SERVER_PREP_MS   -- 서버 준비 대기 포함
-    fx.playAt("zombie_rain", px, py)
+    -- 발동 효과음은 좀비 레인 방식만. 수송기 투하는 엔진음(planeTick)이 대신한다.
+    local startSound = (style == STYLE_RAIN) and "zombie_rain" or nil
+    if startSound then fx.playAt(startSound, px, py) end
     fx.broadcast({
         f = "zombie_rain",
         x = px, y = py, z = pz,
-        sound = "zombie_rain",
+        sound = startSound,
         markerRadius = showRadius and r or 0,
         markerMs = totalMs,
     })
