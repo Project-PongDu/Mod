@@ -16,7 +16,8 @@ local mutantspawn = require("features/mutantspawn")
 --     않는다. createNewGridSquare는 멱등(있으면 그대로 반환) -- 중복 안전.
 --  ③ 남은시간 UI: 폭격 타이머와 동일 스타일의 30초 카운트다운 패널
 --  ④ 낙하 처리: 서버 RainMark(zedId+종류)를 받아 공중에 있는 동안
---     - 소유 클라: 매 틱 fallTime=0 -> 착지 데미지/넘어짐 없음 (DoLand는 fallTime<20이면 무시)
+--     - 소유 클라: 매 틱 fallTime=0 -> 착지 데미지 없음 (DoLand는 fallTime<20이면 무시).
+--       자유낙하는 bHardFall을 직접 세워 착지 넘어짐 연출은 유지
 --     - 전 클라: 바라보는 방향 고정 (플레이어 쪽으로 돌며 낙하산이 회전하는 것 방지)
 --     - 낙하산 연출이면 낙하산 부착 + 감속 (아래 Rain_Parachute 절)
 --     착지하면 대기열에서 뺀다. 체력은 건드리지 않는다 -- 서버 설정(좀비 강인함,
@@ -25,7 +26,8 @@ local mutantspawn = require("features/mutantspawn")
 --
 -- 낙하 데미지는 엔진 DoLand가 착지 순간 소유 클라에서 넣는다 (fallTime>50 시
 -- 체력 감소, 한 층당 fallTime 약 48). 7층이면 최대 약 1.0이라 약함(0.5~0.8)
--- 좀비가 즉사할 수 있어 원복이 아니라 발생 자체를 막는다. 공중 감지는
+-- 좀비가 즉사할 수 있어 원복이 아니라 발생 자체를 막는다. 자유낙하의 착지
+-- 넘어짐은 bHardFall을 직접 세워 그대로 유지한다. 공중 감지는
 -- OnZombieUpdate가 아닌 좀비 리스트 스캔을 쓴다 -- OnZombieUpdate는
 -- ZombieFallDownState 동안 발화가 배제되므로(IsoZombie:2096) 놓칠 수 있다.
 --
@@ -493,8 +495,19 @@ local function onTick()
                     -- 방향 고정 (전 클라): 처음 본 방향을 매 틱 되돌린다
                     if not p.ang then p.ang = z:getDirectionAngle() end
                     z:setDirectionAngle(p.ang)
-                    -- 낙하 데미지 방지 (소유 클라)
-                    if not z:isRemoteZombie() then z:setFallTime(0) end
+                    -- 낙하 데미지 방지 (소유 클라). fallTime=0이면 DoLand가 데미지와
+                    -- 넘어짐(bHardFall)을 둘 다 건너뛰므로, 자유낙하는 넘어짐만 직접 세운다.
+                    -- land_heavy(AnimSets/zombie/falling)는 착지 순간 bFalling+bHardFall로
+                    -- 선택되므로 착지 전(공중)에 세워둬야 한다. 바닐라도 fallTime>80(약 2층
+                    -- 이상)이면 100% 넘어지므로 7층 낙하에서 항상 세우는 게 바닐라와 같다.
+                    -- 낙하산은 사뿐히 내려오므로 넘어짐 없음. 기어다니는 좀비는 바닐라도 제외.
+                    if not z:isRemoteZombie() then
+                        z:setFallTime(0)
+                        if not p.para and not p.hard and not z:isCrawling() then
+                            z:setVariable("bHardFall", true)
+                            p.hard = true
+                        end
+                    end
                     if p.para then
                         -- 부착/재부착: 엔진이 옷을 다시 입히며 지웠으면 다시 씌운다
                         if not chuteHas(z) then
