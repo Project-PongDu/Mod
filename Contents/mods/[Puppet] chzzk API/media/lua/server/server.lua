@@ -468,6 +468,9 @@ DOServer["PongDuFireSupport"]["Sniper"] = function(player, data)
         pierce = pierce, pcChan = pcChan, kdChan = kdChan,
         nextAt = now, expireAt = now + dur,
         shotZids = {},   -- 이 job에서 이미 쏜 zid는 재선정 대상에서 제외
+        -- 결과 집계(종료 로그용). 사살 판정은 서버가 내리므로 여기서 센다.
+        -- 주 표적은 무조건 사살, 관통은 확률 통과분(ex)만 사살로 친다.
+        nShot = 0, nKill = 0, nPierce = 0, nGraze = 0,
     }
     _sniperJobs[#_sniperJobs + 1] = job
 
@@ -567,7 +570,10 @@ local function processSniperJobs()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "SniperStop", { own = job.own })
             end
-            print("[PongDu][Sniper] job finished own=" .. tostring(job.own))
+            print(string.format(
+                "[PongDu][Sniper] job finished own=%s shots=%d kills=%d (main=%d pierce=%d) grazed=%d",
+                tostring(job.own), job.nShot, job.nKill + job.nPierce,
+                job.nKill, job.nPierce, job.nGraze))
         elseif now >= job.nextAt then
             local target  = pickSniperTarget(job)
             local payload = { ox = job.ox, oy = job.oy, oz = job.oz, sender = job.sender }
@@ -578,6 +584,10 @@ local function processSniperJobs()
                 payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
                 local ex, gz = collectPierced(job, zid, payload.x, payload.y)
                 payload.ex, payload.gz, payload.kd = ex, gz, job.kdChan
+                job.nShot   = job.nShot + 1
+                job.nKill   = job.nKill + 1
+                job.nPierce = job.nPierce + #ex
+                job.nGraze  = job.nGraze + #gz
                 print("[PongDu][Sniper] shot zid=" .. zid
                     .. " pierced=" .. #ex .. " grazed=" .. #gz
                     .. " remain=" .. (job.expireAt - now) .. "ms")
@@ -958,6 +968,8 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         legDur = dur, expireAt = now + dur,
         missStreak = 0,
         killed = {},   -- zid -> 재선정 허용 시각(ms). HELI_KILL_TTL 참조
+        -- 결과 집계(종료 로그용). 사살 판정(kc 굴림)은 서버가 내리므로 여기서 센다.
+        nShot = 0, nKill = 0,
     }
     _heliJobs[#_heliJobs + 1] = job
 
@@ -1065,7 +1077,8 @@ local function processHeliJobs()
                     sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
                 end
             end
-            print("[PongDu][Heli] job aborted (" .. why .. ")")
+            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d kills=%d",
+                tostring(why), job.nShot or 0, job.nKill or 0))
         elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
@@ -1073,7 +1086,8 @@ local function processHeliJobs()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
-            print("[PongDu][Heli] job finished")
+            print(string.format("[PongDu][Heli] job finished shots=%d kills=%d",
+                job.nShot or 0, job.nKill or 0))
         elseif now >= job.nextAt then
             -- 헬기 현재 위치: 현재 leg의 A -> B 선형 보간. leg 롤오버가 위에서
             -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
@@ -1160,8 +1174,10 @@ local function processHeliJobs()
                 end
                 payload.id = target:getOnlineID()
                 payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
+                job.nShot = (job.nShot or 0) + 1
                 if ZombRand(100) < job.kc then
                     payload.kill = true
+                    job.nKill = (job.nKill or 0) + 1
                     job.target = nil   -- 사살 -> 다음 발에 새 타겟 랜덤 선정
                     job.killed[payload.id] = now + HELI_KILL_TTL
                     print("[PongDu][Heli] shot KILL zid=" .. payload.id)
