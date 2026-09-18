@@ -34,7 +34,7 @@ local RAIN_MIN_DIST      = 3                                -- 플레이어 직�
 local SPAWN_CAP_PER_TICK = 5                                -- 랙 스파이크 후 몰아치기 상한
 local BATCH_MS           = 500                              -- RainMark 브로드캐스트 묶음 주기
 local PICK_TRIES         = 20                               -- 컬럼 후보 탐색 시도 횟수
-local PREP_DELAY_MS      = 1000                             -- 클라 스퀘어 생성 대기
+local PREP_DELAY_MS      = 1000                             -- 클라 스퀘어 생성 대기 (클라 zombierain.lua SERVER_PREP_MS 와 동일값 유지)
 
 local _sessions = {}
 
@@ -248,7 +248,9 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         cols       = cols,
         sprintPct  = pct,
         durMs      = durMs,
-        intervalMs = durMs / cnt,
+        -- 간격은 요청 마리수(cnt)가 아니라 실제 확보된 컬럼 수 기준. cnt 기준이면
+        -- missedPick 발생 시 #cols 에서 스폰이 끊겨 지속시간보다 일찍 끝난다.
+        intervalMs = durMs / #cols,
         sender     = sender,
         readyAt   = getTimestampMs() + PREP_DELAY_MS,
         startMs   = nil,
@@ -260,5 +262,5 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     print("[PongDuRain] session start player=" .. tostring(player:getUsername())
         .. " r=" .. tostring(r) .. " sprint%=" .. tostring(pct)
         .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
-        .. " cols=" .. tostring(#cols))
+        .. " cols=" .. tostring(#cols) .. " intervalMs=" .. tostring(math.floor(durMs / #cols)))
 end)

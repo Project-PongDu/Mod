@@ -3,6 +3,39 @@ require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
+local deltaTime = require("utils/deltaTime")
+
+-- 대기시간은 ms 단위로 modData.bombRemainMs 에 저장한다 (프레임 독립 감산, utils/deltaTime).
+-- 구버전 세이브의 bombTimer(틱, 1틱=1/60초 가정)는 복구 시 ms로 1회 환산한다.
+local WARN_MS = 8000   -- 폭발 전 경고음 시점 (구 bombTimer == 480틱)
+
+local function migrateLegacy(b)
+    if b.bombTimer ~= nil then
+        if (b.bombTimer or 0) > 0 and not b.bombRemainMs then
+            b.bombRemainMs = b.bombTimer * 1000 / 60
+            print("[PongDuBombard] migrated legacy bombTimer ticks=" .. tostring(b.bombTimer)
+                .. " -> remainMs=" .. tostring(math.floor(b.bombRemainMs)))
+        end
+        b.bombTimer = nil
+    end
+end
+
+-- 틱 1회 감산. 경고음은 WARN_MS 를 "통과"하는 프레임에 1회 (dt가 가변이라 == 비교 불가).
+-- 반환: 0 도달 여부
+local function tickBomb(b)
+    local prev = b.bombRemainMs
+    local now  = prev - deltaTime.ms()
+    b.bombRemainMs = now
+    if prev > WARN_MS and now <= WARN_MS then
+        getSoundManager():PlaySound("explosion", false, 1.0)
+        sendClientCommand("PongDuBombard", "PlayExplosion", {})
+    end
+    if now <= 0 then
+        b.bombRemainMs = 0
+        return true
+    end
+    return false
+end
 
 local BombardTimerDisplay = ISPanel:derive("BombardTimerDisplay")
 
@@ -48,7 +81,7 @@ function BombardTimerDisplay:new(a, b)
     return e
 end
 function BombardTimerDisplay:render()
-    local a = math.floor(self.currentTime / 60)
+    local a = math.floor(self.currentTime / 1000)
     local b = math.floor(a / 60)
     local c = a % 60
     local col = colorMap.get("missile")
@@ -58,7 +91,7 @@ function BombardTimerDisplay:render()
 end
 function BombardTimerDisplay:update()
     local a = self.player:getModData()
-    self.currentTime = a.bombTimer or 0
+    self.currentTime = a.bombRemainMs or 0
     if self.currentTime <= 0 then
         timerStack.unregister(self)
         self:removeFromUIManager()
@@ -68,7 +101,7 @@ end
 -- Show bomb timer UI if there's time remaining.
 function _a.a(a)
     local b = a:getModData()
-    local c = b.bombTimer or 0
+    local c = b.bombRemainMs or 0
     if c > 0 then
         local d = BombardTimerDisplay:new(a, c)
         d:addToUIManager()
@@ -187,20 +220,15 @@ _a.b = function(a)
     end
 
     local function startBomb()
-        -- 대기시간: Bombard_Delay(초) * 60틱.
-        b.bombTimer         = SandboxVars.PongDu.Bombard_Delay * 60
+        -- 대기시간: Bombard_Delay(초) -> ms. 감산은 실제 경과시간 기준.
+        b.bombTimer         = nil
+        b.bombRemainMs      = SandboxVars.PongDu.Bombard_Delay * 1000
         b.timeBombActivated = true
 
         local handler
         handler = function()
-            if b.bombTimer then
-                b.bombTimer = b.bombTimer - 1
-                if b.bombTimer == 480 then
-                    getSoundManager():PlaySound("explosion", false, 1.0)
-                    sendClientCommand("PongDuBombard", "PlayExplosion", {})
-                end
-                if b.bombTimer <= 0 then
-                    b.bombTimer = 0
+            if b.bombRemainMs then
+                if tickBomb(b) then
                     doExplosion(a, b, handler, function()
                         if (b.bombPending or 0) > 0 then
                             b.bombPending = b.bombPending - 1
@@ -259,19 +287,14 @@ local function onTickRecovery()
     local a = getSpecificPlayer(0)
     if not a then return end
     local b = a:getModData()
-    if b.bombTimer and b.bombTimer > 0 and b.timeBombActivated then
+    migrateLegacy(b)
+    if b.bombRemainMs and b.bombRemainMs > 0 and b.timeBombActivated then
         _a.a(a)  -- UI 복원
 
         local handler
         handler = function()
-            if b.bombTimer then
-                b.bombTimer = b.bombTimer - 1
-                if b.bombTimer == 480 then
-                    getSoundManager():PlaySound("explosion", false, 1.0)
-                    sendClientCommand("PongDuBombard", "PlayExplosion", {})
-                end
-                if b.bombTimer <= 0 then
-                    b.bombTimer = 0
+            if b.bombRemainMs then
+                if tickBomb(b) then
                     doExplosion(a, b, handler, function()
                         if (b.bombPending or 0) > 0 then
                             b.bombPending = b.bombPending - 1

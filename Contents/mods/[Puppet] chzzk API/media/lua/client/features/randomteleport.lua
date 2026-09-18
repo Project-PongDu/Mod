@@ -147,7 +147,7 @@ end
 -- ── 생존 복귀 (RT_Mode = 왕복) ──────────────────────────────────────────────
 -- 착지 확정 시점부터 생존시간(RT_SurviveMinutes, 분) 카운트다운. 살아서 버티면
 -- exile과 동일하게 원래 위치로 자동 복귀. 상태는 player modData
--- (rtReturnTime/rtOrigin)에 저장해 재접속 복구를 지원한다 -- exile의
+-- (rtReturnMs/rtOrigin)에 저장해 재접속 복구를 지원한다 -- exile의
 -- returnTime/originalPosition과 키를 분리해 두 기능이 동시 진행돼도 서로 안
 -- 덮는다. 사망 시 취소 (exile과 동일 정책).
 -- 카운트다운 중 랜텔 재발동 시: 세이프존 중 좀비룰렛류가 큐박스 슬롯에서 락되는
@@ -156,6 +156,21 @@ end
 -- 락이 풀리며 준비 카운트다운 후 다음 유닛이 발동된다. 즉 대기 상태가 큐박스
 -- UI에 그대로 보이고, 접속 종료 시 저장/복원도 기존 큐 로직을 그대로 탄다.
 -- (여기서 rtPending 같은 자체 큐를 들고 있으면 큐박스와 이중 관리가 된다.)
+-- 남은 시간은 ms 단위(rtReturnMs), 감산은 실제 경과시간 기준 (utils/deltaTime).
+-- 구버전 세이브의 rtReturnTime(틱, 1틱=1/60초 가정)은 복구 시 ms로 1회 환산한다.
+local deltaTime = require("utils/deltaTime")
+
+local function rtMigrateLegacy(md)
+    if md.rtReturnTime ~= nil then
+        if (md.rtReturnTime or 0) > 0 and not md.rtReturnMs then
+            md.rtReturnMs = md.rtReturnTime * 1000 / 60
+            global.b(" random_teleport: migrated legacy rtReturnTime ticks="
+                .. tostring(md.rtReturnTime) .. " -> ms=" .. tostring(math.floor(md.rtReturnMs)))
+        end
+        md.rtReturnTime = nil
+    end
+end
+
 local RTReturnTimerDisplay = ISPanel:derive("RTReturnTimerDisplay")
 local _retTick  = nil
 local _retPanel = nil
@@ -173,8 +188,8 @@ function RTReturnTimerDisplay:new(player)
 end
 
 function RTReturnTimerDisplay:render()
-    local t = self.player:getModData().rtReturnTime or 0
-    local sec = math.floor(t / 60)
+    local t = self.player:getModData().rtReturnMs or 0
+    local sec = math.floor(t / 1000)
     local col = colorMap.get("random_teleport")
     textOutline.drawCentre(self, getText("IGUI_donation_random_teleport") .. " "
         .. string.format("%02d:%02d", math.floor(sec / 60), sec % 60),
@@ -182,7 +197,7 @@ function RTReturnTimerDisplay:render()
 end
 
 function RTReturnTimerDisplay:update()
-    if (self.player:getModData().rtReturnTime or 0) <= 0 then
+    if (self.player:getModData().rtReturnMs or 0) <= 0 then
         timerStack.unregister(self)
         self:removeFromUIManager()
         _retPanel = nil
@@ -198,16 +213,16 @@ local function rtDoReturn(p)
         movePlayer(p, o.x, o.y, o.z)
         global.b(" random_teleport: survived, returned to origin")
     end
-    md.rtReturnTime = 0
+    md.rtReturnMs = 0
     md.rtOrigin = nil
     -- 대기 중이던 후속 랜텔은 큐박스 슬롯에 락 상태로 남아 있다. 여기서
-    -- rtReturnTime이 0이 되는 순간 다음 틱에 락이 풀리며 큐박스가 알아서 발동한다.
+    -- rtReturnMs가 0이 되는 순간 다음 틱에 락이 풀리며 큐박스가 알아서 발동한다.
 end
 
 local function rtStopCountdown(p)
     local md = p and p:getModData()
     if md then
-        md.rtReturnTime = 0
+        md.rtReturnMs = 0
         md.rtOrigin = nil
     end
     if _retTick then
@@ -220,14 +235,14 @@ local function rtStartTicker(p)
     local md = p:getModData()
     if _retTick then Events.OnTick.Remove(_retTick) end
     _retTick = function()
-        if not md.rtReturnTime or md.rtReturnTime <= 0 then
+        if not md.rtReturnMs or md.rtReturnMs <= 0 then
             Events.OnTick.Remove(_retTick)
             _retTick = nil
             return
         end
-        md.rtReturnTime = md.rtReturnTime - 1
-        if md.rtReturnTime <= 0 then
-            md.rtReturnTime = 0
+        md.rtReturnMs = md.rtReturnMs - deltaTime.ms()
+        if md.rtReturnMs <= 0 then
+            md.rtReturnMs = 0
             rtDoReturn(p)
             Events.OnTick.Remove(_retTick)
             _retTick = nil
@@ -250,7 +265,8 @@ local function rtArmReturn(p, origin)
     if not md.rtOrigin then
         md.rtOrigin = { x = origin.x, y = origin.y, z = origin.z }
     end
-    md.rtReturnTime = mins * 60 * 60   -- 분 -> 틱 (폭격/유배와 동일: 1틱 = 1 감산)
+    md.rtReturnTime = nil
+    md.rtReturnMs = mins * 60 * 1000   -- 분 -> ms (실제 경과시간 감산, 폭격과 동일)
     rtStartTicker(p)
 end
 
@@ -270,7 +286,8 @@ local function rtRecovery()
     local p = getSpecificPlayer(0)
     if not p then return end
     local md = p:getModData()
-    if md.rtReturnTime and md.rtReturnTime > 0 and md.rtOrigin then
+    rtMigrateLegacy(md)
+    if md.rtReturnMs and md.rtReturnMs > 0 and md.rtOrigin then
         if modeCfg() == MODE_ROUNDTRIP then
             rtStartTicker(p)
         else
@@ -278,7 +295,7 @@ local function rtRecovery()
             -- 남겨두면 isBusy는 false인데 복귀만 따로 도는 어긋난 상태가 된다.
             global.b(" random_teleport: saved return countdown discarded (mode="
                 .. tostring(modeCfg()) .. ")")
-            md.rtReturnTime = 0
+            md.rtReturnMs = 0
             md.rtOrigin = nil
         end
     end
@@ -496,13 +513,15 @@ end)
 --   1) 진행 중(state ~= nil): 서버 응답 대기 / 착지 검증 루프. 좌표가 아직 확정
 --      안 됐다. 이 상태에서 재발동하면 기존 루프가 버려지고 원점이 현재(=텔포된)
 --      위치로 갱신돼 복귀 지점이 어긋난다. 방식과 무관하게 잠근다.
---   2) 복귀 카운트다운 진행 중(방식 = 왕복 && rtReturnTime > 0): 타이머가 끝나
+--   2) 복귀 카운트다운 진행 중(방식 = 왕복 && rtReturnMs > 0): 타이머가 끝나
 --      원점으로 돌아올 때까지 다음 텔포를 잠근다.
 function randomteleport.isBusy(player)
     if state ~= nil then return true end
     if not player then return false end
     if modeCfg() ~= MODE_ROUNDTRIP then return false end
-    return (player:getModData().rtReturnTime or 0) > 0
+    local md = player:getModData()
+    rtMigrateLegacy(md)   -- 복구보다 먼저 호출돼도 구버전 값을 놓치지 않게
+    return (md.rtReturnMs or 0) > 0
 end
 
 -- 랜덤 텔레포트 발동  [public name: .a]

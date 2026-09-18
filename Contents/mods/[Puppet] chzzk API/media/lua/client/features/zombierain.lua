@@ -4,6 +4,7 @@ local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
 local fx = require("utils/fx")
+local deltaTime = require("utils/deltaTime")
 
 -- ── 좀비 레인 (zombie_rain) 클라이언트 ── [프로토타입: 런타임 스퀘어 생성] ─────
 -- 역할 4가지:
@@ -28,10 +29,14 @@ local fx = require("utils/fx")
 -- 재생성된다 (일시적 비표시만 발생, 유실 아님).
 
 local PENDING_MS = 60000    -- RainMark 유효시간 (스트림아웃/원격 소유 잔여분 청소)
+-- 서버 PongDuRainServer.lua 의 PREP_DELAY_MS 와 같은 값이어야 한다.
+-- 서버는 Start 수신 후 이만큼 기다렸다가 첫 마리를 스폰하므로, 카운터/반경 마커도
+-- 같은 만큼 늘려 "마지막 마리 스폰 = 카운터 0" 에 맞춘다.
+local SERVER_PREP_MS = 1000
 
 -- ── 샌드박스 옵션 (사용 시점에 읽음 -- 파일 로드 시점엔 SandboxVars 비어있음) ──
 -- 반경/스프린터비율에 더해 지속시간(Rain_Duration, 초)과 마리수(Rain_Count)도
--- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (1틱 = 1 감산).
+-- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (실제 경과 ms 감산).
 local function rainCfg()
     local sv = SandboxVars.PongDu
     return sv.Rain_Radius, sv.Rain_SprinterPercent, sv.Rain_Duration, sv.Rain_Count
@@ -53,7 +58,7 @@ end
 -- 레인 마커는 지속시간 동안 유지 (강령술의 3초와 달리 낙하가 계속되므로).
 
 -- ── 남은시간 표시 패널 (BombardTimerDisplay와 동일 스타일) ─────────────────────
-local _rainTicks = 0
+local _rainRemainMs = 0   -- 남은 시간(ms). OnTick에서 실제 경과시간만큼 감산
 local _panel     = nil
 
 local RainTimerDisplay = ISPanel:derive("RainTimerDisplay")
@@ -70,7 +75,10 @@ function RainTimerDisplay:new()
 end
 
 function RainTimerDisplay:render()
-    local totalSec = math.floor(_rainTicks / 60)
+    -- 남은 시간에는 서버 준비 대기(SERVER_PREP_MS)가 포함돼 있다. 표시에선 그만큼 빼서
+    -- 시작 순간 설정값(예: 30초)이 그대로 보이게 한다. 00:00 은 마지막 1초 동안 표시.
+    local totalSec = math.ceil((_rainRemainMs - SERVER_PREP_MS) / 1000)
+    if totalSec < 0 then totalSec = 0 end
     local m = math.floor(totalSec / 60)
     local s = totalSec % 60
     local col = colorMap.get("zombie_rain")
@@ -79,7 +87,7 @@ function RainTimerDisplay:render()
 end
 
 function RainTimerDisplay:update()
-    if _rainTicks <= 0 then
+    if _rainRemainMs <= 0 then
         timerStack.unregister(self)
         self:removeFromUIManager()
         _panel = nil
@@ -149,8 +157,11 @@ Events.OnServerCommand.Add(function(module, command, args)
 end)
 
 local function onTick()
-    -- ① 타이머 감산 (패널 update()가 0에서 자가 제거)
-    if _rainTicks > 0 then _rainTicks = _rainTicks - 1 end
+    -- ① 타이머 감산 (패널 update()가 0에서 자가 제거). 프레임 수가 아닌 실제 경과시간.
+    if _rainRemainMs > 0 then
+        _rainRemainMs = _rainRemainMs - deltaTime.ms()
+        if _rainRemainMs < 0 then _rainRemainMs = 0 end
+    end
 
     -- ② 착지 스캔 (대기 항목 있을 때만)
     if _pendingCount == 0 then return end
@@ -218,7 +229,7 @@ Events.OnTick.Add(onTick)
 -- ── 활성 여부 조회 (rewardManager의 random_teleport 락용) ────────────────────
 -- [public name: .c]
 function _a.c()
-    return _rainTicks > 0
+    return _rainRemainMs > 0
 end
 
 -- ── 시작 (rewardManager에서 호출) ────────────────────────────────────────────
@@ -233,21 +244,23 @@ function _a.b(player, sender)
     -- 안 뜸), 마커는 낙하가 이어지는 지속시간 내내 유지된다.
     local px, py, pz = player:getX(), player:getY(), player:getZ()
     local showRadius = showRadiusEnabled()
+    local totalMs = dur * 1000 + SERVER_PREP_MS   -- 서버 준비 대기 포함
     fx.playAt("zombie_rain", px, py)
     fx.broadcast({
         f = "zombie_rain",
         x = px, y = py, z = pz,
         sound = "zombie_rain",
         markerRadius = showRadius and r or 0,
-        markerMs = dur * 1000,
+        markerMs = totalMs,
     })
     if showRadius then
-        fx.marker(px, py, pz, "zombie_rain", r, dur * 1000)
+        fx.marker(px, py, pz, "zombie_rain", r, totalMs)
     end
     -- 독립 실행: 진행 중 재후원이 오면 서버는 세션을 병행하고,
     -- 클라 타이머는 "가장 늦게 끝나는 세션" 기준으로 지속시간만큼 리필한다.
-    local ticks = dur * 60
-    if _rainTicks < ticks then _rainTicks = ticks end
+    if _rainRemainMs < totalMs then _rainRemainMs = totalMs end
+    print("[PongDuRain] client timer start durS=" .. tostring(dur) .. " totalMs=" .. tostring(totalMs)
+        .. " remainMs=" .. tostring(math.floor(_rainRemainMs)))
     if not _panel then
         _panel = RainTimerDisplay:new()
         _panel:addToUIManager()
