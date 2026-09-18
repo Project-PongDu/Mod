@@ -231,6 +231,16 @@ local function guardStats(zombie, kind)
     zombie:setVariable("PuppetMutantInit", false)
 end
 
+-- 외부 기능의 정당한 회복 통로 [public name: .restoreHealth]
+-- guardStats ③은 "체력이 스냅샷보다 오르면 타 모드의 덮어쓰기"로 보고 되돌린다.
+-- 좀비 레인의 착지 후 낙하피해 원복처럼 퐁듀가 의도적으로 체력을 올리는 경우엔
+-- 스냅샷을 같은 값으로 함께 갱신해야 guardStats와 싸우지 않는다.
+function _a.restoreHealth(zombie, hp)
+    if not zombie or not hp then return end
+    zombie:setHealth(hp)
+    _hpSnap[zombie:getOnlineID()] = hp
+end
+
 -- ── 스크리머: 비명 (CDDA_ZombieFunction.Scream 이식) ─────────────────────────
 -- playSound는 클라 로컬 렌더링이라 각 클라가 각자 재생 = 전원이 들림.
 -- addSound(월드사운드)는 각 클라가 자기 소유 좀비를 유인 -> 폭격(bombard)과
@@ -762,18 +772,22 @@ end)
 local _reviveMarks = {}   -- { {x,y,z,kind,expire}, ... }
 local REVIVE_MARK_MS = 20000
 
+-- 특좀 지정 [public name: .mark]
+-- MutantMark 수신부와 동일한 등록. 좀비 레인처럼 자체 배치 채널(RainMark)로
+-- zid+kind를 받는 기능이 특좀 개별 패킷 없이 같은 파이프라인에 태울 때 쓴다.
+-- 만료시각 포함: OnZombieDead가 안 뜨고 죽은 좀비의 스테일 항목이
+-- onlineID 재활용으로 새 좀비를 하이재킹하는 것을 차단.
+-- 만료 뒤 스트림-인 재적용은 레지스트리(pid)가 담당한다.
+function _a.mark(zid, kind, sender)
+    if not zid or not kind then return end
+    _pending[zid] = { ["k"] = kind, ["s"] = sender,
+                      ["e"] = getTimestampMs() + PENDING_MS }
+end
+
 Events.OnServerCommand.Add(function(module, command, args)
     if module ~= "PongDuMutant" then return end
     if command == "MutantMark" then
-        local zid  = args and tonumber(args["zedId"])
-        local kind = args and args["kind"]
-        if zid and kind then
-            -- 만료시각 포함: OnZombieDead가 안 뜨고 죽은 좀비의 스테일 항목이
-            -- onlineID 재활용으로 새 좀비를 하이재킹하는 것을 차단.
-            -- 만료 뒤 스트림-인 재적용은 레지스트리(pid)가 담당한다.
-            _pending[zid] = { ["k"] = kind, ["s"] = args["sender"],
-                              ["e"] = getTimestampMs() + PENDING_MS }
-        end
+        _a.mark(args and tonumber(args["zedId"]), args and args["kind"], args and args["sender"])
     elseif command == "MutantRevive" then
         local x, y = tonumber(args and args["x"]), tonumber(args and args["y"])
         local kind = args and args["kind"]

@@ -803,24 +803,39 @@ option PongDu.Rain_Duration = {
     page = PongDu_Debuff, translation = PongDu_Rain_Duration,
 }
 
-option PongDu.Rain_Count = {
-    type = integer, min = 10, max = 500, default = 100,
-    page = PongDu_Debuff, translation = PongDu_Rain_Count,
+option PongDu.Rain_Count_Normal = {
+    type = integer, min = 0, max = 500, default = 95,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Normal,
 }
 
-option PongDu.Rain_SprinterPercent = {
-    type = integer, min = 0, max = 100, default = 5,
-    page = PongDu_Debuff, translation = PongDu_Rain_SprinterPercent,
+option PongDu.Rain_Count_Sprinter = {
+    type = integer, min = 0, max = 500, default = 5,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Sprinter,
+}
+
+option PongDu.Rain_Count_Screamer = {
+    type = integer, min = 0, max = 500, default = 0,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Screamer,
+}
+
+option PongDu.Rain_Count_Brute = {
+    type = integer, min = 0, max = 500, default = 0,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Brute,
+}
+
+option PongDu.Rain_Count_Roach = {
+    type = integer, min = 0, max = 500, default = 0,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Roach,
+}
+
+option PongDu.Rain_Count_Tracer = {
+    type = integer, min = 0, max = 500, default = 0,
+    page = PongDu_Debuff, translation = PongDu_Rain_Count_Tracer,
 }
 
 option PongDu.Rain_ShowRadius = {
     type = boolean, default = true,
     page = PongDu_Debuff, translation = PongDu_Rain_ShowRadius,
-}
-
-option PongDu.Rain_SprinterNameTag = {
-    type = boolean, default = true,
-    page = PongDu_Debuff, translation = PongDu_Rain_SprinterNameTag,
 }
 
 option PongDu.Rain_SafeZoneBlock = {

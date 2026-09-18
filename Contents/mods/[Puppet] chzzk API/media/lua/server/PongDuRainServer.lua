@@ -18,17 +18,21 @@
 -- (client/features/zombierain.lua). 검증된 기존 채널 그대로.
 --
 -- [실험 유의] 생성된 빈 스퀘어는 지울 수 있는 API가 없어 월드에 잔류한다.
--- 발동당 최대 Rain_Count x DROP_Z개. 실험 월드에서 세이브 크기/부하 실측 후
+-- 발동당 최대 (총 마리수) x DROP_Z개. 실험 월드에서 세이브 크기/부하 실측 후
 -- 본 규모(500) 확장 여부를 결정한다.
 
--- 지속시간/마리수는 샌드박스(Rain_Duration/Rain_Count)를 클라가 Start에 실어
--- 보내고, 여기 값들은 파라미터 누락(구버전 클라) 시 폴백 + 클램프 한계로 쓴다.
+-- 지속시간/종류별 마리수는 샌드박스(Rain_Duration/Rain_Count_<종류>)를 클라가
+-- Start에 실어 보내고, 여기 값들은 파라미터 누락(구버전 클라) 시 폴백 + 클램프
+-- 한계로 쓴다.
 local RAIN_DUR_DEFAULT_S = 30                               -- 지속시간 폴백 (초)
 local RAIN_DUR_MIN_S     = 5
 local RAIN_DUR_MAX_S     = 120
-local RAIN_CNT_DEFAULT   = 100                              -- 마리수 폴백
-local RAIN_CNT_MIN       = 10
-local RAIN_CNT_MAX       = 500
+local RAIN_CNT_MAX       = 500                              -- 전 종류 합계 상한 (스퀘어 생성 부하)
+
+-- 낙하 종류. "normal" 외에는 특좀 파이프라인(PuppetMutant kind)과 같은 이름이다
+-- (sprinter = server.lua spawnZombies 뛰좀, 나머지 = features/mutantspawn.lua KINDS).
+-- 순서는 로그 출력 순서일 뿐, 실제 낙하 순서는 셔플된다.
+local RAIN_KINDS = { "normal", "sprinter", "screamer", "brute", "roach", "tracer" }
 local RAIN_DROP_Z        = 4                                -- 낙하 시작 높이 (4층)
 local RAIN_MIN_DIST      = 3                                -- 플레이어 직격 방지 최소 거리
 local SPAWN_CAP_PER_TICK = 5                                -- 랙 스파이크 후 몰아치기 상한
@@ -69,31 +73,48 @@ local function pickRainColumn(cell, px, py, radius)
     return nil
 end
 
+-- 종류별 마리수 -> 셔플된 종류 목록. 지속시간 동안 종류가 고르게 섞여 떨어지게
+-- 한다 (셔플 없이 이어붙이면 특좀이 마지막에 몰린다). 합계가 상한을 넘으면
+-- 셔플 후 앞에서부터 잘라 설정 비율을 대략 유지한다.
+local function buildKindList(kinds)
+    local list = {}
+    for _, k in ipairs(RAIN_KINDS) do
+        local n = math.floor(tonumber(kinds and kinds[k]) or 0)
+        if n < 0 then n = 0 elseif n > RAIN_CNT_MAX then n = RAIN_CNT_MAX end
+        for _ = 1, n do list[#list + 1] = k end
+    end
+    local requested = #list
+    -- Fisher-Yates
+    for i = #list, 2, -1 do
+        local j = ZombRand(i) + 1
+        list[i], list[j] = list[j], list[i]
+    end
+    if #list > RAIN_CNT_MAX then
+        for i = #list, RAIN_CNT_MAX + 1, -1 do list[i] = nil end
+    end
+    return list, requested
+end
+
 -- 1마리 스폰: z=DROP_Z 스퀘어에 직접 생성. 랜덤 아웃핏(outfit=nil),
--- 체력 캡처 후 세션 배치에 적재. 스프린터 롤은 서버에서 하되 walkType 실제
--- 적용은 클라 적용기 담당 (B41 MP 좀비는 클라 권한).
-local function spawnRainZombie(session, col)
+-- 체력 캡처 후 세션 배치에 적재. 특좀 종류는 서버 modData에 마킹만 하고
+-- 스탯/행동 적용은 RainMark를 받은 클라가 특좀 적용기(mutantspawn)에 넘겨
+-- 처리한다 (B41 MP 좀비는 클라 권한).
+local function spawnRainZombie(session, col, kind)
     local zeds = addZombiesInOutfit(col.x, col.y, RAIN_DROP_Z, 1, nil, nil)
     if not zeds or zeds:size() == 0 then return false end
     local zed = zeds:get(0)
     zed:DoZombieStats()
-    local sprint = 0
-    if session.sprintPct > 0 and ZombRand(100) < session.sprintPct then
-        sprint = 1
-    end
     -- 후원받은 플레이어 쪽으로 어그로
     local p = session.player
     pcall(function() zed:setTarget(p) end)
     pcall(function() zed:setTurnAlertedValues(math.floor(p:getX()), math.floor(p:getY())) end)
     -- 서버측 특좀 마킹: 이게 있어야 시체(IsoDeadBody)에 계승되어 강령술
-    -- (RiseUp)이 b:getModData()["PuppetMutant"]를 읽고 스프린터로 부활시킨다.
-    -- 기존엔 클라 RainMark 수신부에서만 마킹해서 서버 시체엔 아무것도 안 남았고,
-    -- 그래서 레인 스프린터가 전부 일반좀비로 부활했다 (sprinter5/좀비룰렛은
-    -- server.lua spawnZombies에서 같은 마킹을 하고 있어 정상 동작했음).
+    -- (RiseUp)이 b:getModData()["PuppetMutant"]를 읽고 같은 종류로 부활시킨다.
     -- PuppetMutantZid 스탬프 필수 -- 없으면 staleSweep이 풀 재활용으로 오인해 즉시 지운다.
-    if sprint == 1 then
+    local mutant = kind ~= nil and kind ~= "normal"
+    if mutant then
         local md = zed:getModData()
-        md["PuppetMutant"]    = "sprinter"
+        md["PuppetMutant"]    = kind
         md["PuppetMutantZid"] = zed:getOnlineID()
         if session.sender and session.sender ~= "" then
             md["PuppetMutantSender"] = session.sender
@@ -101,8 +122,8 @@ local function spawnRainZombie(session, col)
     end
     session.batch[#session.batch + 1] = {
         ["id"] = zed:getOnlineID(),
-        ["h"]  = zed:getHealth(),   -- 착지 후 원복할 낙하 전 체력
-        ["s"]  = sprint,
+        ["h"]  = zed:getHealth(),   -- 착지 후 원복할 낙하 전 체력 (일반좀비 폴백용)
+        ["k"]  = mutant and kind or nil,
     }
     return true
 end
@@ -150,7 +171,7 @@ local function onTick()
             if n > SPAWN_CAP_PER_TICK then n = SPAWN_CAP_PER_TICK end
             for _ = 1, n do
                 s.spawned = s.spawned + 1
-                local ok, res = pcall(spawnRainZombie, s, s.cols[s.spawned])
+                local ok, res = pcall(spawnRainZombie, s, s.cols[s.spawned], s.kinds[s.spawned])
                 if not ok then
                     print("[PongDuRain] spawn error: " .. tostring(res))
                 elseif res then
@@ -176,18 +197,29 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local cell = getCell()
     if not cell then return end
     local r      = tonumber(data and data["r"]) or 55
-    local pct    = tonumber(data and data["pct"]) or 0
     local durS   = tonumber(data and data["dur"]) or RAIN_DUR_DEFAULT_S
-    local cnt    = tonumber(data and data["cnt"]) or RAIN_CNT_DEFAULT
     local sender = tostring(data and data["sender"] or "")
     if r < 10 then r = 10 elseif r > 100 then r = 100 end
-    if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
     if durS < RAIN_DUR_MIN_S then durS = RAIN_DUR_MIN_S
     elseif durS > RAIN_DUR_MAX_S then durS = RAIN_DUR_MAX_S end
-    cnt = math.floor(cnt)
-    if cnt < RAIN_CNT_MIN then cnt = RAIN_CNT_MIN
-    elseif cnt > RAIN_CNT_MAX then cnt = RAIN_CNT_MAX end
     local durMs = durS * 1000
+
+    local kinds  = type(data and data["kinds"]) == "table" and data["kinds"] or nil
+    local kindList, requested = buildKindList(kinds)
+    local cntLog = ""
+    for _, k in ipairs(RAIN_KINDS) do
+        cntLog = cntLog .. " " .. k .. "=" .. tostring(kinds and kinds[k] or 0)
+    end
+    print("[PongDuRain] request" .. cntLog .. " total=" .. tostring(requested)
+        .. " used=" .. tostring(#kindList))
+    if not kinds then
+        print("[PongDuRain] WARN no kinds table in Start (client/server version mismatch?)")
+    end
+    if #kindList == 0 then
+        print("[PongDuRain] session aborted (total count 0) player=" .. tostring(player:getUsername()))
+        return
+    end
+    local cnt = #kindList
 
     -- 컬럼 일괄 선정 + 서버 스퀘어 생성 + 클라 브로드캐스트 페이로드 구성
     -- [계측] 시작 틱 스파이크 실측용: 선정/생성 각 단계 소요시간을 분리 측정
@@ -209,6 +241,8 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         print("[PongDuRain] session aborted (no columns) player=" .. tostring(player:getUsername()))
         return
     end
+    -- 컬럼이 모자라면 종류 목록도 같은 길이로 자른다 (이미 셔플돼 있어 무작위 탈락)
+    for i = #kindList, #cols + 1, -1 do kindList[i] = nil end
 
     local createdSq, reusedSq = 0, 0
     for _, c in ipairs(cols) do
@@ -246,7 +280,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     _sessions[#_sessions + 1] = {
         player     = player,
         cols       = cols,
-        sprintPct  = pct,
+        kinds      = kindList,   -- cols[i] 에 떨어질 종류
         durMs      = durMs,
         -- 간격은 요청 마리수(cnt)가 아니라 실제 확보된 컬럼 수 기준. cnt 기준이면
         -- missedPick 발생 시 #cols 에서 스폰이 끊겨 지속시간보다 일찍 끝난다.
@@ -260,7 +294,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         lastFlush = 0,
     }
     print("[PongDuRain] session start player=" .. tostring(player:getUsername())
-        .. " r=" .. tostring(r) .. " sprint%=" .. tostring(pct)
+        .. " r=" .. tostring(r)
         .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
         .. " cols=" .. tostring(#cols) .. " intervalMs=" .. tostring(math.floor(durMs / #cols)))
 end)

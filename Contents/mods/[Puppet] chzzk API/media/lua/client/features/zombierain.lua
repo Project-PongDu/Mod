@@ -5,18 +5,20 @@ local colorMap = require("utils/colorMap")
 local textOutline = require("utils/textOutline")
 local fx = require("utils/fx")
 local deltaTime = require("utils/deltaTime")
+local mutantspawn = require("features/mutantspawn")
 
 -- ── 좀비 레인 (zombie_rain) 클라이언트 ── [프로토타입: 런타임 스퀘어 생성] ─────
 -- 역할 4가지:
---  ① 시작: 샌드박스 반경/스프린터비율을 읽어 서버에 세션 시작 요청
+--  ① 시작: 샌드박스 반경/지속시간/종류별 마리수를 읽어 서버에 세션 시작 요청
 --  ② 컬럼 준비: 서버 Prep(컬럼 좌표) 수신 시 z=1..dropZ 빈 스퀘어를 로컬 생성.
 --     클라 재생성 관문(NetworkZombieSimulator.parseZombie)이 "이 클라"의
 --     getGridSquare(realZ)를 보므로, 스퀘어가 없으면 서버 좀비가 아예 생성되지
 --     않는다. createNewGridSquare는 멱등(있으면 그대로 반환) -- 중복 안전.
 --  ③ 남은시간 UI: 폭격 타이머와 동일 스타일의 30초 카운트다운 패널
---  ④ 착지 처리: 서버 RainMark(zedId+체력+스프린터)를 받아, 소유 좀비가
+--  ④ 착지 처리: 서버 RainMark(zedId+체력+종류)를 받아, 소유 좀비가
 --     착지(z<=0.05)하면 낙하 전 체력으로 원복 -> 낙하 부상 무효화.
---     스프린터 플래그면 setWalkType 적용 (좀비는 클라 권한이라 클라 적용이 신뢰 경로).
+--     종류(k)가 있으면 특좀 적용기(mutantspawn.mark)에 넘긴다 -- 스프린터 포함
+--     전 특좀이 도네 특좀과 같은 경로로 능력/체력/이름표(Mutant_NameTag)를 받는다.
 --
 -- 낙하 데미지는 엔진 DoLand가 착지 순간 소유 클라에서 넣는다 (fallTime>50 시
 -- 체력 감소 + 80% 확률 bHardFall 넘어짐). 체력만 원복하고 넘어짐 연출은
@@ -35,18 +37,20 @@ local PENDING_MS = 60000    -- RainMark 유효시간 (스트림아웃/원격 소
 local SERVER_PREP_MS = 1000
 
 -- ── 샌드박스 옵션 (사용 시점에 읽음 -- 파일 로드 시점엔 SandboxVars 비어있음) ──
--- 반경/스프린터비율에 더해 지속시간(Rain_Duration, 초)과 마리수(Rain_Count)도
+-- 반경(Rain_Radius), 지속시간(Rain_Duration, 초), 종류별 마리수(Rain_Count_<종류>)를
 -- 서버에 전달한다. 클라 UI 타이머 길이도 지속시간을 따른다 (실제 경과 ms 감산).
+-- kinds 키는 서버 RAIN_KINDS / 특좀 kind 이름과 같다.
 local function rainCfg()
     local sv = SandboxVars.PongDu
-    return sv.Rain_Radius, sv.Rain_SprinterPercent, sv.Rain_Duration, sv.Rain_Count
-end
-
--- 스프린터 이름표 (Rain_SprinterNameTag). 실제 렌더는 특수좀비 이름표
--- 시스템(mutantspawn.lua)이 담당하므로 Mutant_NameTag가 꺼져 있으면
--- 이쪽을 켜도 표시되지 않는다.
-local function sprinterTagEnabled()
-    return SandboxVars.PongDu.Rain_SprinterNameTag
+    local kinds = {
+        ["normal"]   = sv.Rain_Count_Normal,
+        ["sprinter"] = sv.Rain_Count_Sprinter,
+        ["screamer"] = sv.Rain_Count_Screamer,
+        ["brute"]    = sv.Rain_Count_Brute,
+        ["roach"]    = sv.Rain_Count_Roach,
+        ["tracer"]   = sv.Rain_Count_Tracer,
+    }
+    return sv.Rain_Radius, sv.Rain_Duration, kinds
 end
 
 -- 반경 표시 (Rain_ShowRadius)
@@ -95,7 +99,8 @@ function RainTimerDisplay:update()
 end
 
 -- ── 착지 처리 대기열 ──────────────────────────────────────────────────────────
--- [onlineID] = { h=원복 체력, s=스프린터(0/1), e=만료(ms), sApplied=적용 여부 }
+-- [onlineID] = { h=서버 스폰 직후 체력, k=특좀 종류(nil=일반), e=만료(ms),
+--               air=공중에서 마지막으로 본 체력 }
 local _pending      = {}
 local _pendingCount = 0
 local _sweepAcc     = 0
@@ -146,12 +151,15 @@ Events.OnServerCommand.Add(function(module, command, args)
         local id = e and tonumber(e["id"])
         if id then
             if not _pending[id] then _pendingCount = _pendingCount + 1 end
+            local kind = e["k"]
             _pending[id] = {
-                h  = tonumber(e["h"]) or 1.0,
-                s  = tonumber(e["s"]) or 0,
-                e  = now + PENDING_MS,
-                sd = sender,
+                h = tonumber(e["h"]) or 1.0,
+                k = kind,
+                e = now + PENDING_MS,
             }
+            -- 특좀: 도네 특좀(MutantMark)과 같은 대기열에 등록 -> OnZombieUpdate
+            -- 적용기가 onlineID로 매칭해 능력/체력/이름표를 입힌다 (전 클라 각자).
+            if kind then mutantspawn.mark(id, kind, sender) end
         end
     end
 end)
@@ -177,36 +185,35 @@ local function onTick()
                 if now > p.e then
                     _pending[id]  = nil
                     _pendingCount = _pendingCount - 1
-                else
-                    -- 스프린터 적용: 시야에 들어온 모든 클라가 1회 적용 (멱등)
-                    if p.s == 1 and not p.sApplied then
-                        pcall(function() z:setWalkType("sprint" .. tostring(ZombRand(5) + 1)) end)
-                        -- 이름표: 특수좀비 시스템과 동일하게 클라 로컬 modData 마킹
-                        -- (RainMark는 전 클라 브로드캐스트라 각 클라가 각자 마킹 --
-                        --  동기화 불필요). PuppetMutantZid 스탬프는 풀 재활용 스테일
-                        --  방어(applyMutant 가드)의 판별 기준. 서버측 modData는 건드리지
-                        --  않으므로 시체/부활 경로에는 영향 없음 (일반좀비로 부활).
-                        if sprinterTagEnabled() then
-                            pcall(function()
-                                local md = z:getModData()
-                                md["PuppetMutant"]    = "sprinter"
-                                md["PuppetMutantZid"] = id
-                                if p.sd and p.sd ~= "" then
-                                    md["PuppetMutantSender"] = p.sd
-                                end
-                            end)
-                        end
-                        p.sApplied = true
+                elseif z:getZ() > 0.05 then
+                    -- 공중: 착지 직전 체력 기록. 특좀은 적용기 초기화(체력 설정)가
+                    -- 끝난 뒤의 값만 기록한다 -- 초기화 전 값(바닐라 체력)으로
+                    -- 원복하면 특좀 체력 설정이 날아간다.
+                    if not p.k or z:getVariableBoolean("PuppetMutantInit") then
+                        p.air = z:getHealth()
                     end
+                elseif not z:isRemoteZombie() then
                     -- 착지 시 체력 원복: 좀비 체력은 클라 권한 -> 소유 좀비만.
                     -- 낙하 중 사살된 좀비는 원복하지 않고 소모만 한다.
-                    if z:getZ() <= 0.05 and not z:isRemoteZombie() then
-                        if not z:isDead() then
-                            pcall(function() z:setHealth(p.h) end)
+                    if not z:isDead() then
+                        if p.k then
+                            -- 특좀: 초기화 후 공중 체력이 있을 때만 원복. 스냅샷도
+                            -- 같이 갱신해야 guardStats가 "외부 덮어쓰기"로 되돌리지
+                            -- 않는다. 착지 전에 초기화가 안 됐으면 원복하지 않는다
+                            -- (이후 초기화가 설정 체력을 새로 씌우므로 불필요).
+                            if p.air then
+                                pcall(function() mutantspawn.restoreHealth(z, p.air) end)
+                            else
+                                print("[PongDuRain] landed before mutant init, skip restore kind="
+                                    .. tostring(p.k) .. " zid=" .. tostring(id))
+                            end
+                        else
+                            local hp = p.air or p.h
+                            pcall(function() z:setHealth(hp) end)
                         end
-                        _pending[id]  = nil
-                        _pendingCount = _pendingCount - 1
                     end
+                    _pending[id]  = nil
+                    _pendingCount = _pendingCount - 1
                 end
             end
         end
@@ -234,11 +241,15 @@ end
 
 -- ── 시작 (rewardManager에서 호출) ────────────────────────────────────────────
 function _a.b(player, sender)
-    local r, pct, dur, cnt = rainCfg()
+    local r, dur, kinds = rainCfg()
     sendClientCommand("PongDuRain", "Start", {
-        ["r"] = r, ["pct"] = pct, ["dur"] = dur, ["cnt"] = cnt,
+        ["r"] = r, ["dur"] = dur, ["kinds"] = kinds,
         ["sender"] = sender or "",
     })
+    print("[PongDuRain] start request r=" .. tostring(r) .. " dur=" .. tostring(dur)
+        .. " normal=" .. tostring(kinds["normal"]) .. " sprinter=" .. tostring(kinds["sprinter"])
+        .. " screamer=" .. tostring(kinds["screamer"]) .. " brute=" .. tostring(kinds["brute"])
+        .. " roach=" .. tostring(kinds["roach"]) .. " tracer=" .. tostring(kinds["tracer"]))
     -- 효과음/반경 표시: 본인은 즉시 로컬, 나머지 접속자는 서버 거리컷 브로드캐스트.
     -- 반경 표시는 Rain_ShowRadius 를 따르고(꺼져 있으면 markerRadius=0 -> 아무에게도
     -- 안 뜸), 마커는 낙하가 이어지는 지속시간 내내 유지된다.
