@@ -137,6 +137,20 @@ module Base
         }
     }
 
+    /* 좀비 공습 - 수송기 투하 방식의 엔진음. 헬기 로터음과 같은 이유로 loop = true.
+       재생/정지와 거리 볼륨은 features/zombierain.lua가 emitter 핸들로 관리.
+       airdrop_plane.wav는 합성 임시 음원(6초 무이음 루프) -- 교체 시 파일명만 유지. */
+    sound pongdu_airdrop_plane
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/airdrop_plane.wav,
+            volume = 0.5,
+        }
+    }
+
     sound zombie_rain
     {
         category = Object,

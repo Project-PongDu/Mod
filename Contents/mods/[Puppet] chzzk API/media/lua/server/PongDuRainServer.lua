@@ -195,6 +195,16 @@ local function flushBatch(session, force)
     session.batch = {}
 end
 
+-- 종류별 실제 소환 수 로그 문자열 (" normal=93 sprinter=5 ..."). 컬럼 부족으로
+-- 잘린 종류와 스폰 실패분이 반영된 서버 기준 값이다.
+local function kindTally(s)
+    local out = ""
+    for _, k in ipairs(RAIN_KINDS) do
+        out = out .. " " .. k .. "=" .. tostring(s.byKind[k] or 0)
+    end
+    return out
+end
+
 local function onTick()
     if #_sessions == 0 then return end
     local now = getTimestampMs()
@@ -203,7 +213,8 @@ local function onTick()
         -- 플레이어 접속 종료 등으로 무효화되면 세션 폐기
         local alive = s.player and pcall(function() return s.player:getX() end)
         if not alive then
-            print("[PongDuRain] session dropped (player gone) spawned=" .. tostring(s.spawned))
+            print("[PongDuRain] session dropped (player gone) spawned=" .. tostring(s.spawned)
+                .. " hits=" .. tostring(s.hits) .. kindTally(s))
             table.remove(_sessions, i)
         elseif now >= s.readyAt then
             if not s.startMs then s.startMs = now end
@@ -222,6 +233,8 @@ local function onTick()
                     print("[PongDuRain] spawn error: " .. tostring(res))
                 elseif res then
                     s.hits = s.hits + 1
+                    local k = s.kinds[s.spawned] or "normal"
+                    s.byKind[k] = (s.byKind[k] or 0) + 1
                 end
             end
             flushBatch(s, false)
@@ -229,7 +242,7 @@ local function onTick()
                 flushBatch(s, true)
                 print("[PongDuRain] session done player=" .. tostring(s.player:getUsername())
                     .. " spawned=" .. tostring(s.spawned) .. " hits=" .. tostring(s.hits)
-                    .. " cols=" .. tostring(#s.cols))
+                    .. " cols=" .. tostring(#s.cols) .. kindTally(s))
                 table.remove(_sessions, i)
             end
         end
@@ -386,6 +399,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         startMs   = nil,
         spawned   = 0,
         hits      = 0,
+        byKind    = {},  -- 종류별 실제 소환 수 (kindTally)
         batch     = {},
         lastFlush = 0,
     }

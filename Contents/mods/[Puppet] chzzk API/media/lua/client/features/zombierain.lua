@@ -134,28 +134,32 @@ local function toScreen(x, y)
            IsoUtils.YToScreen(x, y, 0, 0) - IsoCamera.getOffY()
 end
 
+-- 수송기 현재 위치와 페이드 계수(0~1). 비행이 끝났으면 nil.
+-- 진행률: prep 시점에 A(0), prep+dur 시점에 B(1) (서버 스폰 시각과 같은 식).
+-- 범위 밖은 연장선으로 외삽 -- 시작 전/도착 후에도 같은 속도로 날아간다.
+local function flightState(f, now)
+    local t = now - f.t0
+    local endT = f.prep + f.dur + SHADOW_TAIL
+    if t > endT then return nil end
+    local frac = (t - f.prep) / f.dur
+    local k = 1
+    if t < SHADOW_FADE then k = t / SHADOW_FADE end
+    if endT - t < SHADOW_FADE then k = k * (endT - t) / SHADOW_FADE end
+    if k < 0 then k = 0 end
+    return f.ax + (f.bx - f.ax) * frac, f.ay + (f.by - f.ay) * frac, k
+end
+
 local function drawFlights(z)
     if z ~= 0 or #_flights == 0 then return end
     if not SHADOW_TEX then return end
     local now = getTimestampMs()
     local renderer = getRenderer()
-    for i = #_flights, 1, -1 do
+    for i = 1, #_flights do
         local f = _flights[i]
-        local t = now - f.t0
-        local endT = f.prep + f.dur + SHADOW_TAIL
-        if t > endT then
-            table.remove(_flights, i)
-            print("[PongDuRain] airdrop shadow done")
-        else
-            -- 진행률: prep 시점에 A(0), prep+dur 시점에 B(1) (서버 스폰 시각과 같은 식).
-            -- 범위 밖은 연장선으로 외삽 -- 시작 전/도착 후에도 같은 속도로 날아간다.
-            local frac = (t - f.prep) / f.dur
-            local a = SHADOW_ALPHA
-            if t < SHADOW_FADE then a = a * t / SHADOW_FADE end
-            if endT - t < SHADOW_FADE then a = a * (endT - t) / SHADOW_FADE end
+        local mx, my, k = flightState(f, now)
+        if mx then
+            local a = SHADOW_ALPHA * k
             local h  = SHADOW_SIZE / 2
-            local mx = f.ax + (f.bx - f.ax) * frac
-            local my = f.ay + (f.by - f.ay) * frac
             local fx_, fy_ = f.ux * h, f.uy * h      -- 기수 방향
             local rx, ry   = -f.uy * h, f.ux * h     -- 오른쪽 날개 방향
             local x1, y1 = toScreen(mx + fx_ - rx, my + fy_ - ry)   -- 기수-왼쪽
@@ -167,6 +171,92 @@ local function drawFlights(z)
     end
 end
 Events.OnPostFloorLayerDraw.Add(drawFlights)
+
+-- ── 투하 모드: 수송기 엔진음 ─────────────────────────────────────────────────
+-- 화력지원 헬기 로터음(firesupport.lua)과 같은 방식:
+--  * GameSound pongdu_airdrop_plane (loop = true, t3_rewards_sounds.txt)
+--  * 로컬 플레이어 emitter 로 로컬 재생 (네트워크 전송 없음 -- Flight 를 받은 클라가 각자 튼다)
+--  * 루프는 1개만 유지하고, 볼륨은 가장 가까운 수송기와의 거리로 매 틱 갱신
+--    -> 멀리서 다가와 머리 위를 지나 멀어지는 느낌
+--  * 정지는 재생한 그 emitter 로 핸들 + 이름 둘 다 (플레이어 교체 시 잔존 방지)
+local PLANE_ALIAS    = "pongdu_airdrop_plane"
+local PLANE_VOL_NEAR = 0.60     -- 머리 위 통과 시
+local PLANE_VOL_FAR  = 0.0      -- PLANE_HEAR_DIST 이상
+local PLANE_HEAR     = 90       -- 이 거리(타일)부터 들리기 시작 (경로 끝 D = 반경 + 50)
+local _planeSound, _planeEmitter = nil, nil
+local _planeSwept = false
+
+local function planeSoundStop(reason)
+    if _planeEmitter then
+        pcall(function() _planeEmitter:stopSound(_planeSound) end)
+        pcall(function() _planeEmitter:stopSoundByName(PLANE_ALIAS) end)
+    end
+    local pl = getSpecificPlayer(0)
+    if pl then pcall(function() pl:getEmitter():stopSoundByName(PLANE_ALIAS) end) end
+    if _planeSound then
+        print("[PongDuRain] airdrop plane sound stopped (" .. tostring(reason) .. ")")
+    end
+    _planeSound, _planeEmitter = nil, nil
+end
+
+local function planeSoundEnsure()
+    if _planeSound then return end
+    local pl = getSpecificPlayer(0)
+    if not pl then return end
+    local okE, em = pcall(function() return pl:getEmitter() end)
+    if not okE or not em then return end
+    local okH, h = pcall(function() return em:playSound(PLANE_ALIAS) end)
+    if not okH or not h or h == 0 then
+        print("[PongDuRain] airdrop plane sound start FAILED")
+        return
+    end
+    pcall(function() em:setVolume(h, PLANE_VOL_FAR) end)
+    _planeSound, _planeEmitter = h, em
+    print("[PongDuRain] airdrop plane sound started")
+end
+
+-- 매 틱: 끝난 비행 정리 + 엔진음 볼륨 갱신
+local function planeTick()
+    -- 로드 직후 1회: 핫리로드로 핸들을 잃은 루프 잔존분을 이름으로 정리
+    if not _planeSwept then
+        local pl = getSpecificPlayer(0)
+        if pl then
+            _planeSwept = true
+            pcall(function() pl:getEmitter():stopSoundByName(PLANE_ALIAS) end)
+        end
+    end
+    if #_flights == 0 then
+        if _planeSound then planeSoundStop("no flight") end
+        return
+    end
+    local now = getTimestampMs()
+    local pl = getSpecificPlayer(0)
+    local px, py = 0, 0
+    if pl then px, py = pl:getX(), pl:getY() end
+    local best = nil
+    for i = #_flights, 1, -1 do
+        local mx, my, k = flightState(_flights[i], now)
+        if not mx then
+            table.remove(_flights, i)
+            print("[PongDuRain] airdrop shadow done")
+        else
+            local dx, dy = mx - px, my - py
+            local v = 1 - math.sqrt(dx * dx + dy * dy) / PLANE_HEAR
+            if v < 0 then v = 0 end
+            v = (PLANE_VOL_FAR + (PLANE_VOL_NEAR - PLANE_VOL_FAR) * v) * k
+            if not best or v > best then best = v end
+        end
+    end
+    if not best then
+        if _planeSound then planeSoundStop("flights done") end
+        return
+    end
+    planeSoundEnsure()
+    if _planeSound and _planeEmitter then
+        pcall(function() _planeEmitter:setVolume(_planeSound, best) end)
+    end
+end
+Events.OnTick.Add(planeTick)
 
 -- ── 착지 처리 대기열 ──────────────────────────────────────────────────────────
 -- [onlineID] = { h=서버 스폰 직후 체력, k=특좀 종류(nil=일반), e=만료(ms),
