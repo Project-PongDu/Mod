@@ -793,6 +793,13 @@ option PongDu.Delay_zombie_rain = {
     page = PongDu_Debuff, translation = PongDu_Delay_zombie_rain,
 }
 
+option PongDu.Rain_Style = {
+    type = enum, numValues = 2, default = 1,
+    page = PongDu_Debuff,
+    translation = PongDu_Rain_Style,
+    valueTranslation = PongDu_Rain_Style,
+}
+
 option PongDu.Rain_Radius = {
     type = integer, min = 3, max = 50, default = 20,
     page = PongDu_Debuff, translation = PongDu_Rain_Radius,
@@ -801,6 +808,11 @@ option PongDu.Rain_Radius = {
 option PongDu.Rain_Duration = {
     type = integer, min = 5, max = 120, default = 30,
     page = PongDu_Debuff, translation = PongDu_Rain_Duration,
+}
+
+option PongDu.Rain_Parachute = {
+    type = boolean, default = false,
+    page = PongDu_Debuff, translation = PongDu_Rain_Parachute,
 }
 
 option PongDu.Rain_Count_Normal = {
@@ -841,13 +853,6 @@ option PongDu.Rain_ShowRadius = {
 option PongDu.Rain_SafeZoneBlock = {
     type = boolean, default = true,
     page = PongDu_Debuff, translation = PongDu_Rain_SafeZoneBlock,
-}
-
-option PongDu.Rain_Style = {
-    type = enum, numValues = 2, default = 1,
-    page = PongDu_Debuff,
-    translation = PongDu_Rain_Style,
-    valueTranslation = PongDu_Rain_Style,
 }
 
 

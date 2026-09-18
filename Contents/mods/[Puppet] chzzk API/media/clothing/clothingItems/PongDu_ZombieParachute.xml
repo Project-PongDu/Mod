@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<clothingItem>
+	<m_MaleModel>PongDu_OpenParachute</m_MaleModel>
+	<m_FemaleModel>PongDu_OpenParachute</m_FemaleModel>
+	<m_GUID>46d258d8-67d9-440f-b82b-75db11c0b252</m_GUID>
+	<m_Static>false</m_Static>
+	<m_AllowRandomHue>false</m_AllowRandomHue>
+	<m_AllowRandomTint>false</m_AllowRandomTint>
+	<m_AttachBone></m_AttachBone>
+	<textureChoices>PongDu_parachute</textureChoices>
+</clothingItem>

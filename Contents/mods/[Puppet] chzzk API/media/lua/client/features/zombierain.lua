@@ -72,6 +72,63 @@ local function rainCfg()
     return sv.Rain_Radius, sv.Rain_Duration, kinds
 end
 
+-- ── 낙하산 연출 (Rain_Parachute) ────────────────────────────────────────────
+-- 낙하 좀비 등에 펼친 낙하산을 씌우고(ItemVisual, 전 클라 각자 로컬), 소유 클라는
+-- 낙하 속도를 PARA_FALL_RATE 배로 늦춘다. 착지하면 낙하산을 벗긴다.
+--  * 모델/텍스처/clothing은 Parachuting Start 모드(Panopticon 외) 에셋을 자체
+--    네임스페이스로 복사해 쓴다 (t3_rewards_items.txt PongDuZombieParachute).
+--  * 서버 좀비에는 씌우지 않는다 -> 서버가 만드는 시체 인벤토리에 안 들어간다.
+--  * 낙하 중 사살: Kill()이 OnZombieDead 전에 itemVisuals를 인벤토리 아이템으로
+--    바꾸므로(IsoZombie.DoZombieInventory) OnZombieDead에서 비주얼+아이템을 지운다.
+--  * 감속: 엔진 updateFalling이 매 프레임 z를 lastFallSpeed(0.125*배속/1.6)만큼
+--    내린다. 소유 클라가 매 틱 그중 (1-PARA_FALL_RATE)만큼 되올린다. fallTime도
+--    매 틱 0으로 -> 착지 시 DoLand가 20 미만이라 넘어짐/낙하 데미지 없음.
+local PARA_ITEM      = "t3chzzkDonation.PongDuZombieParachute"
+local PARA_CLOTHING  = "PongDu_ZombieParachute"
+local PARA_FALL_RATE = 0.3      -- 일반 낙하 대비 속도 (0.3 = 약 3배 느리게)
+local _paraScriptOk  = nil      -- 아이템 스크립트 존재 여부 캐시
+
+local function paraEnabled()
+    return SandboxVars.PongDu.Rain_Parachute
+end
+
+local function chuteAttach(z)
+    if _paraScriptOk == nil then
+        _paraScriptOk = getScriptManager():FindItem(PARA_ITEM) ~= nil
+        if not _paraScriptOk then
+            print("[PongDuRain] WARN parachute item script missing: " .. PARA_ITEM)
+        end
+    end
+    if not _paraScriptOk then return false end
+    local ok, err = pcall(function()
+        local iv = ItemVisual.new()
+        iv:setItemType(PARA_ITEM)
+        iv:setClothingItemName(PARA_CLOTHING)
+        z:getItemVisuals():add(iv)
+        z:resetModelNextFrame()
+    end)
+    if not ok then
+        print("[PongDuRain] parachute attach FAILED zid=" .. tostring(z:getOnlineID()) .. " err=" .. tostring(err))
+    end
+    return ok
+end
+
+local function chuteDetach(z)
+    local removed = 0
+    pcall(function()
+        local ivs = z:getItemVisuals()
+        for i = ivs:size() - 1, 0, -1 do
+            local iv = ivs:get(i)
+            if iv and iv:getItemType() == PARA_ITEM then
+                ivs:remove(iv)
+                removed = removed + 1
+            end
+        end
+        if removed > 0 then z:resetModelNextFrame() end
+    end)
+    return removed
+end
+
 -- 반경 표시 (Rain_ShowRadius)
 local function showRadiusEnabled()
     return SandboxVars.PongDu.Rain_ShowRadius
@@ -339,6 +396,7 @@ Events.OnServerCommand.Add(function(module, command, args)
     local zeds = args and args["zeds"]
     if type(zeds) ~= "table" then return end
     local sender = tostring(args["sender"] or "")   -- 세션 공통 (이름표용)
+    local para   = args["para"] == true               -- 세션 공통 (낙하산 연출)
     local now = getTimestampMs()
     for _, e in pairs(zeds) do
         local id = e and tonumber(e["id"])
@@ -349,6 +407,8 @@ Events.OnServerCommand.Add(function(module, command, args)
                 h = tonumber(e["h"]) or 1.0,
                 k = kind,
                 e = now + PENDING_MS,
+                para = para,     -- 낙하산 대상
+                chute = false,   -- 이 클라에서 낙하산을 씌웠는지
             }
             -- 특좀: 도네 특좀(MutantMark)과 같은 대기열에 등록 -> OnZombieUpdate
             -- 적용기가 onlineID로 매칭해 능력/체력/이름표를 입힌다 (전 클라 각자).
@@ -375,6 +435,22 @@ local function onTick()
             local id = z and z:getOnlineID()
             local p  = id and _pending[id]
             if p then
+                -- 낙하산: 공중이면 씌우고(전 클라) 소유 클라만 감속, 착지하면 벗긴다.
+                -- 체력 원복 체인과 독립이라 먼저 처리한다 (원격 좀비도 벗겨야 함).
+                if p.para then
+                    local zz = z:getZ()
+                    if zz > 0.05 and now <= p.e and not z:isDead() then
+                        if not p.chute then p.chute = chuteAttach(z) end
+                        if not z:isRemoteZombie() then
+                            local fs = z:getLastFallSpeed()
+                            if fs > 0 then z:setZ(zz + fs * (1 - PARA_FALL_RATE)) end
+                            z:setFallTime(0)
+                        end
+                    elseif p.chute then
+                        chuteDetach(z)
+                        p.chute = false
+                    end
+                end
                 if now > p.e then
                     _pending[id]  = nil
                     _pendingCount = _pendingCount - 1
@@ -426,6 +502,19 @@ local function onTick()
 end
 Events.OnTick.Add(onTick)
 
+-- 낙하 중 사살: Kill()이 이미 itemVisuals를 인벤토리로 옮긴 뒤 발화한다.
+-- 비주얼과 인벤토리의 낙하산을 둘 다 지워 시체에 남지 않게 한다.
+Events.OnZombieDead.Add(function(zombie)
+    if _pendingCount == 0 or not zombie then return end
+    local p = _pending[zombie:getOnlineID()]
+    if not p or not p.chute then return end
+    local n = chuteDetach(zombie)
+    pcall(function() zombie:getInventory():RemoveAll("PongDuZombieParachute") end)
+    p.chute = false
+    print("[PongDuRain] parachute removed on death zid=" .. tostring(zombie:getOnlineID())
+        .. " visuals=" .. tostring(n))
+end)
+
 -- ── 활성 여부 조회 (rewardManager의 random_teleport 락용) ────────────────────
 -- [public name: .c]
 function _a.c()
@@ -440,8 +529,9 @@ function _a.b(player, sender)
         ["r"] = r, ["dur"] = dur, ["kinds"] = kinds,
         ["sender"] = sender or "",
         ["style"] = style,
+        ["para"]  = paraEnabled(),
     })
-    print("[PongDuRain] start request style=" .. tostring(style) .. " r=" .. tostring(r) .. " dur=" .. tostring(dur)
+    print("[PongDuRain] start request style=" .. tostring(style) .. " para=" .. tostring(paraEnabled()) .. " r=" .. tostring(r) .. " dur=" .. tostring(dur)
         .. " normal=" .. tostring(kinds["normal"]) .. " sprinter=" .. tostring(kinds["sprinter"])
         .. " screamer=" .. tostring(kinds["screamer"]) .. " brute=" .. tostring(kinds["brute"])
         .. " roach=" .. tostring(kinds["roach"]) .. " tracer=" .. tostring(kinds["tracer"]))

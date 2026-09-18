@@ -175,11 +175,14 @@ end
 local function flushBatch(session, force)
     if #session.batch == 0 then return end
     local now = getTimestampMs()
-    if not force and now - session.lastFlush < BATCH_MS then return end
+    -- 낙하산 모드는 매 틱 즉시 보낸다: 클라가 RainMark를 받아야 낙하산을 씌우고
+    -- 낙하를 늦추므로, 500ms 묶음이면 그동안 일반 속도로 떨어져 버린다.
+    if not force and not session.para and now - session.lastFlush < BATCH_MS then return end
     session.lastFlush = now
     sendServerCommand("PongDuRain", "RainMark", {
         ["zeds"]   = session.batch,
         ["sender"] = session.sender or "",   -- 스프린터 이름표용 (세션 공통)
+        ["para"]   = session.para,           -- 낙하산 연출 (Rain_Parachute, 세션 공통)
     })
     -- 어그로 스코프 공급: 이번 배치의 zid를 열려있는 어그로 창(pid 매칭)에
     -- 추가한다 (features/aggro.lua "AddIds" 수신부). 낙하 좀비는 배치 분산
@@ -259,6 +262,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local durS   = tonumber(data and data["dur"]) or RAIN_DUR_DEFAULT_S
     local sender = tostring(data and data["sender"] or "")
     local style  = math.floor(tonumber(data and data["style"]) or STYLE_RAIN)
+    local para   = data and data["para"] == true
     if not STYLE_NAMES[style] then
         print("[PongDuRain] WARN unknown style " .. tostring(style) .. ", fallback to rain")
         style = STYLE_RAIN
@@ -395,6 +399,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         kinds      = kindList,   -- cols[i] 에 떨어질 종류
         durMs      = durMs,
         sender     = sender,
+        para       = para,
         readyAt   = getTimestampMs() + PREP_DELAY_MS,
         startMs   = nil,
         spawned   = 0,
@@ -403,7 +408,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         batch     = {},
         lastFlush = 0,
     }
-    print("[PongDuRain] session start player=" .. tostring(player:getUsername())
+    print("[PongDuRain] session start para=" .. tostring(para) .. " player=" .. tostring(player:getUsername())
         .. " style=" .. STYLE_NAMES[style] .. " r=" .. tostring(r)
         .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
         .. " cols=" .. tostring(#cols) .. " intervalMs=" .. tostring(math.floor(durMs / #cols)))

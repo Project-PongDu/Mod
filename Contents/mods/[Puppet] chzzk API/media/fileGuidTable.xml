@@ -3420,4 +3420,8 @@
 		<path>media/clothing/clothingItems/Zed_Skin.xml</path>
 		<guid>ff6a89d6-0609-43e6-98e9-e271ed15fa19</guid>
 	</files>
+	<files>
+		<path>media/clothing/clothingItems/PongDu_ZombieParachute.xml</path>
+		<guid>46d258d8-67d9-440f-b82b-75db11c0b252</guid>
+	</files>
 </fileGuidTable>
