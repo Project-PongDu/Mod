@@ -74,32 +74,63 @@ end
 
 -- ── 낙하산 연출 (Rain_Parachute) ────────────────────────────────────────────
 -- 낙하 좀비 등에 펼친 낙하산을 씌우고(ItemVisual, 전 클라 각자 로컬), 소유 클라는
--- 낙하 속도를 PARA_FALL_RATE 배로 늦춘다. 착지하면 낙하산을 벗긴다.
+-- 낙하 속도를 PARA_DESCENT(층/초)로 늦춘다. 착지하면 낙하산을 벗긴다.
 --  * 모델/텍스처/clothing은 Parachuting Start 모드(Panopticon 외) 에셋을 자체
 --    네임스페이스로 복사해 쓴다 (t3_rewards_items.txt PongDuZombieParachute).
 --  * 서버 좀비에는 씌우지 않는다 -> 서버가 만드는 시체 인벤토리에 안 들어간다.
 --  * 낙하 중 사살: Kill()이 OnZombieDead 전에 itemVisuals를 인벤토리 아이템으로
 --    바꾸므로(IsoZombie.DoZombieInventory) OnZombieDead에서 비주얼+아이템을 지운다.
---  * 감속: 엔진 updateFalling이 매 프레임 z를 lastFallSpeed(0.125*배속/1.6)만큼
---    내린다. 소유 클라가 매 틱 그중 (1-PARA_FALL_RATE)만큼 되올린다. fallTime도
---    매 틱 0으로 -> 착지 시 DoLand가 20 미만이라 넘어짐/낙하 데미지 없음.
+--  * 감속: 소유 클라가 좀비별 목표 높이(p.pz)를 PARA_DESCENT(층/초)로 매 틱 내리고,
+--    실제 z를 그 값에 고정한다. 엔진 낙하와 무관하게 일정 속도로 내려오며 절대
+--    처음 높이보다 올라가지 않는다. fallTime도 매 틱 0 -> 착지 시 DoLand가 20
+--    미만이라 넘어짐/낙하 데미지 없음.
+--    (구버전은 매 틱 lastFallSpeed의 70%를 되올렸는데, 엔진이 그 틱에 실제로 안
+--     떨어뜨린 경우에도 lastFallSpeed가 남아 있어 좀비가 계속 위로 떠올랐다 ->
+--     대기열 만료(60초) 후 고공에서 추락사. 09-18 실측)
+--  * 부착 유지: 원격 좀비는 도착 직후 엔진이 옷(persistent outfit)을 입히며
+--    itemVisuals를 통째로 다시 채울 수 있어, 공중에 있는 동안 매 틱 낙하산이
+--    남아 있는지 확인하고 없으면 다시 씌운다.
 local PARA_ITEM      = "t3chzzkDonation.PongDuZombieParachute"
 local PARA_CLOTHING  = "PongDu_ZombieParachute"
-local PARA_FALL_RATE = 0.3      -- 일반 낙하 대비 속도 (0.3 = 약 3배 느리게)
+local PARA_DESCENT   = 1.2      -- 낙하산 하강 속도 (층/초). 4층에서 약 3.3초
+local PARA_LOG_MAX   = 5        -- 공습 1회당 부착/재부착 상세 로그 상한
 local _paraScriptOk  = nil      -- 아이템 스크립트 존재 여부 캐시
+local _paraLogLeft   = PARA_LOG_MAX
+local _paraStats     = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
 
 local function paraEnabled()
     return SandboxVars.PongDu.Rain_Parachute
 end
 
+-- 낙하산 ItemVisual 이 지금 붙어 있는가
+local function chuteHas(z)
+    local found = false
+    pcall(function()
+        local ivs = z:getItemVisuals()
+        for i = 0, ivs:size() - 1 do
+            local iv = ivs:get(i)
+            if iv and iv:getItemType() == PARA_ITEM then found = true; return end
+        end
+    end)
+    return found
+end
+
 local function chuteAttach(z)
     if _paraScriptOk == nil then
-        _paraScriptOk = getScriptManager():FindItem(PARA_ITEM) ~= nil
+        local item = getScriptManager():FindItem(PARA_ITEM)
+        _paraScriptOk = item ~= nil
         if not _paraScriptOk then
             print("[PongDuRain] WARN parachute item script missing: " .. PARA_ITEM)
+        else
+            -- 스크립트 -> clothing xml(GUID) -> 모델 연결이 살아있는지 1회 확인
+            local okC, ci = pcall(function() return item:getClothingItemAsset() end)
+            print("[PongDuRain] parachute asset check clothingItem=" .. tostring(okC and ci ~= nil))
         end
     end
-    if not _paraScriptOk then return false end
+    if not _paraScriptOk then
+        _paraStats.noAsset = _paraStats.noAsset + 1
+        return false
+    end
     local ok, err = pcall(function()
         local iv = ItemVisual.new()
         iv:setItemType(PARA_ITEM)
@@ -417,10 +448,21 @@ Events.OnServerCommand.Add(function(module, command, args)
     end
 end)
 
+-- 낙하산 공습 결과 요약 (대기열이 비는 시점에 1회)
+local function paraStatsFlush()
+    local s = _paraStats
+    if s.attach + s.reattach + s.detach + s.noAsset == 0 then return end
+    print("[PongDuRain] parachute summary attach=" .. s.attach .. " reattach=" .. s.reattach
+        .. " detach=" .. s.detach .. " noAsset=" .. s.noAsset)
+    _paraStats = { attach = 0, reattach = 0, detach = 0, noAsset = 0 }
+    _paraLogLeft = PARA_LOG_MAX
+end
+
 local function onTick()
+    local dtMs = deltaTime.ms()
     -- ① 타이머 감산 (패널 update()가 0에서 자가 제거). 프레임 수가 아닌 실제 경과시간.
     if _rainRemainMs > 0 then
-        _rainRemainMs = _rainRemainMs - deltaTime.ms()
+        _rainRemainMs = _rainRemainMs - dtMs
         if _rainRemainMs < 0 then _rainRemainMs = 0 end
     end
 
@@ -440,18 +482,47 @@ local function onTick()
                 if p.para then
                     local zz = z:getZ()
                     if zz > 0.05 and now <= p.e and not z:isDead() then
-                        if not p.chute then p.chute = chuteAttach(z) end
+                        -- 부착/재부착: 엔진이 옷을 다시 입히며 지웠으면 다시 씌운다
+                        if not chuteHas(z) then
+                            if chuteAttach(z) then
+                                if p.chute then
+                                    _paraStats.reattach = _paraStats.reattach + 1
+                                else
+                                    _paraStats.attach = _paraStats.attach + 1
+                                end
+                                if _paraLogLeft > 0 then
+                                    _paraLogLeft = _paraLogLeft - 1
+                                    print(string.format("[PongDuRain] parachute %s zid=%d z=%.2f remote=%s",
+                                        p.chute and "REATTACH" or "attach", id, zz,
+                                        tostring(z:isRemoteZombie())))
+                                end
+                                p.chute = true
+                            end
+                        end
+                        -- 감속 (소유 클라만): 목표 높이를 일정 속도로 내리고 z를 그 이하로 고정.
+                        -- 목표는 절대 올라가지 않으므로 좀비가 떠오를 수 없다.
                         if not z:isRemoteZombie() then
-                            local fs = z:getLastFallSpeed()
-                            if fs > 0 then z:setZ(zz + fs * (1 - PARA_FALL_RATE)) end
+                            if not p.pz or p.pz > zz + 1 then p.pz = zz end
+                            p.pz = p.pz - PARA_DESCENT * dtMs / 1000
+                            if p.pz < 0 then p.pz = 0 end
+                            if zz < p.pz then
+                                -- 엔진 낙하가 목표보다 빨랐다 -> 목표 높이로 되돌림 (감속)
+                                z:setZ(p.pz)
+                            end
                             z:setFallTime(0)
                         end
                     elseif p.chute then
                         chuteDetach(z)
                         p.chute = false
+                        _paraStats.detach = _paraStats.detach + 1
                     end
                 end
                 if now > p.e then
+                    if p.chute then
+                        chuteDetach(z)
+                        print("[PongDuRain] WARN parachute expired in air zid=" .. tostring(id)
+                            .. " z=" .. tostring(z:getZ()))
+                    end
                     _pending[id]  = nil
                     _pendingCount = _pendingCount - 1
                 elseif z:getZ() > 0.05 then
@@ -499,6 +570,7 @@ local function onTick()
             end
         end
     end
+    if _pendingCount == 0 then paraStatsFlush() end
 end
 Events.OnTick.Add(onTick)
 
