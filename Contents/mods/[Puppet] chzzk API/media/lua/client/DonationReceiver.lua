@@ -203,7 +203,6 @@ end
 -- 표시 이름 자체가 갈리는 효과가 있어서 사용 시점에 한 번 더 걸러준다.
 -- missile: PongDu.Bombard_Injure(플레이어 부상 여부)에 따라
 --   켜짐 -> "유도 폭격" (플레이어도 맞음), 꺼짐 -> "지원 폭격" (플레이어는 안 맞음).
--- zombie_rain: PongDu.Rain_AirdropMode 켜짐 -> "좀비 투하", 꺼짐 -> "좀비 레인".
 -- SandboxVars는 게임 로드 후에만 존재하므로 파일 로드 시점이 아니라 여기서 읽는다.
 local function resolveLabelKey(featureId)
     if featureId == "missile" then
@@ -211,10 +210,6 @@ local function resolveLabelKey(featureId)
             return "IGUI_donation_bombard_guided"
         end
         return "IGUI_donation_bombard_support"
-    end
-    -- zombie_rain: PongDu.Rain_AirdropMode 켜짐 -> "좀비 투하" (수송기 투하 연출)
-    if featureId == "zombie_rain" and SandboxVars.PongDu.Rain_AirdropMode then
-        return "IGUI_donation_zombie_airdrop"
     end
     return labelKey[featureId]
 end

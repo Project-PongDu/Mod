@@ -152,8 +152,7 @@ IGUI_KO = {
 
 
 
-    IGUI_donation_zombie_rain = "좀비 레인",
-    IGUI_donation_zombie_airdrop = "좀비 투하",
+    IGUI_donation_zombie_rain = "좀비 공습",
 
 
 

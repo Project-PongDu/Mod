@@ -40,14 +40,28 @@ local BATCH_MS           = 500                              -- RainMark 브로�
 local PICK_TRIES         = 20                               -- 컬럼 후보 탐색 시도 횟수
 local PREP_DELAY_MS      = 1000                             -- 클라 스퀘어 생성 대기 (클라 zombierain.lua SERVER_PREP_MS 와 동일값 유지)
 
--- ── 투하 모드 (Rain_AirdropMode) ──
--- 수송기가 플레이어 근처를 직선으로 한 번 지나가며 경로 양옆 띠 안에 떨어뜨린다.
--- 경로 구간 [-r, +r]를 지속시간 동안 등속으로 통과하고, 각 컬럼은 비행기가 그
--- 지점을 지나는 시각에 스폰된다. 그림자 연출은 클라(zombierain.lua)가 같은 비행
--- 정보(Flight)로 그린다.
-local AIR_BAND_RATIO     = 0.35                             -- 띠 반폭 = 반경 x 비율
-local AIR_BAND_MIN       = 4                                -- 띠 반폭 최소 (타일)
-local AIR_PASS_OFFSET    = 0.5                              -- 경로가 플레이어에서 비켜나는 최대 거리 (띠 반폭 대비)
+-- ── 연출 방식 (Rain_Style, 샌드박스 드롭다운) ──
+-- 기능 표시명은 "좀비 공습"(featureId는 zombie_rain 유지), 방식은 샌드박스 드롭다운.
+-- 1 = 좀비 레인: 플레이어 중심 반경(Rain_Radius) 원 안에 균등 간격으로 낙하
+-- 2 = 수송기 투하: 아래 투하 모드
+-- 새 방식을 추가하면 번호를 이어 붙이고, 클라 zombierain.lua STYLE_* 와
+-- sandbox-options.txt numValues, Sandbox_KO option<N> 도 같이 늘린다.
+-- 모르는 번호는 1로 처리한다.
+local STYLE_RAIN    = 1
+local STYLE_AIRDROP = 2
+local STYLE_NAMES   = { [STYLE_RAIN] = "rain", [STYLE_AIRDROP] = "airdrop" }
+
+-- ── 투하 모드 (Rain_Style = 2) ──
+-- 경로는 화력지원 헬기(server.lua Heli 핸들러)와 같은 방식:
+--   A = 플레이어 중심 반경 D 원 위 무작위 각도, B = 반대편(±30도 지터).
+--   D = 투하 반경 + AIR_PATH_EXTRA -> 시작/소멸이 화면 밖. 지터 때문에 머리 위가
+--   아니라 근처(최대 약 0.26D)를 스치듯 지나가기도 한다.
+-- 수송기는 PREP_DELAY_MS 시점에 A, 지속시간 뒤 B에 도달하는 등속 비행이다.
+-- 각 좀비는 스폰 시각 t의 수송기 위치 P(t)를 중심으로 투하 반경(r) 원 안에 떨어진다
+-- (그림자가 움직이면 투하 범위도 같이 움직인다). 스퀘어 선행 생성(Prep) 때문에
+-- 시각과 위치는 Start 시점에 전부 미리 정한다. 그림자는 클라가 Flight로 그린다.
+local AIR_PATH_EXTRA     = 50                               -- 헬기와 동일 (D = r + 50)
+local AIR_JITTER         = 0.52                             -- B 각도 지터 (rad, 약 ±30도)
 
 local _sessions = {}
 
@@ -83,21 +97,21 @@ local function pickRainColumn(cell, px, py, radius)
     return nil
 end
 
--- 투하 모드 컬럼: 경로 위치 s가 [sLo, sHi) 구간, 경로에서 옆으로 ±halfW 안.
--- 시도 절반을 넘기면 띠를 2배로 넓혀 다시 찾는다 (도심/물가 대비).
--- 반환 s는 스폰 시각 계산용 (비행기가 s를 지나는 순간 떨어진다).
-local function pickAirdropColumn(cell, px, py, f, sLo, sHi, halfW)
+-- 투하 모드 컬럼: 수송기 위치 (cx, cy) 중심 반경 radius 원 안 (원판 균등).
+-- 시도 절반을 넘기면 반경을 2배로 넓혀 다시 찾는다 (도심/물가 대비).
+-- 플레이어 직격 방지(RAIN_MIN_DIST)는 기존과 동일.
+local function pickAirdropColumn(cell, px, py, cx, cy, radius)
     for try = 1, PICK_TRIES do
-        local w = halfW
-        if try > PICK_TRIES / 2 then w = halfW * 2 end
-        local s   = sLo + (ZombRand(10000) / 10000.0) * (sHi - sLo)
-        local off = (ZombRand(20001) / 10000.0 - 1.0) * w
-        local x = math.floor(f.cx + f.ux * s - f.uy * off)
-        local y = math.floor(f.cy + f.uy * s + f.ux * off)
+        local rr = radius
+        if try > PICK_TRIES / 2 then rr = radius * 2 end
+        local angle = ZombRand(628) / 100.0
+        local dist  = math.sqrt(ZombRand(10000) / 10000.0) * rr
+        local x = math.floor(cx + math.cos(angle) * dist)
+        local y = math.floor(cy + math.sin(angle) * dist)
         local dx, dy = x + 0.5 - px, y + 0.5 - py
         if dx * dx + dy * dy >= RAIN_MIN_DIST * RAIN_MIN_DIST
             and isRainColumn(cell, x, y) then
-            return x, y, s
+            return x, y
         end
     end
     return nil
@@ -231,8 +245,12 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local r      = tonumber(data and data["r"]) or 55
     local durS   = tonumber(data and data["dur"]) or RAIN_DUR_DEFAULT_S
     local sender = tostring(data and data["sender"] or "")
-    local air    = data and data["air"] == true
-    if r < 10 then r = 10 elseif r > 100 then r = 100 end
+    local style  = math.floor(tonumber(data and data["style"]) or STYLE_RAIN)
+    if not STYLE_NAMES[style] then
+        print("[PongDuRain] WARN unknown style " .. tostring(style) .. ", fallback to rain")
+        style = STYLE_RAIN
+    end
+    if r < 3 then r = 3 elseif r > 100 then r = 100 end
     if durS < RAIN_DUR_MIN_S then durS = RAIN_DUR_MIN_S
     elseif durS > RAIN_DUR_MAX_S then durS = RAIN_DUR_MAX_S end
     local durMs = durS * 1000
@@ -261,25 +279,25 @@ Events.OnClientCommand.Add(function(module, command, player, data)
     local cols, payload = {}, {}
     local missedPick = 0
     local flight = nil
-    if air then
-        -- 비행 경로: 방향 무작위 직선, 플레이어 옆으로 살짝 비켜 지나간다.
-        local halfW = math.max(AIR_BAND_MIN, r * AIR_BAND_RATIO)
-        local ang   = ZombRand(628) / 100.0
-        local ux, uy = math.cos(ang), math.sin(ang)
-        local pass  = (ZombRand(20001) / 10000.0 - 1.0) * halfW * AIR_PASS_OFFSET
+    if style == STYLE_AIRDROP then
+        -- 비행 경로 A -> B (화력지원 헬기와 같은 산출식)
+        local D    = r + AIR_PATH_EXTRA
+        local ang  = ZombRand(628) / 100.0
+        local jit  = (ZombRand(105) - 52) / 100.0
+        local ang2 = ang + 3.1416 + jit
         flight = {
-            cx = px - uy * pass, cy = py + ux * pass,
-            ux = ux, uy = uy, halfW = halfW,
+            ax = px + math.cos(ang)  * D, ay = py + math.sin(ang)  * D,
+            bx = px + math.cos(ang2) * D, by = py + math.sin(ang2) * D,
         }
-        -- 층화 추출: 경로 [-r, r]를 cnt 칸으로 나눠 칸마다 1마리. s가 이미 오름차순이라
-        -- 정렬 없이 스폰 시각이 단조 증가한다 (투하가 경로를 따라 순서대로 진행).
-        local span = 2 * r
+        -- 층화 추출: 지속시간을 cnt 칸으로 나눠 칸마다 1마리. 칸 순서대로 t가
+        -- 오름차순이라 정렬 없이 스폰 시각이 단조 증가한다.
         for i = 1, cnt do
-            local sLo = -r + span * (i - 1) / cnt
-            local sHi = -r + span * i / cnt
-            local x, y, sv = pickAirdropColumn(cell, px, py, flight, sLo, sHi, halfW)
+            local frac = ((i - 1) + ZombRand(10000) / 10000.0) / cnt
+            local cx = flight.ax + (flight.bx - flight.ax) * frac
+            local cy = flight.ay + (flight.by - flight.ay) * frac
+            local x, y = pickAirdropColumn(cell, px, py, cx, cy, r)
             if x then
-                cols[#cols + 1]       = { x = x, y = y, t = (sv + r) / span * durMs }
+                cols[#cols + 1]       = { x = x, y = y, t = frac * durMs }
                 payload[#payload + 1] = { ["x"] = x, ["y"] = y }
             else
                 missedPick = missedPick + 1
@@ -325,16 +343,19 @@ Events.OnClientCommand.Add(function(module, command, player, data)
 
     sendServerCommand("PongDuRain", "Prep", { ["cols"] = payload, ["z"] = RAIN_DROP_Z })
 
-    -- 투하 모드: 그림자 연출용 비행 정보. 비행기는 PREP_DELAY_MS 뒤에 경로 -r 지점을
-    -- 지나 durMs 동안 +r까지 등속 비행한다 (서버 첫 스폰 시각과 같은 기준).
+    -- 투하 모드: 그림자 연출용 비행 정보. 수송기는 PREP_DELAY_MS 시점에 A, 그로부터
+    -- durMs 뒤 B에 도달한다 (서버 스폰 시각 t와 같은 기준).
     if flight then
         sendServerCommand("PongDuRain", "Flight", {
-            ["cx"] = flight.cx, ["cy"] = flight.cy,
-            ["ux"] = flight.ux, ["uy"] = flight.uy,
-            ["r"] = r, ["prep"] = PREP_DELAY_MS, ["dur"] = durMs,
+            ["ax"] = flight.ax, ["ay"] = flight.ay,
+            ["bx"] = flight.bx, ["by"] = flight.by,
+            ["prep"] = PREP_DELAY_MS, ["dur"] = durMs,
         })
-        print(string.format("[PongDuRain] airdrop flight c=(%.1f,%.1f) dir=(%.2f,%.2f) halfW=%.1f speed=%.2f tiles/s",
-            flight.cx, flight.cy, flight.ux, flight.uy, flight.halfW, 2 * r / durS))
+        local ldx, ldy = flight.bx - flight.ax, flight.by - flight.ay
+        local len = math.sqrt(ldx * ldx + ldy * ldy)
+        print(string.format("[PongDuRain] airdrop flight A=(%d,%d) B=(%d,%d) len=%.0f speed=%.2f tiles/s dropR=%d",
+            math.floor(flight.ax), math.floor(flight.ay), math.floor(flight.bx), math.floor(flight.by),
+            len, len / durS, r))
     end
 
     -- 낙하 좀비 플레이어 어그로 창 (클라 features/aggro.lua 수신).
@@ -369,7 +390,7 @@ Events.OnClientCommand.Add(function(module, command, player, data)
         lastFlush = 0,
     }
     print("[PongDuRain] session start player=" .. tostring(player:getUsername())
-        .. " mode=" .. (air and "airdrop" or "rain") .. " r=" .. tostring(r)
+        .. " style=" .. STYLE_NAMES[style] .. " r=" .. tostring(r)
         .. " dur=" .. tostring(durS) .. "s cnt=" .. tostring(cnt)
         .. " cols=" .. tostring(#cols) .. " intervalMs=" .. tostring(math.floor(durMs / #cols)))
 end)
