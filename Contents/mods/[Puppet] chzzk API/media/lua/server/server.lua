@@ -27,7 +27,7 @@ end
 -- ── 특수좀비 영속 레지스트리 (부활 유지의 핵심) ──────────────────────────────
 -- persistentOutfitID는 좀비 외형을 사망->시체(reanimated.bin)->부활 내내
 -- 유지시키는 영속 ID다. 단, 원시값은 모자 상태가 16번 비트로 박혀 있어
--- 모자가 벗겨지면 값이 변한다 -> 밴딧과 동일하게 HitmanUtils.GetZombieID로
+-- 모자가 벗겨지면 값이 변한다 -> 히트맨과 동일하게 HitmanUtils.GetZombieID로
 -- 모자 비트를 마스킹한 정규화 ID를 키로 쓴다 (등록/조회 양쪽 동일 함수).
 -- 글로벌 ModData는 서버 세이브에 저장되므로 서버 재시작 후 부활에도 유효.
 local function mutantKey(zed)

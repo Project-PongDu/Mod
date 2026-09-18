@@ -137,7 +137,7 @@ function HitmanMenu.WorldContextMenuPre(playerID, context, worldobjects, test)
     -- ── [PongDu] "Spawn Hitman Clan" 컨텍스트 메뉴 제거 ──────────────────────
     -- 원본은 isDebugEnabled() or isAdmin() 조건으로 클랜 목록을 붙이고
     -- Hitman_Spawner/Type 으로 즉시 소환했다. 방송 중 어드민이 우클릭 한 번
-    -- 잘못하면 밴딧이 그대로 쏟아지므로 뺐다.
+    -- 잘못하면 히트맨이 그대로 쏟아지므로 뺐다.
     -- 히트맨 소환은 퐁듀 도네 경로(featureId bandit_melee / bandit_ranged ->
     -- features/hitman.lua -> Hitman_Spawner/Clan)로만 나가고, 수동 테스트는
     -- DonationTestMenu 의 dev 서브메뉴를 쓴다.
