@@ -443,14 +443,17 @@ end
 --  으로 지정한 모션을 재생한다.
 -- ═══════════════════════════════════════════════════════════════════════════
 local HIT_SCALE          = 1.5 * 0.3 * 0.5 * 0.7   -- 0.1575
-local DRONE_NORMAL_RATIO = 0.25                     -- 드론 일반 = 헬기 일반의 1/4
 
--- kind: "heli" | "drone". 발동 시점에 읽는다(샌드박스 캐싱 금지).
+-- kind: "heli" | "drone". 헬기/드론 데미지는 샌드박스에서 따로 설정한다
+-- (Heli_/Drone_ CritDamage, NormalDamage). 발동 시점에 읽는다(샌드박스 캐싱 금지).
 local function fsShotHp(kind, crit)
     local sv = SandboxVars.PongDu
-    if crit then return sv.FireSupport_CritDamage end
-    if kind == "drone" then return sv.FireSupport_NormalDamage * DRONE_NORMAL_RATIO end
-    return sv.FireSupport_NormalDamage
+    if kind == "drone" then
+        if crit then return sv.Drone_CritDamage end
+        return sv.Drone_NormalDamage
+    end
+    if crit then return sv.Heli_CritDamage end
+    return sv.Heli_NormalDamage
 end
 
 -- ── 검증 로그 ──────────────────────────────────────────────────────────────

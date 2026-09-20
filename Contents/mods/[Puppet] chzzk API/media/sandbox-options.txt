@@ -451,16 +451,6 @@ option PongDu.Sniper_KnockdownChance = {
     page = PongDu_Buff, translation = PongDu_Sniper_KnockdownChance,
 }
 
-option PongDu.FireSupport_CritDamage = {
-    type = double, min = 0.10, max = 100, default = 6.00,
-    page = PongDu_Buff, translation = PongDu_FireSupport_CritDamage,
-}
-
-option PongDu.FireSupport_NormalDamage = {
-    type = double, min = 0.01, max = 10, default = 0.43,
-    page = PongDu_Buff, translation = PongDu_FireSupport_NormalDamage,
-}
-
 option PongDu.Heli_Duration = {
     type = integer, min = 10, max = 120, default = 30,
     page = PongDu_Buff, translation = PongDu_Heli_Duration,
@@ -481,6 +471,16 @@ option PongDu.Heli_CritChance = {
     page = PongDu_Buff, translation = PongDu_Heli_CritChance,
 }
 
+option PongDu.Heli_CritDamage = {
+    type = double, min = 0.10, max = 100, default = 6.00,
+    page = PongDu_Buff, translation = PongDu_Heli_CritDamage,
+}
+
+option PongDu.Heli_NormalDamage = {
+    type = double, min = 0.00, max = 10, default = 0.43,
+    page = PongDu_Buff, translation = PongDu_Heli_NormalDamage,
+}
+
 option PongDu.Drone_Duration = {
     type = integer, min = 10, max = 120, default = 60,
     page = PongDu_Buff, translation = PongDu_Drone_Duration,
@@ -499,6 +499,16 @@ option PongDu.Drone_Interval = {
 option PongDu.Drone_CritChance = {
     type = integer, min = 0, max = 100, default = 2,
     page = PongDu_Buff, translation = PongDu_Drone_CritChance,
+}
+
+option PongDu.Drone_CritDamage = {
+    type = double, min = 0.10, max = 100, default = 6.00,
+    page = PongDu_Buff, translation = PongDu_Drone_CritDamage,
+}
+
+option PongDu.Drone_NormalDamage = {
+    type = double, min = 0.00, max = 10, default = 0.02,
+    page = PongDu_Buff, translation = PongDu_Drone_NormalDamage,
 }
 
 option PongDu.Drone_KnockdownChance = {
