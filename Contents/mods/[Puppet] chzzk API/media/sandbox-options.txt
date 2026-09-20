@@ -492,7 +492,7 @@ option PongDu.Drone_DetectRadius = {
 }
 
 option PongDu.Drone_Interval = {
-    type = integer, min = 10, max = 2000, default = 25,
+    type = integer, min = 10, max = 2000, default = 50,
     page = PongDu_Buff, translation = PongDu_Drone_Interval,
 }
 
@@ -507,12 +507,12 @@ option PongDu.Drone_CritDamage = {
 }
 
 option PongDu.Drone_NormalDamage = {
-    type = double, min = 0.00, max = 10, default = 0.02,
+    type = double, min = 0.00, max = 10, default = 0.10,
     page = PongDu_Buff, translation = PongDu_Drone_NormalDamage,
 }
 
 option PongDu.Drone_KnockdownChance = {
-    type = integer, min = 0, max = 100, default = 80,
+    type = integer, min = 0, max = 100, default = 30,
     page = PongDu_Buff, translation = PongDu_Drone_KnockdownChance,
 }
 

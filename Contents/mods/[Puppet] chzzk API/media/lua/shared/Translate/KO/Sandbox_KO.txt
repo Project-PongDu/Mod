@@ -430,7 +430,7 @@ Sandbox_KO = {
 	Sandbox_PongDu_Drone_CritDamage = "드론: 크리티컬 데미지 (체력)",
 	Sandbox_PongDu_Drone_CritDamage_tooltip = "크리티컬 한 발에 깎이는 좀비 체력. 6 = 사실상 즉사.",
 	Sandbox_PongDu_Drone_NormalDamage = "드론: 일반 데미지 (체력)",
-	Sandbox_PongDu_Drone_NormalDamage_tooltip = "일반 한 발에 깎이는 좀비 체력. 드론은 발수가 많아 조금만 올려도 킬 수가 크게 늘어남. 기본 0.02 = 사살은 크리티컬 위주, 일반탄은 제압용.",
+	Sandbox_PongDu_Drone_NormalDamage_tooltip = "일반 한 발에 깎이는 좀비 체력. 드론은 발수가 많아 조금만 올려도 킬 수가 크게 늘어남. 기본 0.1 = 보통 좀비 약 20발.",
 	Sandbox_PongDu_Drone_KnockdownChance = "드론: 넉다운 확률 (%)",
 	Sandbox_PongDu_Drone_KnockdownChance_tooltip = "일반 데미지를 맞고 살아남은 좀비를 넘어뜨릴 확률. 아니면 움찔만.",
 
