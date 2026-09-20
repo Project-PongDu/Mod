@@ -87,27 +87,25 @@ local function sniperCfg()
            sv.Sniper_KnockdownChance
 end
 
--- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_KillChance(%).
+-- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_CritChance(%).
 local function heliCfg()
     local sv = SandboxVars.PongDu
     return sv.Heli_Duration,
            sv.Heli_Radius,
            sv.Heli_Interval,
-           sv.Heli_KillChance
+           sv.Heli_CritChance
 end
 
--- 드론 파라미터: Drone_Duration(s) / Drone_OrbitRadius / Drone_DetectRadius /
--- Drone_Interval(ms) / Drone_KillChance(%) / Drone_KnockdownChance(%) /
--- Drone_OrbitPeriod(s).
+-- 드론 파라미터: Drone_Duration(s) / Drone_DetectRadius / Drone_Interval(ms) /
+-- Drone_CritChance(%) / Drone_KnockdownChance(%).
+-- 공전 반경/주기는 서버 상수(DRONE_ORBIT_R / DRONE_PERIOD_S)로 고정됐다.
 local function droneCfg()
     local sv = SandboxVars.PongDu
     return sv.Drone_Duration,
-           sv.Drone_OrbitRadius,
            sv.Drone_DetectRadius,
            sv.Drone_Interval,
-           sv.Drone_KillChance,
-           sv.Drone_KnockdownChance,
-           sv.Drone_OrbitPeriod
+           sv.Drone_CritChance,
+           sv.Drone_KnockdownChance
 end
 
 -- ── 종류별 실행부 (전부 미구현) ────────────────────────────────────────────
@@ -139,13 +137,13 @@ end
 -- 시계방향 공전하며 사격한다. 공전 위치/타겟팅/킬 굴림은 전부 서버 job이
 -- 맡는다(저격·헬기와 동일한 이유 -- 킬 판정의 단일 권위가 필요).
 runners.drone = function(player, sender)
-    local dur, orbitR, detR, iv, kc, kd, period = droneCfg()
+    local dur, detR, iv, kc, kd = droneCfg()
     print(string.format(
-        "[PongDu] fire_support/drone request dur=%ds orbitR=%d detR=%d iv=%d kc=%d%% kd=%d%% period=%ds",
-        dur, orbitR, detR, iv, kc, kd, period))
+        "[PongDu] fire_support/drone request dur=%ds detR=%d iv=%d crit=%d%% kd=%d%%",
+        dur, detR, iv, kc, kd))
     sendClientCommand("PongDuFireSupport", "Drone", {
-        dur = dur, orad = orbitR, dr = detR, iv = iv,
-        kc = kc, kd = kd, pd = period, sender = sender or "",
+        dur = dur, dr = detR, iv = iv,
+        kc = kc, kd = kd, sender = sender or "",
     })
 end
 
@@ -155,7 +153,7 @@ end
 -- (이유는 저격과 동일 -- 킬 총량/타이밍의 단일 권위가 필요).
 runners.helicopter = function(player, sender)
     local dur, radius, interval, kc = heliCfg()
-    print(string.format("[PongDu] fire_support/heli request dur=%ds r=%d iv=%d kc=%d%%",
+    print(string.format("[PongDu] fire_support/heli request dur=%ds r=%d iv=%d crit=%d%%",
         dur, radius, interval, kc))
     sendClientCommand("PongDuFireSupport", "Heli", {
         dur = dur, r = radius, iv = interval, kc = kc, sender = sender or "",
@@ -386,7 +384,8 @@ local GRAZE_REACTIONS = {
 }
 
 -- kdForced: nil 이면 kdChance 로 로컬 굴림(저격 경로 -- 기존 동작 유지),
--- true/false 면 서버가 이미 굴린 결과를 그대로 적용한다(드론 경로). 서버가
+-- true/false 면 서버가 이미 굴린 결과를 그대로 적용한다(구 드론 경로 --
+-- 지금 드론은 fsApplyShot 의 kd 인자를 쓴다). 서버가
 -- 굴려야 하는 이유는 server.lua 의 processDroneJobs 주석 참고 -- 클라마다
 -- 굴리면 넘어진 놈이 클라별로 갈리고, 서버가 억제창을 걸 수 없다.
 local function grazeZombie(z, id, kdChance, kdForced)
@@ -415,6 +414,90 @@ local function grazeZombie(z, id, kdChance, kdForced)
     if not ok then
         print("[PongDu] fire_support/sniper GRAZE FAILED zid="
             .. tostring(id) .. " err=" .. tostring(err))
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  헬기/드론 사격 데미지 (크리티컬 / 일반)
+--
+--  샌드박스 값은 "깎이는 체력" 단위다. Hit()에 넣는 값은 그대로 체력에서
+--  빠지지 않고 엔진이 배율을 곱하므로 역산해서 넘긴다
+--  (IsoGameCharacter.processHitDamage / Hit / hitConsequences, B41.78.20):
+--    x1.5  맞는 쪽이 IsoPlayer 가 아님
+--    x0.3  쏘는 쪽(fakeZombie) 무기 레벨 0 -- 손에 든 무기가 없음
+--    x0.5  TwoHandWeapon 을 양손에 안 듦 (HuntingRifle = TwoHandWeapon)
+--    x0.7  IsAimedFirearm
+--  → 실제 체력 감소 = 입력값 x 0.1575. 쏘는 쪽/무기를 바꾸면 이 값도 바뀐다.
+--
+--  Hit() 부작용 처리:
+--    hitTime  -- 같은 좀비가 4번째 피격부터 입력값에 (hitTime-2)*1.5 가 곱해진다
+--                (IsoGameCharacter.Hit). 좀비 평생 누적이라 그대로 두면 일반
+--                데미지가 4발째부터 폭증한다. Hit 직전 0으로 두고 끝나면 원복해서
+--                화력지원 탄은 카운트에 안 남긴다.
+--    setTarget -- 생존 시 hitConsequences 가 target 을 fakeZombie(0,0)로 바꾼다.
+--                원래 타겟으로 되돌려 플레이어 추적이 끊기지 않게 한다.
+--    크롤러화  -- 생존 피격마다 1/30 확률로 기어다니는 좀비가 된다
+--                (IsoZombie.shouldBecomeCrawler). 드론은 수십 발을 맞히므로
+--                원래 크롤러 예정이 아니었으면 플래그를 되돌린다.
+--  피격 리액션은 hitConsequences 의 reportEvent("wasHit")가 setHitReaction
+--  으로 지정한 모션을 재생한다.
+-- ═══════════════════════════════════════════════════════════════════════════
+local HIT_SCALE          = 1.5 * 0.3 * 0.5 * 0.7   -- 0.1575
+local DRONE_NORMAL_RATIO = 0.25                     -- 드론 일반 = 헬기 일반의 1/4
+
+-- kind: "heli" | "drone". 발동 시점에 읽는다(샌드박스 캐싱 금지).
+local function fsShotHp(kind, crit)
+    local sv = SandboxVars.PongDu
+    if crit then return sv.FireSupport_CritDamage end
+    if kind == "drone" then return sv.FireSupport_NormalDamage * DRONE_NORMAL_RATIO end
+    return sv.FireSupport_NormalDamage
+end
+
+-- 한 발 적용. 사운드/혈흔은 전 클라 로컬 연출, 데미지는 소유 클라만.
+-- kd: true 면 생존 시 넘어뜨린다(드론 일반탄, 서버가 굴린 결과).
+local function fsApplyShot(z, id, hp, kd, tag)
+    if not z or z:isDead() then return end
+    pcall(function() z:playSound("BulletHitBody") end)
+    pcall(function() z:splatBlood(2, 0.3) end)
+    -- 원격 좀비에 Hit 하면 소유 클라 sync 에 덮인다 -- 연출만 하고 끝.
+    if z:isRemoteZombie() then return end
+
+    local ok, err = pcall(function()
+        local gun = sniperWeapon()
+        if not gun then
+            -- 폴백: 총기 생성 실패. 체력만 직접 깎는다(모션 없음).
+            local left = z:getHealth() - hp
+            if left <= 0 then
+                killZombieNow(z)
+            else
+                z:setHealth(left)
+            end
+            return
+        end
+        local fake        = getCell():getFakeZombieForHit()
+        local prevTarget  = z:getTarget()
+        local prevHitTime = z:getHitTime()
+        local prevCrawler = z:isBecomeCrawler()
+
+        z:setHitTime(0)
+        z:setBumpDone(true)
+        z:setHitReaction(GRAZE_REACTIONS[ZombRand(#GRAZE_REACTIONS) + 1])
+        z:Hit(gun, fake, hp / HIT_SCALE, false, 1, false)
+        z:setHitTime(prevHitTime)
+
+        if z:isDead() then
+            z:setAttackedBy(fake)
+            print("[PongDu] fire_support/" .. tag .. " KILL zid=" .. tostring(id)
+                .. " hp=" .. tostring(hp))
+        else
+            z:setTarget(prevTarget)
+            if not prevCrawler then z:setBecomeCrawler(false) end
+            if kd then z:knockDown(false) end
+        end
+    end)
+    if not ok then
+        print("[PongDu] fire_support/" .. tag .. " HIT FAILED zid="
+            .. tostring(id) .. " hp=" .. tostring(hp) .. " err=" .. tostring(err))
     end
 end
 
@@ -1434,7 +1517,7 @@ local function droneExtend(args)
 end
 
 -- ── 사격 1발 처리 ──────────────────────────────────────────────────────────
--- 드론: 저격 SniperFire와 같은 구조지만 관통이 없고, 킬/그레이즈 판정은
+-- 드론: 저격 SniperFire와 같은 구조지만 관통이 없고, 크리티컬/넉다운 판정은
 -- 서버가 이미 굴려서 내려보낸 결과를 그대로 적용한다.
 local function handleDroneFire(args)
     local ox = tonumber(args.ox) or 0
@@ -1466,37 +1549,20 @@ local function handleDroneFire(args)
 
     if not z or z:isDead() then return end
 
-    if args.kill then
-        if z:isRemoteZombie() then
-            -- 소유 클라가 아님 -> 연출만. 킬은 소유 클라가 수행한다.
-            pcall(function() z:playSound("BulletHitBody") end)
-        else
-            local ok, err = pcall(function() killZombieNow(z) end)
-            if ok then
-                pcall(function() z:playSound("BulletHitBody") end)
-            else
-                print("[PongDu] fire_support/drone KILL FAILED zid="
-                    .. tostring(id) .. " err=" .. tostring(err))
-            end
-        end
-    else
-        -- 사살 실패: 히트리액션만 반드시 재생(스펙). grazeZombie가 사운드/혈흔/
-        -- 소유 클라 판정까지 전부 처리한다. 넉다운 여부는 서버가 굴려서
-        -- kdHit(1/0)로 내려준다 -- 클라 굴림이 아니라 결과 적용만 한다.
-        grazeZombie(z, id, nil, tonumber(args.kdHit) == 1)
-    end
+    -- 크리티컬/일반 모두 명중. 넉다운은 일반탄에만 서버가 kdHit(1/0)로 굴려준다.
+    local crit = tonumber(args.crit) == 1
+    local kd   = (not crit) and tonumber(args.kdHit) == 1
+    fsApplyShot(z, id, fsShotHp("drone", crit), kd, "drone")
 end
 
--- 헬기: "적당히 탄이 튀는" 난사 연출.
---   kill=true  -> 좀비 정조준(실명중). 소유 클라가 킬 수행.
---   kill 없음  -> 좀비 근처 ±2타일 산탄 오프셋으로 빗나가는 탄만 그린다.
+-- 헬기: 락온 좀비에 매 발 명중. crit=1 이면 크리티컬, 0 이면 일반 데미지.
+-- (구버전의 "사살 아니면 ±2타일 빗나감" 연출은 데미지 방식 전환으로 제거)
 -- 헬기 원점 고도(px). 예광탄은 실제 3D 렌더와 무관한 수제 스크린좌표 연출이라
 -- HELI_FLY_ALT(물리 y)와 원래 안 이어져 있었다. 정확한 물리y->스크린px 변환식은
 -- 엔진 렌더러 내부값이라 알 수 없어서, 처음 튜닝됐던 3.0px<->260px
 -- 비율(≈86.7px/unit)을 그대로 적용해 최소한 "같이 움직이게"는 만든다.
 local HELI_ALT_PX_PER_UNIT = 86.7
 local HELI_ALT     = HELI_FLY_ALT * HELI_ALT_PX_PER_UNIT
-local HELI_SCATTER = 2.0     -- 미스탄 산탄 반경(타일)
 
 local function handleHeliFire(args)
     local ox = tonumber(args.ox) or 0
@@ -1506,7 +1572,7 @@ local function handleHeliFire(args)
     local tx = tonumber(args.x) or 0
     local ty = tonumber(args.y) or 0
     local tz = tonumber(args.z) or 0
-    local kill = args.kill and true or false
+    local crit = tonumber(args.crit) == 1
 
     local z = id and findZombieById(id) or nil
     if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
@@ -1520,30 +1586,12 @@ local function handleHeliFire(args)
         if px2 then ox, oy = px2, py2 end
     end
 
-    if not kill then
-        -- 난사 느낌: 미스탄은 목표에서 살짝 빗나가게
-        tx = tx + (ZombRand(HELI_SCATTER * 200) - HELI_SCATTER * 100) / 100.0
-        ty = ty + (ZombRand(HELI_SCATTER * 200) - HELI_SCATTER * 100) / 100.0
-    end
     addTracer(ox, oy, oz, tx, ty, tz, HELI_ALT)
 
     -- 발당 트리거 없음: 총성은 pongdu_heli_lmg 루프가 교전 구간 내내 재생
-    -- 중이라 여기선 예광탄/킬 판정만 처리한다. 볼륨 갱신도 OnTick 이 맡는다.
+    -- 중이라 여기선 예광탄/데미지만 처리한다. 볼륨 갱신도 OnTick 이 맡는다.
 
-    if kill and z and not z:isDead() then
-        if z:isRemoteZombie() then
-            pcall(function() z:playSound("BulletHitBody") end)
-        else
-            local ok, err = pcall(function() killZombieNow(z) end)
-            if ok then
-                pcall(function() z:playSound("BulletHitBody") end)
-                print("[PongDu] fire_support/heli KILL zid=" .. tostring(id))
-            else
-                print("[PongDu] fire_support/heli KILL FAILED zid="
-                    .. tostring(id) .. " err=" .. tostring(err))
-            end
-        end
-    end
+    fsApplyShot(z, id, fsShotHp("heli", crit), false, "heli")
 end
 
 -- ── 통합 틱 ────────────────────────────────────────────────────────────────

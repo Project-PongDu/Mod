@@ -907,7 +907,7 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
     local dur = (tonumber(data["dur"]) or 30) * 1000
     local r   = tonumber(data["r"])  or 30
     local iv  = tonumber(data["iv"]) or 200
-    local kc  = tonumber(data["kc"]) or 5
+    local kc  = tonumber(data["kc"]) or 5     -- 발당 크리티컬 확률(%)
     local sender = data["sender"] or ""
     local D = r + 50
 
@@ -968,8 +968,9 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         legDur = dur, expireAt = now + dur,
         missStreak = 0,
         killed = {},   -- zid -> 재선정 허용 시각(ms). HELI_KILL_TTL 참조
-        -- 결과 집계(종료 로그용). 사살 판정(kc 굴림)은 서버가 내리므로 여기서 센다.
-        nShot = 0, nKill = 0,
+        -- 결과 집계(종료 로그용). 크리티컬 판정(kc 굴림)은 서버가 내리므로 여기서 센다.
+        -- 실제 사망 여부는 소유 클라가 데미지를 적용한 결과라 서버는 모른다.
+        nShot = 0, nCrit = 0,
     }
     _heliJobs[#_heliJobs + 1] = job
 
@@ -977,7 +978,7 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
 
     heliBroadcastStart(job)
     print(string.format(
-        "[PongDu][Heli] job queued dur=%dms r=%d iv=%d kc=%d%% A=%d,%d B=%d,%d sender=%s",
+        "[PongDu][Heli] job queued dur=%dms r=%d iv=%d crit=%d%% A=%d,%d B=%d,%d sender=%s",
         dur, r, iv, kc, math.floor(ax), math.floor(ay),
         math.floor(bx), math.floor(by), tostring(sender)))
 end
@@ -1077,8 +1078,8 @@ local function processHeliJobs()
                     sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
                 end
             end
-            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d kills=%d",
-                tostring(why), job.nShot or 0, job.nKill or 0))
+            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d crits=%d",
+                tostring(why), job.nShot or 0, job.nCrit or 0))
         elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
@@ -1086,8 +1087,8 @@ local function processHeliJobs()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
-            print(string.format("[PongDu][Heli] job finished shots=%d kills=%d",
-                job.nShot or 0, job.nKill or 0))
+            print(string.format("[PongDu][Heli] job finished shots=%d crits=%d",
+                job.nShot or 0, job.nCrit or 0))
         elseif now >= job.nextAt then
             -- 헬기 현재 위치: 현재 leg의 A -> B 선형 보간. leg 롤오버가 위에서
             -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
@@ -1175,12 +1176,22 @@ local function processHeliJobs()
                 payload.id = target:getOnlineID()
                 payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
                 job.nShot = (job.nShot or 0) + 1
+                -- 크리티컬/일반 굴림은 서버에서 한다(클라마다 굴리면 같은 탄의
+                -- 결과가 클라별로 갈린다). 데미지 수치 적용은 소유 클라가
+                -- 샌드박스(FireSupport_CritDamage/NormalDamage)를 읽어서 한다.
+                -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
                 if ZombRand(100) < job.kc then
-                    payload.kill = true
-                    job.nKill = (job.nKill or 0) + 1
-                    job.target = nil   -- 사살 -> 다음 발에 새 타겟 랜덤 선정
+                    payload.crit = 1
+                    job.nCrit = (job.nCrit or 0) + 1
+                    -- 크리티컬은 기본값(6)이면 확정 사살이라 즉시 락을 풀고 다음 발에
+                    -- 새 타겟을 고른다. 서버 isDead() 는 시체 sync 이후에나 true 라
+                    -- 그걸 기다리면 죽은 놈에게 탄을 낭비한다.
+                    job.target = nil
                     job.killed[payload.id] = now + HELI_KILL_TTL
-                    print("[PongDu][Heli] shot KILL zid=" .. payload.id)
+                    print("[PongDu][Heli] shot CRIT zid=" .. payload.id)
+                else
+                    -- 일반: 락 유지. 누적 데미지로 죽으면 위 락온 검사의 isDead() 로 풀린다.
+                    payload.crit = 0
                 end
             else
                 if job.engaged == true and job.missStreak >= HELI_MISS_THRESHOLD then
@@ -1839,6 +1850,10 @@ local DRONE_APPROACH_MS = 1000    -- 스폰점 → 궤도 진입까지
 local DRONE_DEPART_MS   = 1000    -- 궤도 이탈 → 소멸까지
 local DRONE_DEPART_DIST = 60      -- 이탈 비행 거리(타일). 1초에 이만큼 = 화면 밖
 local DRONE_TWO_PI      = 6.2831853
+-- 공전 반경/주기. 샌드박스(Drone_OrbitRadius/Drone_OrbitPeriod)에서 뺐다 --
+-- 연출 전용 값이라 서버마다 바꿀 일이 없다. 값은 기존 샌드박스 기본값 그대로.
+local DRONE_ORBIT_R     = 5       -- 타일
+local DRONE_PERIOD_S    = 6       -- 1회전(초)
 
 -- 공전 위치. 서버와 파일럿 클라가 **같은 식**을 써야 한다(클라 쪽 사본은
 -- firesupport.lua droneComputePos). 한쪽만 고치면 실차량과 탄착점이 어긋난다.
@@ -1895,12 +1910,12 @@ end
 
 DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
     local dur    = tonumber(data["dur"]) or 60     -- 공전 지속(초)
-    local orbitR = tonumber(data["orad"])  or 4      -- 공전 반경(타일)
+    local orbitR = DRONE_ORBIT_R                     -- 공전 반경(타일, 고정)
     local detR   = tonumber(data["dr"])  or 8      -- 인식 반경(타일)
     local iv     = tonumber(data["iv"])  or 100    -- 발사 간격(ms)
-    local kc     = tonumber(data["kc"])  or 40     -- 발당 사살 확률(%)
+    local kc     = tonumber(data["kc"])  or 40     -- 발당 크리티컬 확률(%)
     local kd     = tonumber(data["kd"])  or 50     -- 넉다운 확률(%)
-    local period = tonumber(data["pd"])  or 6      -- 1회전 주기(초)
+    local period = DRONE_PERIOD_S                    -- 1회전 주기(초, 고정)
     local sender = data["sender"] or ""
 
     -- 스폰점은 저격과 동일 로직(발동 시점 1회 고정, 화면 밖 랜덤 방위).
@@ -1973,10 +1988,10 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         vehicle = nil,
         -- zid -> 억제 만료(ms). 동기화 공백 동안 재타겟을 막는다.
         suppress = {},
-        -- 튜닝용 집계. 정상 동작이면 nSwitch 가 (nKill + nKd) 에 근접한다 --
-        -- 넘기거나 죽인 직후 다음 대상으로 옮겨갔다는 뜻이다. nSwitch 가
+        -- 튜닝용 집계. 정상 동작이면 nSwitch 가 (nCrit + nKd) 에 근접한다 --
+        -- 넘기거나 크리티컬을 넣은 직후 다음 대상으로 옮겨갔다는 뜻이다. nSwitch 가
         -- 그보다 훨씬 작으면 같은 놈을 계속 두들기고 있는 것.
-        nShot = 0, nKill = 0, nKd = 0, nSwitch = 0,
+        nShot = 0, nCrit = 0, nKd = 0, nSwitch = 0,
         lastId = nil,
     }
 
@@ -2011,7 +2026,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
     end
 
     print(string.format(
-        "[PongDu][Drone] job queued dur=%ds orbitR=%d detR=%d iv=%d kc=%d%% kd=%d%% period=%ds spawn=%d,%d vid=%s sender=%s",
+        "[PongDu][Drone] job queued dur=%ds orbitR=%d detR=%d iv=%d crit=%d%% kd=%d%% period=%ds spawn=%d,%d vid=%s sender=%s",
         dur, orbitR, detR, iv, kc, kd, period,
         math.floor(sx), math.floor(sy), tostring(job.vid), tostring(sender)))
 end
@@ -2192,8 +2207,8 @@ local function droneFinish(job, reason)
         sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", { own = job.own })
     end
     print(string.format(
-        "[PongDu][Drone] job finished (%s) shots=%d kills=%d knockdowns=%d switches=%d",
-        tostring(reason), job.nShot or 0, job.nKill or 0, job.nKd or 0, job.nSwitch or 0))
+        "[PongDu][Drone] job finished (%s) shots=%d crits=%d knockdowns=%d switches=%d",
+        tostring(reason), job.nShot or 0, job.nCrit or 0, job.nKd or 0, job.nSwitch or 0))
 end
 
 local function processDroneJobs()
@@ -2249,8 +2264,9 @@ local function processDroneJobs()
                     payload.tx = z:getX()
                     payload.ty = z:getY()
                     payload.tz = z:getZ()
-                    -- 사살 굴림은 반드시 서버에서. 클라마다 굴리면 같은 탄인데
-                    -- 클라별로 죽는 놈이 갈린다(저격과 동일한 이유).
+                    -- 크리티컬 굴림은 반드시 서버에서. 클라마다 굴리면 같은 탄인데
+                    -- 클라별로 데미지가 갈린다(저격과 동일한 이유). 데미지 수치
+                    -- 적용은 소유 클라가 샌드박스를 읽어서 한다.
                     --
                     -- 넉다운 굴림도 같이 서버로 올렸다. 클라측 굴림이면 (a) 클라별로
                     -- 넘어진 놈이 갈리고 (b) 서버가 자기가 넘긴 대상을 몰라서
@@ -2259,12 +2275,13 @@ local function processDroneJobs()
                     local zid = payload.id
                     job.nShot = job.nShot + 1
                     if ZombRand(100) < job.kc then
-                        payload.kill = true
-                        job.nKill = job.nKill + 1
+                        payload.crit = 1
+                        job.nCrit = job.nCrit + 1
                         droneSuppress(job, zid, now)
                     else
+                        payload.crit = 0
                         local kdHit = ZombRand(100) < job.kd
-                        payload.kdHit = kdHit and 1 or 0    -- 빗나감 → 리액션만(스펙 5번)
+                        payload.kdHit = kdHit and 1 or 0    -- 일반 데미지 + (넉다운 or 움찔)
                         if kdHit then
                             job.nKd = job.nKd + 1
                             droneSuppress(job, zid, now)

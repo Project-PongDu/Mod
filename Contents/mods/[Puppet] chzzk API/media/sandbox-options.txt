@@ -451,6 +451,16 @@ option PongDu.Sniper_KnockdownChance = {
     page = PongDu_Buff, translation = PongDu_Sniper_KnockdownChance,
 }
 
+option PongDu.FireSupport_CritDamage = {
+    type = double, min = 0.10, max = 100, default = 6.00,
+    page = PongDu_Buff, translation = PongDu_FireSupport_CritDamage,
+}
+
+option PongDu.FireSupport_NormalDamage = {
+    type = double, min = 0.01, max = 10, default = 0.43,
+    page = PongDu_Buff, translation = PongDu_FireSupport_NormalDamage,
+}
+
 option PongDu.Heli_Duration = {
     type = integer, min = 10, max = 120, default = 30,
     page = PongDu_Buff, translation = PongDu_Heli_Duration,
@@ -466,19 +476,14 @@ option PongDu.Heli_Interval = {
     page = PongDu_Buff, translation = PongDu_Heli_Interval,
 }
 
-option PongDu.Heli_KillChance = {
-    type = integer, min = 1, max = 100, default = 50,
-    page = PongDu_Buff, translation = PongDu_Heli_KillChance,
+option PongDu.Heli_CritChance = {
+    type = integer, min = 0, max = 100, default = 50,
+    page = PongDu_Buff, translation = PongDu_Heli_CritChance,
 }
 
 option PongDu.Drone_Duration = {
     type = integer, min = 10, max = 120, default = 60,
     page = PongDu_Buff, translation = PongDu_Drone_Duration,
-}
-
-option PongDu.Drone_OrbitRadius = {
-    type = integer, min = 2, max = 20, default = 5,
-    page = PongDu_Buff, translation = PongDu_Drone_OrbitRadius,
 }
 
 option PongDu.Drone_DetectRadius = {
@@ -491,19 +496,14 @@ option PongDu.Drone_Interval = {
     page = PongDu_Buff, translation = PongDu_Drone_Interval,
 }
 
-option PongDu.Drone_KillChance = {
-    type = integer, min = 1, max = 100, default = 10,
-    page = PongDu_Buff, translation = PongDu_Drone_KillChance,
+option PongDu.Drone_CritChance = {
+    type = integer, min = 0, max = 100, default = 10,
+    page = PongDu_Buff, translation = PongDu_Drone_CritChance,
 }
 
 option PongDu.Drone_KnockdownChance = {
     type = integer, min = 0, max = 100, default = 80,
     page = PongDu_Buff, translation = PongDu_Drone_KnockdownChance,
-}
-
-option PongDu.Drone_OrbitPeriod = {
-    type = integer, min = 1, max = 20, default = 6,
-    page = PongDu_Buff, translation = PongDu_Drone_OrbitPeriod,
 }
 
 
