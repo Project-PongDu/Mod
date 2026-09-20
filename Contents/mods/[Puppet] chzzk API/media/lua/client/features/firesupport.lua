@@ -1150,6 +1150,12 @@ local function heliRemove(own, reason)
     local h = _helis[own]
     if not h then return end
     _helis[own] = nil
+    if h.st then
+        -- 대상 플레이어 클라의 사격 집계. locks = 락온한 좀비 수, idle = 대상이 없어 쉰 발.
+        print(string.format(
+            "[PongDu] fire_support/heli local summary shots=%d crits=%d locks=%d idle=%d",
+            h.st.shots, h.st.crits, h.st.locks, h.st.idle))
+    end
     print("[PongDu] fire_support/heli: instance removed own=" .. tostring(own)
         .. " (" .. tostring(reason) .. ") remaining=" .. tostring(tcount(_helis)))
     if own == myOnlineID() then heliTimerHide() end
@@ -1201,6 +1207,13 @@ local function heliUpsert(args)
 
     -- 유실 대비 자체 데드라인. 서버 HeliStop이 정상 도착하면 그쪽이 먼저 끈다.
     h.stopAt = getTimestampMs() + (tonumber(args.remain) or 30000) + 2000
+    -- 사격 파라미터/사격 마감. 대상 플레이어 클라만 쓴다(heliFireTick).
+    -- 급선회(재후원)마다 HeliStart 가 다시 오므로 여기서 매번 갱신한다.
+    if args.r  then h.r  = tonumber(args.r)  or h.r  end
+    if args.iv then h.iv = tonumber(args.iv) or h.iv end
+    if args.kc then h.kc = tonumber(args.kc) or h.kc end
+    h.fireUntil = getTimestampMs() + (tonumber(args.remain) or 30000)
+    h.firstAt = h.firstAt or getTimestampMs()
 
     print(string.format(
         "[PongDu] fire_support/heli: start own=%s vid=%s pilot=%s amPilot=%s count=%d",
@@ -1657,7 +1670,7 @@ local HELI_ALT     = HELI_FLY_ALT * HELI_ALT_PX_PER_UNIT
 
 local _fsQueue = {}   -- { at, kind, own, ox, oy, oz, shot }
 
--- 헬기 1발: 락온 좀비에 명중. crit=1 크리티컬, 0 일반.
+-- 헬기 1발(중계 수신측): 락온 좀비에 명중. crit=1 크리티컬, 0 일반.
 local function heliShotPlay(own, ox, oy, oz, sh)
     local id = tonumber(sh.id)
     local tx, ty, tz = tonumber(sh.x) or 0, tonumber(sh.y) or 0, tonumber(sh.z) or 0
@@ -1745,6 +1758,152 @@ end
 
 local function handleHeliFire(args)  fsReceiveShots("heli", args)  end
 local function handleDroneFire(args) fsReceiveShots("drone", args) end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  헬기 조준/사격 (대상 플레이어 클라 권한)
+--
+--  드론과 같은 이유로 클라로 옮겼다(server.lua HeliShots 주석): 서버는 일반탄
+--  누적으로 죽은 좀비를 최대 4초 모르는 동안 락을 유지해 시체에 쐈다.
+--  규칙은 서버 시절과 같다:
+--    반경 r(플레이어 기준) 안 랜덤 좀비 1마리에 락온 -> 죽거나 반경 이탈할 때까지
+--    계속 쏜다 -> 다음 대상 랜덤 재선정. 크리티컬/일반은 발마다 kc% 굴림.
+--  사망은 이 클라가 즉시 알기 때문에(isDead) 시체에 쏘는 일이 없다.
+--  교전(LMG) 히스테리시스와 구역정리 무전도 여기서 판정한다.
+-- ═══════════════════════════════════════════════════════════════════════════
+local HELI_BATCH_MS           = 100
+local HELI_MAX_BURST          = 8
+-- 연속 몇 번 대상이 없어야 LMG 를 끌지(반경 경계 진동으로 루프음이 끊겨 들리는 것 방지).
+local HELI_MISS_THRESHOLD     = 3
+-- 구역정리 무전 보류용 확장 반경(사격반경에 더함). 이 안에 살아있는 좀비가
+-- 있으면 곧 다시 잡을 가능성이 높아 무전을 미룬다.
+local HELI_CLEAR_EXTRA_RADIUS = 20
+local HELI_RADIO_MIN_MS       = 3000   -- 시작 직후 무전 금지(도착 연출)
+
+local function heliTargetValid(z, cx, cy, r2)
+    if not z or z:isDead() then return false end
+    local dx, dy = z:getX() - cx, z:getY() - cy
+    return dx * dx + dy * dy <= r2
+end
+
+-- 반경 안 랜덤 1마리 + 확장 반경 안에 누구라도 있는지.
+local function heliScan(cx, cy, r)
+    local cell = getCell()
+    local zl = cell and cell:getZombieList()
+    if not zl then return nil, false end
+    local r2  = r * r
+    local re  = r + HELI_CLEAR_EXTRA_RADIUS
+    local re2 = re * re
+    local pool, n, near = {}, 0, false
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local dx, dy = z:getX() - cx, z:getY() - cy
+            local d2 = dx * dx + dy * dy
+            if d2 <= re2 then near = true end
+            if d2 <= r2 then
+                n = n + 1
+                pool[n] = z
+            end
+        end
+    end
+    if n == 0 then return nil, near end
+    return pool[ZombRand(n) + 1], true
+end
+
+local function heliSetEngaged(h, on)
+    if h.engaged == on then return end
+    h.engaged = on
+    sendClientCommand("PongDuFireSupport", "HeliEngaged", { on = on and 1 or 0 })
+    print("[PongDu] fire_support/heli " .. (on and "ENGAGE" or "LMG STOP"))
+end
+
+local function heliFlush(h, ox, oy, oz)
+    if not h.batchN or h.batchN == 0 then return end
+    sendClientCommand("PongDuFireSupport", "HeliShots", {
+        ox = ox, oy = oy, oz = oz, shots = h.batch, n = h.batchN,
+    })
+    h.batch, h.batchN, h.batchAt = {}, 0, nil
+end
+
+-- 대상 플레이어 클라에서만 매 프레임 호출된다(OnTick).
+local function heliFireTick(h, now)
+    local ox, oy = heliCurPos(h)
+    local oz = h.oz or 0
+    if not h.fireUntil or now >= h.fireUntil or not h.r or not h.iv then
+        if ox then heliFlush(h, ox, oy, oz) end
+        return
+    end
+    local p = getSpecificPlayer(0)
+    if not p or not ox then return end
+    local cx, cy = p:getX(), p:getY()
+    local r2 = h.r * h.r
+
+    h.batch  = h.batch or {}
+    h.batchN = h.batchN or 0
+    h.miss   = h.miss or 0
+    h.st = h.st or { shots = 0, crits = 0, locks = 0, idle = 0 }
+    if not h.nextShotAt then h.nextShotAt = now end
+
+    local burst = 0
+    while now >= h.nextShotAt and burst < HELI_MAX_BURST do
+        local shotT = h.nextShotAt
+        h.nextShotAt = h.nextShotAt + h.iv
+        burst = burst + 1
+
+        local z = h.lock
+        if not heliTargetValid(z, cx, cy, r2) then
+            local near
+            z, near = heliScan(cx, cy, h.r)
+            h.lock = z
+            if not z then
+                h.st.idle = h.st.idle + 1
+                h.miss = h.miss + 1
+                h.nextShotAt = now + h.iv
+                if h.miss >= HELI_MISS_THRESHOLD then
+                    heliSetEngaged(h, false)
+                    -- 구역정리 무전: 확장 반경까지 비었을 때 1회. 좀비가 다시 보이면 재무장.
+                    if not near and not h.radioDone and now - h.firstAt >= HELI_RADIO_MIN_MS then
+                        h.radioDone = true
+                        local okS = pcall(function()
+                            getSoundManager():PlaySound("area_clear", false, 1.0)
+                        end)
+                        print("[PongDu] fire_support/heli AREA CLEAR radio" .. (okS and "" or " (sound failed)"))
+                    end
+                end
+                if near then h.radioDone = false end
+                break
+            end
+            h.st.locks = h.st.locks + 1
+        end
+        h.miss = 0
+        h.radioDone = false
+        heliSetEngaged(h, true)
+
+        local crit = ZombRand(100) < h.kc
+        local id = z:getOnlineID()
+        local tx, ty, tz = z:getX(), z:getY(), z:getZ()
+        addTracer(ox, oy, oz, tx, ty, tz, HELI_ALT)
+        -- 로컬 즉시 적용. 다른 클라 소유 좀비면 연출만 되고 데미지는 중계를
+        -- 받은 소유 클라가 넣는다(fsApplyShot 참조).
+        fsApplyShot(z, id, fsShotHp("heli", crit), crit, false, "heli", h.own)
+
+        h.st.shots = h.st.shots + 1
+        if crit then h.st.crits = h.st.crits + 1 end
+
+        if h.batchN == 0 then h.batchAt = shotT end
+        h.batchN = h.batchN + 1
+        h.batch[h.batchN] = {
+            id = id, x = tx, y = ty, z = tz,
+            crit = crit and 1 or 0, dt = shotT - h.batchAt,
+        }
+    end
+    if burst >= HELI_MAX_BURST and now - h.nextShotAt > h.iv * HELI_MAX_BURST then
+        h.nextShotAt = now + h.iv   -- 긴 히칭 뒤 재동기화
+    end
+    if h.batchN > 0 and (now - h.batchAt >= HELI_BATCH_MS) then
+        heliFlush(h, ox, oy, oz)
+    end
+end
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  드론 조준/사격 (대상 플레이어 클라 권한)
@@ -1951,6 +2110,7 @@ Events.OnTick.Add(function()
     fsSweepStaleLoops()
     local now = getTimestampMs()
 
+    local meH = myOnlineID()
     local n = 0
     for own, h in pairs(_helis) do
         if h.stopAt and now > h.stopAt then
@@ -1959,6 +2119,14 @@ Events.OnTick.Add(function()
         else
             if h.amPilot then heliPilotTick(h) end   -- 권한 클라만 실제 이동
             heliBladeTick(h)                         -- 로터 회전은 전 클라 로컬 연출
+            -- 사격은 대상 플레이어 클라만(SP 는 양쪽 -1 이라 자동 일치).
+            if meH ~= nil and own == meH then
+                local okF, errF = pcall(function() heliFireTick(h, now) end)
+                if not okF and not h.fireErr then
+                    h.fireErr = true
+                    print("[PongDu] fire_support/heli fire tick FAILED err=" .. tostring(errF))
+                end
+            end
         end
     end
     for i = 1, n do
@@ -2027,24 +2195,12 @@ Events.OnServerCommand.Add(function(module, command, args)
         return
     elseif command == "HeliClear" then
         -- LMG 사운드 전용 -- 실제 사격이 끊겼을 때만 서버가 보낸다.
-        -- 무전("구역 정리")은 더 이상 여기서 재생하지 않는다 -- HeliAreaClear로 분리됨.
+        -- 무전("구역 정리")은 사격 클라(heliFireTick)가 직접 재생한다.
         -- 남은 시간 동안 헬기(로터음)는 계속 떠 있고, 좀비가 다시 감지되면
         -- 서버가 HeliEngage를 다시 보내 사격을 재개한다.
         local own = ownOf(args, "HeliClear")
         local h = own and _helis[own] or nil
         if h then h.engaged = false end
-        return
-    elseif command == "HeliAreaClear" then
-        -- 무전 전용: 사격/LMG 상태와 무관하게, 확장반경까지 완전히 비었을 때
-        -- 서버가 1회 보낸다. 내 헬기일 때만 재생 -- 전 인스턴스가 방송하면
-        -- 동시 발동 상황에서 무전이 인원수만큼 겹쳐 들린다.
-        local own = ownOf(args, "HeliAreaClear")
-        if own and own == myOnlineID() then
-            local okS = pcall(function()
-                getSoundManager():PlaySound("area_clear", false, 1.0)
-            end)
-            if not okS then print("[PongDu] fire_support/heli: area_clear sound failed") end
-        end
         return
     elseif command == "HeliFire" then
         handleHeliFire(args)

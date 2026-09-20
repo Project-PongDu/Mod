@@ -652,28 +652,12 @@ addServerTick(processSniperJobs)
 -- 뿐이라 "새 지원이 왔다"는 체감이 없다. 대신 이번 발동 시점의 헬기 현재
 -- 위치(보간값)를 새 시작점 A'로 잡고, 거기서 새로운 랜덤 B'로 향하는 완전히
 -- 새 직선을 즉시 잇는다 -- 방향을 홱 트는 급선회 연출이 된다. dur/r/iv/kc도
--- 최신 발동값으로 갱신(사실상 항상 동일 샌박값이라 큰 의미는 없음). engage
--- 상태와 좀비 락온(job.target)은 급선회와 무관하므로 그대로 유지한다.
+-- 최신 발동값으로 갱신(사실상 항상 동일 샌박값이라 큰 의미는 없음). 락온/교전
+-- 상태는 사격 클라가 들고 있으므로 급선회와 무관하게 유지된다.
 local _heliJobs = {}
 
--- 미탐지 히스테리시스 임계값: 연속 몇 회 스캔이 비어야 CLEAR로 전환할지.
--- iv(기본 100ms) 기준 3회 = 약 300ms. 너무 크면 clear 반응이 굼떠 보이고,
--- 1이면(=즉시) 반경 경계 진동으로 LMG 루프가 재시작되며 끊겨 들린다.
-local HELI_MISS_THRESHOLD = 3
--- 사살 지시를 보낸 zid를 잠시 후보에서 제외하는 유예 시간(ms).
--- 킬은 소유 클라가 수행하므로 서버의 isDead()가 즉시 true가 되지 않는다.
--- 이 유예가 없으면 방금 죽인 좀비를 다음 스캔에서 또 락온해 탄을 낭비한다
--- (알파테스트#2 로그 실측: KILL 48발 / 고유 32마리 = 33% 낭비).
-local HELI_KILL_TTL       = 3000
--- 서버 틱(약 10Hz, 실측)보다 발사 간격이 짧으면 한 틱에 여러 발을 몰아서 굴리고
--- 한 패킷(shots 배열)으로 보낸다. 클라는 각 발의 dt(ms) 만큼 지연 재생해
--- 연사 간격을 복원한다. 한 틱 최대 발수 -- 서버 히칭 뒤 몰아쏘기 폭주 방지.
-local HELI_MAX_BURST      = 10
--- CLEAR 판정 확장 반경(사격반경에 더하는 값, 타일). 사격반경(job.r) 안이
--- 비었어도 이 여유분 안에 아직 살아있는 좀비가 있으면 clear 방송을 보류한다.
--- 헬기가 leg를 따라 계속 이동 중이므로, 근처에 다음 타겟이 있는데도 매번
--- "구역 정리"가 뜨는 게 부자연스럽다는 피드백으로 추가.
-local HELI_CLEAR_EXTRA_RADIUS = 20
+-- 조준/굴림/교전 히스테리시스/구역정리 무전 관련 상수는 클라(firesupport.lua
+-- heliFireTick)로 옮겼다. 서버는 경로·실차량·수명과 중계만 맡는다.
 
 -- 헬기 실차량(Base.PongDuHeli) 스폰. A 지점 청크가 서버에 로드 안 돼 있으면
 -- 플레이어 쪽으로 10%씩 당기며 로드된 스퀘어를 찾는다. 스폰 후 대상 플레이어
@@ -919,6 +903,8 @@ local function heliBroadcastStart(job)
         ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
         elapsed = now - job.startAt, total = job.endAt - job.startAt,
         vid = job.vid, pilot = job.pilot, own = job.own,
+        -- 사격 파라미터. 대상 플레이어 클라가 조준/사격한다(HeliShots 주석 참조).
+        r = job.r, iv = job.iv, kc = job.kc,
     }
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
@@ -946,7 +932,6 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
             local curX, curY = heliCurrentPos(job)
 
             job.r, job.iv, job.kc, job.sender = r, iv, kc, sender
-            job.missStreak = 0
             job.legDur     = dur
             -- 이미 만료 시각을 지난 job(같은 틱에 정리 예정)이면 now2 기준으로
             -- 눕혀서 과거 시각에 누적되는 걸 막는다.
@@ -987,13 +972,10 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         player = player, own = player:getOnlineID(),
         r = r, iv = iv, kc = kc, sender = sender,
         ax = ax, ay = ay, bx = bx, by = by, oz = player:getZ(),
-        startAt = now, endAt = now + dur, nextAt = now,
+        startAt = now, endAt = now + dur,
         legDur = dur, expireAt = now + dur,
-        missStreak = 0,
-        killed = {},   -- zid -> 재선정 허용 시각(ms). HELI_KILL_TTL 참조
-        -- 결과 집계(종료 로그용). 크리티컬 판정(kc 굴림)은 서버가 내리므로 여기서 센다.
-        -- 실제 사망 여부는 소유 클라가 데미지를 적용한 결과라 서버는 모른다.
-        nShot = 0, nCrit = 0,
+        -- 집계(종료 로그용). 사격은 대상 클라가 하고 HeliShots 로 보고한 걸 센다.
+        nShot = 0, nCrit = 0, nBatch = 0,
         nKill = 0,   -- 소유 클라 FsKill 보고 누적
     }
     _heliJobs[#_heliJobs + 1] = job
@@ -1007,91 +989,67 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         math.floor(bx), math.floor(by), tostring(sender)))
 end
 
--- 반경 내 랜덤 좀비 1마리. 헬기는 이 좀비를 "락온"해서 사살할 때까지 계속
--- 쏘고, 죽으면 다음 타겟을 다시 랜덤으로 고른다 (매 발 랜덤 대상 아님).
-local function pickHeliTarget(job, now)
-    local ok, cx, cy, cell = pcall(function()
-        return job.player:getX(), job.player:getY(), job.player:getCell()
-    end)
-    if not ok then return nil end
-    local zl = cell and cell:getZombieList()
-    if not zl then return nil end
+-- ── 헬기 사격: 대상 플레이어 클라 권한 ─────────────────────────────────────
+-- 드론과 같은 이유(server.lua DroneShots 주석): 서버의 좀비 정보는 혼자일 때
+-- 최대 4초 늦어서, 일반탄 누적으로 죽은 좀비를 서버가 모르는 동안 락을 유지해
+-- 시체에 계속 쐈다(실측: 300발 중 약 55발 낭비, 크리티컬 19발 포함).
+-- 이제 대상 클라가 락온/굴림/데미지를 하고 약 100ms 마다 HeliShots 로 보고,
+-- 서버는 집계 + 다른 클라에 HeliFire 중계만 한다.
+local HELI_MAX_SHOTS_PER_BATCH = 20
 
-    local r2 = job.r * job.r
-    local pool = {}
-    for i = 0, zl:size() - 1 do
-        local z = zl:get(i)
-        if z and not z:isDead() then
-            local dx, dy = z:getX() - cx, z:getY() - cy
-            if dx * dx + dy * dy <= r2 then
-                -- 사살 지시를 이미 보낸 좀비는 유예 시간 동안 제외.
-                -- 클라의 사망 동기화가 돌아오기 전까지 isDead()가 false라서
-                -- 이 가드가 없으면 같은 좀비를 반복 락온한다.
-                local exp = job.killed[z:getOnlineID()]
-                if not (exp and now < exp) then
-                    pool[#pool + 1] = z
-                end
-            end
-        end
+local function heliJobOf(player)
+    for i = 1, #_heliJobs do
+        if _heliJobs[i].player == player then return _heliJobs[i] end
     end
-    if #pool == 0 then return nil end
-    return pool[ZombRand(#pool) + 1]
+    return nil
 end
 
--- 락온 유지 검사 + 필요 시 재선정. 버스트(한 틱 여러 발) 중에도 발마다
--- 다시 불러서, 크리티컬로 락이 풀린 직후 발은 새 대상으로 가게 한다.
-local function heliAcquireTarget(job, now)
-    -- 락온 유지 검사: 죽었거나 반경을 벗어났으면 락 해제 후 재선정.
-    -- (킬은 소유 클라가 수행하므로 kill 전송 후에도 서버에서 isDead()가
-    --  반영되기까지 지연이 있다 -- kill 보낸 발에서 즉시 락을 풀어
-    --  같은 좀비에 탄을 낭비하지 않는다.)
-    local target = job.target
-    if target then
-        local okV, valid = pcall(function()
-            if target:isDead() then return false end
-            local dx = target:getX() - job.player:getX()
-            local dy = target:getY() - job.player:getY()
-            return dx * dx + dy * dy <= job.r * job.r
-        end)
-        if not okV or not valid then
-            target = nil
-            job.target = nil
+DOServer["PongDuFireSupport"]["HeliShots"] = function(player, data)
+    local job = heliJobOf(player)
+    if not job then
+        print("[PongDu][Heli] HeliShots from " .. tostring(player and player:getUsername())
+            .. " without active job -- dropped")
+        return
+    end
+    local shots = data and data.shots
+    local n = tonumber(data and data.n) or 0
+    if not shots or n <= 0 then return end
+    if n > HELI_MAX_SHOTS_PER_BATCH then
+        print("[PongDu][Heli] HeliShots batch too large n=" .. tostring(n) .. " -- truncated")
+        n = HELI_MAX_SHOTS_PER_BATCH
+    end
+    local out, m = {}, 0
+    for i = 1, n do
+        local sh = shots[i]
+        if sh then
+            m = m + 1
+            out[m] = sh
+            job.nShot = job.nShot + 1
+            if tonumber(sh.crit) == 1 then job.nCrit = job.nCrit + 1 end
         end
     end
-    if not target then
-        target = pickHeliTarget(job, now)
-        job.target = target
-        if target then
-            print("[PongDu][Heli] lock zid=" .. target:getOnlineID())
-        end
-    end
-    return target
+    if m == 0 then return end
+    job.nBatch = job.nBatch + 1
+    local hx, hy = heliCurrentPos(job)
+    fsBroadcastFire("HeliFire", {
+        own = job.own, ox = hx, oy = hy, oz = job.oz,
+        x = tonumber(out[1].x) or 0, y = tonumber(out[1].y) or 0,
+        shots = out, n = m,
+    }, player)
 end
 
--- 확장 반경(사격반경 + HELI_CLEAR_EXTRA_RADIUS) 내 생존 좀비 존재 여부.
--- pickHeliTarget과 달리 락온 대상을 뽑는 게 아니라 "clear 방송을 보류할
--- 근거가 있는가"만 보면 되므로, killed TTL 가드 없이 첫 매치에서 바로
--- true를 반환한다(풀 배열을 만들 필요가 없다).
-local function hasZombieInExtendedRadius(job)
-    local ok, cx, cy, cell = pcall(function()
-        return job.player:getX(), job.player:getY(), job.player:getCell()
-    end)
-    if not ok then return false end
-    local zl = cell and cell:getZombieList()
-    if not zl then return false end
-
-    local r = job.r + HELI_CLEAR_EXTRA_RADIUS
-    local r2 = r * r
-    for i = 0, zl:size() - 1 do
-        local z = zl:get(i)
-        if z and not z:isDead() then
-            local dx, dy = z:getX() - cx, z:getY() - cy
-            if dx * dx + dy * dy <= r2 then
-                return true
-            end
+-- 교전 상태(LMG 루프음) 중계. 발사 클라는 이미 로컬로 전환했다.
+DOServer["PongDuFireSupport"]["HeliEngaged"] = function(player, data)
+    local job = heliJobOf(player)
+    if not job then return end
+    local cmd = (tonumber(data and data.on) == 1) and "HeliEngage" or "HeliClear"
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        local p = players:get(k)
+        if p ~= player then
+            sendServerCommand(p, "PongDuFireSupport", cmd, { own = job.own })
         end
     end
-    return false
 end
 
 local function processHeliJobs()
@@ -1133,8 +1091,8 @@ local function processHeliJobs()
                 end
             end
             fsQueueResult(job.own, "heli", job.nKill)
-            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d crits=%d kills(so far)=%d",
-                tostring(why), job.nShot or 0, job.nCrit or 0, job.nKill or 0))
+            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d crits=%d batches=%d kills(so far)=%d",
+                tostring(why), job.nShot or 0, job.nCrit or 0, job.nBatch or 0, job.nKill or 0))
         elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
@@ -1143,153 +1101,10 @@ local function processHeliJobs()
                 sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
             fsQueueResult(job.own, "heli", job.nKill)
-            print(string.format("[PongDu][Heli] job finished shots=%d crits=%d kills(so far)=%d",
-                job.nShot or 0, job.nCrit or 0, job.nKill or 0))
-        elseif now >= job.nextAt then
-            -- 헬기 현재 위치: 현재 leg의 A -> B 선형 보간. leg 롤오버가 위에서
-            -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
-            local hx, hy = heliCurrentPos(job)
-
-            local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender,
-                              own = job.own }
-
-            local target = heliAcquireTarget(job, now)
-
-            -- 미탐지 히스테리시스: 반경 경계에서 좀비가 순간적으로 들락날락하면
-            -- 매 스캔 CLEAR<->ENGAGE가 반복돼 LMG 루프가 재시작될 때마다
-            -- 끊겨 들린다("씹힘"). 연속 3회(iv 100ms 기준 약 300ms) 미탐지가
-            -- 확인돼야만 진짜로 소진된 것으로 보고 clear 전환한다.
-            -- ※ LMG 사운드(engaged)는 실제 사격 여부(사격반경 job.r 기준)만
-            --   따진다. 확장반경은 아래 "무전 전용" 판정에서만 쓴다 -- 예전엔
-            --   이 히스테리시스가 확장반경까지 같이 보류시켜서, 사격이 끊긴
-            --   상태에서도 LMG 루프가 계속 도는 버그가 있었다.
-            if target then
-                job.missStreak = 0
-            else
-                job.missStreak = (job.missStreak or 0) + 1
-            end
-
-            -- 확장반경 스캔은 셀 전체 좀비 리스트 1패스라 비싸다. 아래 두
-            -- 판정(무전 히스테리시스 / 무전 재무장)이 같은 결과를 쓰므로
-            -- 스캔은 이 자리에서 딱 한 번만 한다. target 이 있으면 단축평가로
-            -- 스캔 자체가 생략된다.
-            -- (구버전은 같은 스캔을 이 블록과 아래 재무장 블록에서 두 번
-            --  돌렸다 -- 대상이 없는 틱마다 pickHeliTarget 까지 합쳐 3패스.)
-            local nearby = (target ~= nil) or hasZombieInExtendedRadius(job)
-
-            -- 무전("구역 정리") 전용 히스테리시스. LMG와 별개로, 확장반경
-            -- (job.r + HELI_CLEAR_EXTRA_RADIUS) 안에 좀비가 남아있으면 계속
-            -- 0으로 눌러서 "구역 이상무" 방송 자체를 보류한다 -- 헬기가 leg를
-            -- 따라 이동하며 곧 그 좀비를 사격반경 안으로 다시 포착할 가능성이
-            -- 높은데, 그 사이 무전이 뜨는 게 부자연스럽기 때문. LMG 판정과
-            -- 분리했으므로 이 보류 기간 동안 총성은 이미 멈춰 있다.
-            if nearby then
-                if job.radioMissStreak and job.radioMissStreak > 0 then
-                    job.radioMissStreak = 0
-                end
-            else
-                job.radioMissStreak = (job.radioMissStreak or 0) + 1
-            end
-
-            -- ── engage/clear 상태머신 (LMG 사운드 전용) ──
-            -- 대상 있음: engage 상태로 사격. 없음: 사격 자체를 중단(HeliFire
-            -- 미전송 -- 구버전의 "랜덤 지면 난사" 제거). 상태가 바뀌는 순간에만
-            -- HeliEngage/HeliClear를 브로드캐스트해서 클라가 기관총 루프음을
-            -- 켜고 끄게 한다. (구역 정리 무전은 더 이상 여기서 재생하지 않음
-            -- -- HeliAreaClear로 완전히 분리.)
-            if target then
-                if job.engaged ~= true then
-                    job.engaged = true
-                    local players = getOnlinePlayers()
-                    for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliEngage", { own = job.own })
-                    end
-                    print("[PongDu][Heli] ENGAGE")
-                end
-                -- 이번 틱에 쏠 발수. nextAt 을 누적 기준(nextAt += iv)으로 굴리므로
-                -- 틱이 밀린 만큼 몰아서 쏜다(구버전 nextAt = now + iv 는 틱 지터마다
-                -- 한 틱씩 통째로 건너뛰어 100ms 설정에서 실발수가 60%였다).
-                local due = math.floor((now - job.nextAt) / job.iv) + 1
-                if due > HELI_MAX_BURST then due = HELI_MAX_BURST end
-                local shots, ns = {}, 0
-                local t = target
-                for b = 1, due do
-                    if b > 1 then
-                        t = heliAcquireTarget(job, now)
-                        if not t then break end
-                    end
-                    local zid = t:getOnlineID()
-                    local shot = { id = zid, x = t:getX(), y = t:getY(), z = t:getZ(),
-                                   dt = (b - 1) * job.iv }
-                    job.nShot = (job.nShot or 0) + 1
-                    -- 크리티컬/일반 굴림은 서버에서 한다(클라마다 굴리면 같은 탄의
-                    -- 결과가 클라별로 갈린다). 데미지 수치 적용은 소유 클라가
-                    -- 샌드박스(FireSupport_CritDamage/NormalDamage)를 읽어서 한다.
-                    -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
-                    if ZombRand(100) < job.kc then
-                        shot.crit = 1
-                        job.nCrit = (job.nCrit or 0) + 1
-                        -- 크리티컬은 기본값(6)이면 확정 사살이라 즉시 락을 풀고 다음 발에
-                        -- 새 타겟을 고른다. 서버 isDead() 는 시체 sync 이후에나 true 라
-                        -- 그걸 기다리면 죽은 놈에게 탄을 낭비한다.
-                        job.target = nil
-                        job.killed[zid] = now + HELI_KILL_TTL
-                    else
-                        -- 일반: 락 유지. 누적 데미지로 죽으면 락온 검사의 isDead() 로 풀린다.
-                        shot.crit = 0
-                    end
-                    ns = ns + 1
-                    shots[ns] = shot
-                end
-                payload.shots = shots
-                payload.n = ns
-                payload.x, payload.y = shots[1].x, shots[1].y   -- fsBroadcastFire 근접 판정용
-                if due >= HELI_MAX_BURST and now - job.nextAt > HELI_MAX_BURST * job.iv then
-                    -- 서버가 크게 멈췄다 온 경우: 밀린 걸 다 쏘지 않고 재동기화.
-                    job.nextAt = now + job.iv
-                else
-                    job.nextAt = job.nextAt + due * job.iv
-                end
-            else
-                if job.engaged == true and job.missStreak >= HELI_MISS_THRESHOLD then
-                    job.engaged = false
-                    local players = getOnlinePlayers()
-                    for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliClear", { own = job.own })
-                    end
-                    print("[PongDu][Heli] LMG STOP (targets depleted)")
-                elseif job.engaged == nil and job.missStreak >= HELI_MISS_THRESHOLD then
-                    -- 시작부터 사격반경이 비어 있으면 별도 유예 없이 바로 engaged=false로
-                    -- 확정한다 (LMG가 애초에 켜진 적 없으니 HeliClear를 보낼 필요도 없음).
-                    job.engaged = false
-                end
-
-                -- ── 무전 전용 상태머신 ──
-                -- job.engaged와 별개인 job.radioCleared로 관리한다. 시작부터
-                -- 반경이 비어 있으면 도착 연출을 위해 3초 유예 후 1회 방송.
-                if job.radioCleared ~= true
-                    and job.radioMissStreak and job.radioMissStreak >= HELI_MISS_THRESHOLD
-                    and now - job.startAt >= 3000 then
-                    job.radioCleared = true
-                    local players = getOnlinePlayers()
-                    for k = 0, players:size() - 1 do
-                        sendServerCommand(players:get(k), "PongDuFireSupport", "HeliAreaClear", { own = job.own })
-                    end
-                    print("[PongDu][Heli] AREA CLEAR radio (extended radius empty)")
-                end
-                -- 사격 없음: 다음 스캔 예약만 하고 이번 발은 건너뛴다
-                job.nextAt = now + job.iv
-            end
-            -- 좀비가 (사격반경이든 확장반경이든) 다시 감지되면 무전 방송 재무장
-            -- -- 다음번 진짜로 이탈할 때 또 한 번 방송할 수 있게.
-            if nearby then
-                job.radioCleared = false
-            end
-
-            if payload.shots then
-                fsBroadcastFire("HeliFire", payload)
-            end
+            print(string.format("[PongDu][Heli] job finished shots=%d crits=%d batches=%d kills(so far)=%d",
+                job.nShot or 0, job.nCrit or 0, job.nBatch or 0, job.nKill or 0))
         end
+        -- 사격은 대상 플레이어 클라가 한다(HeliShots). 서버는 경로/수명만 관리.
     end
 end
 addServerTick(processHeliJobs)
