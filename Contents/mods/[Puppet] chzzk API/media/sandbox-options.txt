@@ -472,7 +472,7 @@ option PongDu.Heli_Radius = {
 }
 
 option PongDu.Heli_Interval = {
-    type = integer, min = 10, max = 2000, default = 100,
+    type = integer, min = 10, max = 2000, default = 150,
     page = PongDu_Buff, translation = PongDu_Heli_Interval,
 }
 
@@ -497,7 +497,7 @@ option PongDu.Drone_Interval = {
 }
 
 option PongDu.Drone_CritChance = {
-    type = integer, min = 0, max = 100, default = 10,
+    type = integer, min = 0, max = 100, default = 2,
     page = PongDu_Buff, translation = PongDu_Drone_CritChance,
 }
 
