@@ -648,6 +648,10 @@ local HELI_MISS_THRESHOLD = 3
 -- 이 유예가 없으면 방금 죽인 좀비를 다음 스캔에서 또 락온해 탄을 낭비한다
 -- (알파테스트#2 로그 실측: KILL 48발 / 고유 32마리 = 33% 낭비).
 local HELI_KILL_TTL       = 3000
+-- 서버 틱(약 10Hz, 실측)보다 발사 간격이 짧으면 한 틱에 여러 발을 몰아서 굴리고
+-- 한 패킷(shots 배열)으로 보낸다. 클라는 각 발의 dt(ms) 만큼 지연 재생해
+-- 연사 간격을 복원한다. 한 틱 최대 발수 -- 서버 히칭 뒤 몰아쏘기 폭주 방지.
+local HELI_MAX_BURST      = 10
 -- CLEAR 판정 확장 반경(사격반경에 더하는 값, 타일). 사격반경(job.r) 안이
 -- 비었어도 이 여유분 안에 아직 살아있는 좀비가 있으면 clear 방송을 보류한다.
 -- 헬기가 leg를 따라 계속 이동 중이므로, 근처에 다음 타겟이 있는데도 매번
@@ -862,7 +866,9 @@ end
 -- 다르므로 양쪽을 모두 본다.
 local FS_FIRE_SEND_RADIUS = 55
 
-local function fsBroadcastFire(command, payload)
+-- exclude: 이 플레이어에게는 보내지 않는다(드론 -- 발사한 클라가 이미 로컬로
+-- 처리했으므로 되돌려 보내면 연출/데미지가 두 번 들어간다).
+local function fsBroadcastFire(command, payload, exclude)
     local r2 = FS_FIRE_SEND_RADIUS * FS_FIRE_SEND_RADIUS
     local ox, oy = payload.ox, payload.oy
     local tx, ty = payload.tx or payload.x, payload.ty or payload.y
@@ -870,7 +876,7 @@ local function fsBroadcastFire(command, payload)
     for k = 0, players:size() - 1 do
         local p = players:get(k)
         local okP, px, py = pcall(function() return p:getX(), p:getY() end)
-        if okP and px then
+        if okP and px and p ~= exclude then
             local dxo, dyo = px - ox, py - oy
             local near = (dxo * dxo + dyo * dyo) <= r2
             if not near and tx then
@@ -1014,6 +1020,36 @@ local function pickHeliTarget(job, now)
     return pool[ZombRand(#pool) + 1]
 end
 
+-- 락온 유지 검사 + 필요 시 재선정. 버스트(한 틱 여러 발) 중에도 발마다
+-- 다시 불러서, 크리티컬로 락이 풀린 직후 발은 새 대상으로 가게 한다.
+local function heliAcquireTarget(job, now)
+    -- 락온 유지 검사: 죽었거나 반경을 벗어났으면 락 해제 후 재선정.
+    -- (킬은 소유 클라가 수행하므로 kill 전송 후에도 서버에서 isDead()가
+    --  반영되기까지 지연이 있다 -- kill 보낸 발에서 즉시 락을 풀어
+    --  같은 좀비에 탄을 낭비하지 않는다.)
+    local target = job.target
+    if target then
+        local okV, valid = pcall(function()
+            if target:isDead() then return false end
+            local dx = target:getX() - job.player:getX()
+            local dy = target:getY() - job.player:getY()
+            return dx * dx + dy * dy <= job.r * job.r
+        end)
+        if not okV or not valid then
+            target = nil
+            job.target = nil
+        end
+    end
+    if not target then
+        target = pickHeliTarget(job, now)
+        job.target = target
+        if target then
+            print("[PongDu][Heli] lock zid=" .. target:getOnlineID())
+        end
+    end
+    return target
+end
+
 -- 확장 반경(사격반경 + HELI_CLEAR_EXTRA_RADIUS) 내 생존 좀비 존재 여부.
 -- pickHeliTarget과 달리 락온 대상을 뽑는 게 아니라 "clear 방송을 보류할
 -- 근거가 있는가"만 보면 되므로, killed TTL 가드 없이 첫 매치에서 바로
@@ -1097,30 +1133,7 @@ local function processHeliJobs()
             local payload = { ox = hx, oy = hy, oz = job.oz, sender = job.sender,
                               own = job.own }
 
-            -- 락온 유지 검사: 죽었거나 반경을 벗어났으면 락 해제 후 재선정.
-            -- (킬은 소유 클라가 수행하므로 kill 전송 후에도 서버에서 isDead()가
-            --  반영되기까지 지연이 있다 -- kill 보낸 발에서 즉시 락을 풀어
-            --  같은 좀비에 탄을 낭비하지 않는다.)
-            local target = job.target
-            if target then
-                local okV, valid = pcall(function()
-                    if target:isDead() then return false end
-                    local dx = target:getX() - job.player:getX()
-                    local dy = target:getY() - job.player:getY()
-                    return dx * dx + dy * dy <= job.r * job.r
-                end)
-                if not okV or not valid then
-                    target = nil
-                    job.target = nil
-                end
-            end
-            if not target then
-                target = pickHeliTarget(job, now)
-                job.target = target
-                if target then
-                    print("[PongDu][Heli] lock zid=" .. target:getOnlineID())
-                end
-            end
+            local target = heliAcquireTarget(job, now)
 
             -- 미탐지 히스테리시스: 반경 경계에서 좀비가 순간적으로 들락날락하면
             -- 매 스캔 CLEAR<->ENGAGE가 반복돼 LMG 루프가 재시작될 때마다
@@ -1173,25 +1186,49 @@ local function processHeliJobs()
                     end
                     print("[PongDu][Heli] ENGAGE")
                 end
-                payload.id = target:getOnlineID()
-                payload.x, payload.y, payload.z = target:getX(), target:getY(), target:getZ()
-                job.nShot = (job.nShot or 0) + 1
-                -- 크리티컬/일반 굴림은 서버에서 한다(클라마다 굴리면 같은 탄의
-                -- 결과가 클라별로 갈린다). 데미지 수치 적용은 소유 클라가
-                -- 샌드박스(FireSupport_CritDamage/NormalDamage)를 읽어서 한다.
-                -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
-                if ZombRand(100) < job.kc then
-                    payload.crit = 1
-                    job.nCrit = (job.nCrit or 0) + 1
-                    -- 크리티컬은 기본값(6)이면 확정 사살이라 즉시 락을 풀고 다음 발에
-                    -- 새 타겟을 고른다. 서버 isDead() 는 시체 sync 이후에나 true 라
-                    -- 그걸 기다리면 죽은 놈에게 탄을 낭비한다.
-                    job.target = nil
-                    job.killed[payload.id] = now + HELI_KILL_TTL
-                    print("[PongDu][Heli] shot CRIT zid=" .. payload.id)
+                -- 이번 틱에 쏠 발수. nextAt 을 누적 기준(nextAt += iv)으로 굴리므로
+                -- 틱이 밀린 만큼 몰아서 쏜다(구버전 nextAt = now + iv 는 틱 지터마다
+                -- 한 틱씩 통째로 건너뛰어 100ms 설정에서 실발수가 60%였다).
+                local due = math.floor((now - job.nextAt) / job.iv) + 1
+                if due > HELI_MAX_BURST then due = HELI_MAX_BURST end
+                local shots, ns = {}, 0
+                local t = target
+                for b = 1, due do
+                    if b > 1 then
+                        t = heliAcquireTarget(job, now)
+                        if not t then break end
+                    end
+                    local zid = t:getOnlineID()
+                    local shot = { id = zid, x = t:getX(), y = t:getY(), z = t:getZ(),
+                                   dt = (b - 1) * job.iv }
+                    job.nShot = (job.nShot or 0) + 1
+                    -- 크리티컬/일반 굴림은 서버에서 한다(클라마다 굴리면 같은 탄의
+                    -- 결과가 클라별로 갈린다). 데미지 수치 적용은 소유 클라가
+                    -- 샌드박스(FireSupport_CritDamage/NormalDamage)를 읽어서 한다.
+                    -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
+                    if ZombRand(100) < job.kc then
+                        shot.crit = 1
+                        job.nCrit = (job.nCrit or 0) + 1
+                        -- 크리티컬은 기본값(6)이면 확정 사살이라 즉시 락을 풀고 다음 발에
+                        -- 새 타겟을 고른다. 서버 isDead() 는 시체 sync 이후에나 true 라
+                        -- 그걸 기다리면 죽은 놈에게 탄을 낭비한다.
+                        job.target = nil
+                        job.killed[zid] = now + HELI_KILL_TTL
+                    else
+                        -- 일반: 락 유지. 누적 데미지로 죽으면 락온 검사의 isDead() 로 풀린다.
+                        shot.crit = 0
+                    end
+                    ns = ns + 1
+                    shots[ns] = shot
+                end
+                payload.shots = shots
+                payload.n = ns
+                payload.x, payload.y = shots[1].x, shots[1].y   -- fsBroadcastFire 근접 판정용
+                if due >= HELI_MAX_BURST and now - job.nextAt > HELI_MAX_BURST * job.iv then
+                    -- 서버가 크게 멈췄다 온 경우: 밀린 걸 다 쏘지 않고 재동기화.
+                    job.nextAt = now + job.iv
                 else
-                    -- 일반: 락 유지. 누적 데미지로 죽으면 위 락온 검사의 isDead() 로 풀린다.
-                    payload.crit = 0
+                    job.nextAt = job.nextAt + due * job.iv
                 end
             else
                 if job.engaged == true and job.missStreak >= HELI_MISS_THRESHOLD then
@@ -1229,11 +1266,8 @@ local function processHeliJobs()
                 job.radioCleared = false
             end
 
-            if not payload.id then
-                -- 대상이 없으면 아무것도 보내지 않는다
-            else
+            if payload.shots then
                 fsBroadcastFire("HeliFire", payload)
-                job.nextAt = now + job.iv
             end
         end
     end
@@ -1848,46 +1882,13 @@ local _droneJobs = {}
 
 local DRONE_APPROACH_MS = 1000    -- 스폰점 → 궤도 진입까지
 local DRONE_DEPART_MS   = 1000    -- 궤도 이탈 → 소멸까지
-local DRONE_DEPART_DIST = 60      -- 이탈 비행 거리(타일). 1초에 이만큼 = 화면 밖
-local DRONE_TWO_PI      = 6.2831853
 -- 공전 반경/주기. 샌드박스(Drone_OrbitRadius/Drone_OrbitPeriod)에서 뺐다 --
 -- 연출 전용 값이라 서버마다 바꿀 일이 없다. 값은 기존 샌드박스 기본값 그대로.
 local DRONE_ORBIT_R     = 5       -- 타일
 local DRONE_PERIOD_S    = 6       -- 1회전(초)
 
--- 공전 위치. 서버와 파일럿 클라가 **같은 식**을 써야 한다(클라 쪽 사본은
--- firesupport.lua droneComputePos). 한쪽만 고치면 실차량과 탄착점이 어긋난다.
---
--- theta 증가 = 화면상 시계방향. IsoUtils.XToScreen ∝ (x-y),
--- YToScreen ∝ (x+y) 이므로 theta 0/90/180/270 이 화면상 4:30/7:30/10:30/1:30
--- 에 대응한다 — 즉 증가 방향이 시계방향이다(엔진 소스로 4방위 검산 완료).
-local function droneComputePos(j, cx, cy, now)
-    local el = now - j.t0
-    if el < 0 then el = 0 end
-
-    if el < DRONE_APPROACH_MS then
-        local t  = el / DRONE_APPROACH_MS
-        local ex = cx + math.cos(j.theta0) * j.orbitR
-        local ey = cy + math.sin(j.theta0) * j.orbitR
-        return j.sx + (ex - j.sx) * t, j.sy + (ey - j.sy) * t, "APPROACH"
-    end
-
-    local oel = el - DRONE_APPROACH_MS
-    if oel < j.orbitMs then
-        local th = j.theta0 + (oel / j.periodMs) * DRONE_TWO_PI
-        return cx + math.cos(th) * j.orbitR, cy + math.sin(th) * j.orbitR, "ORBIT"
-    end
-
-    -- 이탈: 궤도 종료 지점에서 접선 방향으로 직진. 시계방향 진행이므로
-    -- 접선은 theta+90도, 즉 (-sin, cos).
-    local t = (oel - j.orbitMs) / DRONE_DEPART_MS
-    if t > 1 then t = 1 end
-    local thE = j.theta0 + (j.orbitMs / j.periodMs) * DRONE_TWO_PI
-    local ex  = cx + math.cos(thE) * j.orbitR
-    local ey  = cy + math.sin(thE) * j.orbitR
-    return ex - math.sin(thE) * DRONE_DEPART_DIST * t,
-           ey + math.cos(thE) * DRONE_DEPART_DIST * t, "DEPART"
-end
+-- 공전 위치 계산은 클라(firesupport.lua droneComputePos)에만 있다. 사격이
+-- 클라 권한으로 넘어가면서 서버는 위치를 쓸 일이 없어졌다(DroneShots 주석 참조).
 
 -- 실차량 스폰. 헬기 droneSpawn 대응물 — 청크 미로드 시 nil 을 돌려주고
 -- 호출측이 좌표만으로 진행하게 둔다(연출 없이도 킬은 돌아야 하므로).
@@ -1960,7 +1961,8 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
             local pl2 = getOnlinePlayers()
             for k = 0, pl2:size() - 1 do
                 sendServerCommand(pl2:get(k), "PongDuFireSupport", "DroneExtend",
-                    { addMs = dur * 1000, own = ex.own })
+                    { addMs = dur * 1000, own = ex.own,
+                      dr = detR, iv = iv, kc = kc, kd = kd })
             end
             print(string.format(
                 "[PongDu][Drone] job EXTENDED +%ds (orbit total %ds) sender=%s",
@@ -1987,16 +1989,8 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         sender  = sender,
         vehicle = nil,
         -- zid -> 억제 만료(ms). 동기화 공백 동안 재타겟을 막는다.
-        suppress = {},
-        -- zid -> { at = kd 판정 시각(ms), st = 그 시점 서버가 보던 realState }.
-        -- DRONE_KD_HOLD_MS 참조.
-        kdMark = {},
-        rtLogAt = 0,   -- re-target 로그 스로틀
-        -- 튜닝용 집계. 정상 동작이면 nSwitch 가 (nCrit + nKd) 에 근접한다 --
-        -- 넘기거나 크리티컬을 넣은 직후 다음 대상으로 옮겨갔다는 뜻이다. nSwitch 가
-        -- 그보다 훨씬 작으면 같은 놈을 계속 두들기고 있는 것.
-        nShot = 0, nCrit = 0, nKd = 0, nSwitch = 0,
-        lastId = nil,
+        -- 집계(종료 로그용). 사격은 클라가 하고 DroneShots 로 보고한 걸 센다.
+        nShot = 0, nCrit = 0, nKd = 0, nBatch = 0,
     }
 
     local v = droneSpawnVehicle(sx, sy, oz)
@@ -2018,11 +2012,13 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
 
     -- 전 클라에 시작 통보. 경로 좌표는 보내지 않는다 — 공전 중심이
     -- 플레이어라 각 클라가 매 틱 직접 읽어야 하기 때문(헬기와 다른 지점).
+    -- dr/iv/kc/kd: 조준·사격은 대상 플레이어 클라가 한다(DroneShots 주석 참조).
     local payload = {
         vid = job.vid, pilot = player:getOnlineID(), own = job.own,
         sx = sx, sy = sy, oz = oz, th0 = job.theta0,
         orbitR = orbitR, orbitMs = job.orbitMs, periodMs = job.periodMs,
         target = player:getUsername(), sender = sender,
+        dr = detR, iv = iv, kc = kc, kd = kd,
     }
     local players = getOnlinePlayers()
     for k = 0, players:size() - 1 do
@@ -2035,205 +2031,83 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         math.floor(sx), math.floor(sy), tostring(job.vid), tostring(sender)))
 end
 
--- ── 위협도 우선순위 판정 (realState 기반) ──────────────────────────────────
---
--- [왜 isOnFloor() 를 못 쓰는가]
---   getBooleanVariables() 는 onFloor 를 bit 256 에 실어 보내지만, 받는 쪽
---   setBooleanVariables() 가 isReanimatedPlayer() 일 때만 setOnFloor() 를
---   적용한다 (NetworkZombieVariables.java:94). 서버의 수신 경로
---   NetworkZombiePacker.applyZombie() 도 이 함수를 타므로, 일반 좀비의
---   서버측 isOnFloor() 는 영구히 false 다. 서버는 knockDown() 을 직접 부르지도
---   않아 자체 상태머신으로 true 가 될 경로도 없다. bKnockedDown 은 애초에
---   패킷에 없다. 즉 구 isOnFloor() 기반 후순위 분기는 전체가 dead code 였고,
---   드론은 넉다운시킨 좀비를 계속 최근접으로 다시 골라 두들겼다.
---
--- [대신 realState]
---   NetworkZombieAI.set() 이 getAdvancedAnimator():getCurrentStateName() 을
---   packet.realState 에 싣고(:188~189), 서버가 applyZombie() 에서 그대로
---   반영한다(NetworkZombiePacker.java:251). Lua 에서는 IsoZombie:getRealState()
---   로 문자열을 읽는다. 값은 actiongroups/zombie/ 하위 디렉토리명과 1:1.
---   ※ 전파 지연은 짧지 않다. 상태 전환 시 extraUpdate() 가 불리긴 하지만
---   큐에 넣기만 하고, 실제 전송은 서버가 정해준 주기(주변 120타일에 다른
---   플레이어가 있으면 200ms, 없으면 4000ms)의 send() 에서만 일어난다.
---   혼자 플레이 중이면 최대 4초 늦다 -- DRONE_KD_HOLD_MS 주석 참조.
---
--- [우선순위를 나누는 이유]
---   realState 를 후순위(반응/제압 중) 판정에만 쓰다가, 위협도가 반대 방향인
---   상태 -- 물기 판정 중(attack) / 곧 물 것(lunge) -- 도 같은 값으로 구분
---   가능하다는 걸 이용해 최우선군을 추가했다. attack/lunge 는
---   walktoward -> lunge -> face-target -> attack 순으로 진행하는 좀비 AI의
---   정규 경로이며(actiongroups/zombie/lunge/transitions.xml 의 bAttack &&
---   isFacingTarget 조건), 이 상태로 관측됐다는 건 지금 위협이 실재한다는
---   뜻이라 방금 쐈다는 이유의 억제(suppress)보다 우선한다.
---
---   크롤러/fakeDead 는 여기 없다 -- 구 코드와 동일하게 "정상 사격 대상"으로
---   둔다(활동 중인 위협이므로). 크롤러가 피격 반응 중이면 zombie-crawler
---   액션그룹도 같은 이름의 상태를 쓰므로 자연히 후순위로 빠진다.
-local DRONE_REACTING_STATES = {
-    ["hitreaction"]       = true,
-    ["hitreaction-hit"]   = true,
-    ["hitwhilestaggered"] = true,
-    ["staggerback"]       = true,
-    ["falldown"]          = true,
-    ["onground"]          = true,
-    ["getup"]             = true,
-}
-
--- 위협도 최우선군: 실제로 무는 모션(공격 판정) 중인 좀비. bAttack &&
--- isFacingTarget 조건으로 lunge 에서 진입하며(actiongroups/zombie/lunge/
--- transitions.xml), bDead/bOnFloor/bStaggerBack 외엔 못 빠져나간다 --
--- 이 상태로 관측됐다는 건 지금 이 순간 공격 판정이 살아있다는 뜻이다.
-local DRONE_ATTACKING_STATES = {
-    ["attack"]         = true,
-    ["attack-network"] = true,
-}
-
--- 위협도 차순위군: 대상에게 근접해 팔을 뻗은 채 다가가는 중(bLunge).
--- walktoward/idle/pathfind 세 상태 전부 이 트리거 하나로 lunge 에 들어오며,
--- 다음 틱 얼굴이 맞으면 곧장 attack 으로 넘어간다 -- "곧 물 것"의 신호.
-local DRONE_LUNGING_STATES = {
-    ["lunge"]         = true,
-    ["lunge-network"] = true,
-}
-
--- realState 는 "클라가 반응을 시작한 뒤"에야 서버에 도착한다. 그 사이
--- (서버 발사 -> 클라 수신 -> knockDown -> anim 전환 -> 클라->서버 패킷)
--- 최소 1왕복이 비어 있고, iv 가 50ms(디폴트)면 그 구간에 같은 좀비에게
--- 여러 발이 더 나간다. 그래서 서버가 자기가 방금 처리한 zid 를 짧게
--- 기억해 후순위로 내린다 -- 이 창은 "동기화 공백을 메우는 용도"이며
--- 실제 기상 시간까지 커버하는 건 위 realState 체크 쪽이다.
--- 킬도 같은 이유로 억제한다: becomeCorpse 는 소유 클라에서 일어나고
--- 서버의 isDead() 는 시체 sync 이후에나 true 가 된다.
---
--- 주의: 이 억제는 "아직 못 받은 상태"에 대한 추측일 뿐이라, realState 로
--- attack/lunge 가 실제로 확인된 좀비에는 적용하지 않는다 -- 방금 쐈다는
--- 이유로 지금 물고 있는 놈의 우선순위를 낮추면 안 된다.
-local DRONE_SUPPRESS_MS = 1000
-
--- 만료 항목 정리 + 신규 등록. pairs 순회 중 t[k]=nil 의 안전성이 Kahlua
--- 에서 보장되지 않으므로 새 테이블로 재구성한다. 억제창이 1초라 항목 수는
--- 항상 수십개 이하고, 호출은 킬/넉다운 시에만 발생한다.
--- ── 넉다운 홀드 ──────────────────────────────────────────────────────────
--- [왜 억제창(1초)만으로는 부족한가]
---   소유 클라의 좀비 상태 패킷 주기는 서버가 정해준다(GameClient.
+-- ── 드론 사격: 대상 플레이어 클라 권한 ─────────────────────────────────────
+-- [왜 서버에서 조준하지 않는가]
+--   소유 클라의 좀비 패킷 주기는 서버가 정해준다(GameClient.
 --   receiveZombieSimulation): 120타일 안에 다른 플레이어가 있으면 200ms,
---   없으면 4000ms. 상태 전환 시 extraUpdate() 는 ExtraSendQueue 에 넣기만
---   하고, 그 큐도 같은 주기의 send() 에서만 비워진다(IsoCell.java:4198,
---   NetworkZombieSimulator.send). 즉 혼자 플레이 중이면 서버의 realState 는
---   최대 4초 늦는다 -- 넘어진 좀비가 서버엔 계속 walktoward/attack 으로 보여
---   억제창 1초가 끝나면 다시 정상/최우선 대상으로 잡혔다.
---   특히 attack/lunge 는 억제창보다 우선하므로, 물던 좀비를 넘어뜨리면
---   낡은 "attack" 때문에 누운 채로 계속 1순위였다.
+--   없으면 4000ms. 상태 전환 시 extraUpdate() 도 큐에 넣기만 하고 같은 주기의
+--   send() 에서만 나간다(IsoCell.java:4198, NetworkZombieSimulator.send).
+--   혼자 플레이 중이면 서버의 좀비 위치/realState 는 최대 4초 늦고,
+--   isOnFloor() 는 아예 동기화되지 않는다(NetworkZombieVariables.java:94).
+--   실측(재타깃 로그): kd 후 3.5초가 지나도 서버 realState 가 kd 전 값 그대로,
+--   크리티컬로 죽은 좀비가 서버엔 lunge 로 남아 1순위로 재사격.
+--   "가장 가까운 위협 제압" 은 이 정보로는 불가능해서 조준/굴림을 대상
+--   플레이어 클라(주변 좀비 대부분의 소유자)로 옮겼다. 서버는 수명(스폰/공전
+--   시간/종료)과 중계만 맡는다.
 --
--- [홀드 규칙] kd 를 내린 건 서버 자신이므로 네트워크 상태보다 이 사실을 우선한다.
---   kd 판정 시 그 순간의 realState 를 같이 저장하고, DRONE_KD_HOLD_MS 동안:
---     realState == 저장값      -> 새 패킷이 아직 안 옴(낡은 정보) -> 후순위 고정
---     realState 가 반응 상태   -> 넘어짐/기상 중 확인 -> 후순위
---     그 외로 바뀜(attack 포함) -> 새 패킷으로 일어난 게 확인됨 -> 홀드 해제
---   만료 후에는 기존 로직(realState + 억제창)으로 돌아간다.
-local DRONE_KD_HOLD_MS = 5000
+-- [흐름]  대상 클라: 프레임마다 조준+굴림+로컬 적용 -> 약 100ms 마다 묶어서
+--   DroneShots 전송 -> 서버: 집계 + 발사 클라를 뺀 근처 클라에 DroneFire 중계
+--   -> 받은 클라: dt 만큼 지연 재생(예광탄) + 자기가 소유한 좀비면 데미지.
 
-local function droneKdMark(job, zid, st, now)
-    local fresh = {}
-    for k, v in pairs(job.kdMark) do
-        if now - v.at < DRONE_KD_HOLD_MS then fresh[k] = v end
+-- 보고 1건에 받는 최대 발수. 클라 배치 주기(100ms) x 최소 간격(10ms) = 10 에
+-- 프레임 지터 여유를 둔 값. 넘는 건 잘라서 중계한다(비정상 클라 방어).
+local DRONE_MAX_SHOTS_PER_BATCH = 20
+
+local function droneJobOf(player)
+    for i = 1, #_droneJobs do
+        if _droneJobs[i].player == player then return _droneJobs[i] end
     end
-    fresh[zid] = { at = now, st = st }
-    job.kdMark = fresh
+    return nil
 end
 
-local function droneSuppress(job, zid, now)
-    local fresh = {}
-    for k, v in pairs(job.suppress) do
-        if v > now then fresh[k] = v end
+DOServer["PongDuFireSupport"]["DroneShots"] = function(player, data)
+    local job = droneJobOf(player)
+    if not job then
+        print("[PongDu][Drone] DroneShots from " .. tostring(player and player:getUsername())
+            .. " without active job -- dropped")
+        return
     end
-    fresh[zid] = now + DRONE_SUPPRESS_MS
-    job.suppress = fresh
-end
-
--- 인식 반경 기준: 예전엔 드론(공전 좌표) 기준이었으나, 저격/헬기와 통일해
--- 플레이어 기준으로 바꿨다. 드론 파라미터명이 "인식 반경"인데 실제로는
--- 드론이 계속 움직이는 공전 좌표에서 잰 거라 체감 반경이 매 프레임 바뀌는
--- 것처럼 느껴졌던 문제도 겸사겸사 해결됨 -- 이제 플레이어 위치 고정 기준.
--- 필터/정렬 둘 다 플레이어 기준이라 pickSniperTarget과 동일한 규칙이 됐다.
--- table.sort 는 Kahlua TableLib 미등록이므로 단일 패스 최소값 탐색으로 처리.
---
--- 4단계 위협도 우선순위(각 군 내에서는 플레이어 최근접):
---   1) bestA 공격 판정 중(attack/attack-network)      -- 지금 물고 있음
---   2) bestL 돌진 접근 중(lunge/lunge-network)          -- 곧 물 것
---   3) best  그 외 정상 상태(걷기/추적 등)
---   4) bestD 반응/제압 중이거나 방금 처리한 대상(억제창) -- 지금 쏴봤자 낭비
-local function pickDroneTarget(job, now)
-    local ok, cx, cy, cell = pcall(function()
-        return job.player:getX(), job.player:getY(), job.player:getCell()
-    end)
-    if not ok then return nil end
-    local zl = cell and cell:getZombieList()
-    if not zl then return nil end
-
-    local dr2 = job.dr * job.dr
-    local sup = job.suppress
-    local kdm = job.kdMark
-    local bestA, bestAPD2 = nil, nil     -- 공격 판정 중
-    local bestL, bestLPD2 = nil, nil     -- 돌진 접근 중
-    local best,  bestPD2  = nil, nil     -- 정상 사격 대상
-    local bestD, bestDPD2 = nil, nil     -- 후순위 대상
-    for i = 0, zl:size() - 1 do
-        local z = zl:get(i)
-        if z and not z:isDead() then
-            local zx, zy = z:getX(), z:getY()
-            local pdx, pdy = zx - cx, zy - cy
-            local pd2 = pdx * pdx + pdy * pdy
-            if pd2 <= dr2 then                              -- 플레이어 기준 인식
-                local okf, st = pcall(function() return z:getRealState() end)
-                st = okf and st or nil
-
-                -- 넉다운 홀드(DRONE_KD_HOLD_MS 주석 참조). 걸리면 attack/lunge
-                -- 여부와 무관하게 후순위군으로 보낸다.
-                local held = false
-                local mark = kdm[z:getOnlineID()]
-                if mark and now - mark.at < DRONE_KD_HOLD_MS then
-                    if st == mark.st or (st and DRONE_REACTING_STATES[st]) then
-                        held = true
-                    end
-                end
-
-                if held then
-                    if (not bestDPD2) or pd2 < bestDPD2 then
-                        bestD, bestDPD2 = z, pd2
-                    end
-                elseif st and DRONE_ATTACKING_STATES[st] then
-                    if (not bestAPD2) or pd2 < bestAPD2 then
-                        bestA, bestAPD2 = z, pd2
-                    end
-                elseif st and DRONE_LUNGING_STATES[st] then
-                    if (not bestLPD2) or pd2 < bestLPD2 then
-                        bestL, bestLPD2 = z, pd2
-                    end
-                else
-                    local low = false
-                    if st and DRONE_REACTING_STATES[st] then
-                        low = true
-                    else
-                        local exp = sup[z:getOnlineID()]
-                        if exp and now < exp then low = true end
-                    end
-
-                    if low then
-                        if (not bestDPD2) or pd2 < bestDPD2 then
-                            bestD, bestDPD2 = z, pd2
-                        end
-                    elseif (not bestPD2) or pd2 < bestPD2 then  -- 플레이어 기준 최근접
-                        best, bestPD2 = z, pd2
-                    end
-                end
-            end
+    local shots = data and data.shots
+    local n = tonumber(data and data.n) or 0
+    if not shots or n <= 0 then return end
+    if n > DRONE_MAX_SHOTS_PER_BATCH then
+        print("[PongDu][Drone] DroneShots batch too large n=" .. tostring(n) .. " -- truncated")
+        n = DRONE_MAX_SHOTS_PER_BATCH
+    end
+    local out, m = {}, 0
+    for i = 1, n do
+        local sh = shots[i]
+        if sh then
+            m = m + 1
+            out[m] = sh
+            job.nShot = job.nShot + 1
+            if tonumber(sh.crit) == 1 then job.nCrit = job.nCrit + 1 end
+            if tonumber(sh.kd) == 1 then job.nKd = job.nKd + 1 end
         end
     end
-    if bestA then return bestA, "attack" end
-    if bestL then return bestL, "lunge" end
-    if best  then return best,  "normal" end
-    return bestD, "fallback"
+    if m == 0 then return end
+    job.nBatch = job.nBatch + 1
+    local first = out[1]
+    fsBroadcastFire("DroneFire", {
+        own = job.own, oz = job.oz,
+        ox = tonumber(data.ox) or 0, oy = tonumber(data.oy) or 0,
+        tx = tonumber(first.tx) or 0, ty = tonumber(first.ty) or 0,
+        shots = out, n = m,
+    }, player)
+end
+
+-- 교전 상태(드론 기관총 루프음) 중계. 발사 클라는 이미 로컬로 전환했다.
+DOServer["PongDuFireSupport"]["DroneEngaged"] = function(player, data)
+    local job = droneJobOf(player)
+    if not job then return end
+    local cmd = (tonumber(data and data.on) == 1) and "DroneEngage" or "DroneClear"
+    local players = getOnlinePlayers()
+    for k = 0, players:size() - 1 do
+        local p = players:get(k)
+        if p ~= player then
+            sendServerCommand(p, "PongDuFireSupport", cmd, { own = job.own })
+        end
+    end
 end
 
 local function droneFinish(job, reason)
@@ -2256,8 +2130,8 @@ local function droneFinish(job, reason)
         sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", { own = job.own })
     end
     print(string.format(
-        "[PongDu][Drone] job finished (%s) shots=%d crits=%d knockdowns=%d switches=%d",
-        tostring(reason), job.nShot or 0, job.nCrit or 0, job.nKd or 0, job.nSwitch or 0))
+        "[PongDu][Drone] job finished (%s) shots=%d crits=%d knockdowns=%d batches=%d",
+        tostring(reason), job.nShot or 0, job.nCrit or 0, job.nKd or 0, job.nBatch or 0))
 end
 
 local function processDroneJobs()
@@ -2285,92 +2159,8 @@ local function processDroneJobs()
         elseif now >= job.endAt then
             droneFinish(job, "duration elapsed")
             table.remove(_droneJobs, i)
-        else
-            local dx, dy, phase = droneComputePos(job, cx, cy, now)
-
-            -- 사격은 ORBIT 단계에서만. 접근/이탈 중엔 쏘지 않는다.
-            if phase == "ORBIT" and now >= job.nextAt then
-                job.nextAt = now + job.iv
-                local z, why = pickDroneTarget(job, now)
-
-                -- 검증 로그: 최근 kd/억제를 건 좀비를 다시 쏘는 경우만 남긴다.
-                -- 폴백으로 누운 좀비를 연사하면 발당 찍혀서 500ms 스로틀.
-                if z and now - job.rtLogAt >= 500 then
-                    local rid  = z:getOnlineID()
-                    local mk   = job.kdMark[rid]
-                    local sexp = job.suppress[rid]
-                    local inKd  = mk and now - mk.at < DRONE_KD_HOLD_MS
-                    local inSup = sexp and now < sexp
-                    if inKd or inSup then
-                        job.rtLogAt = now
-                        local okS, rst = pcall(function() return z:getRealState() end)
-                        print(string.format(
-                            "[PongDu][Drone] re-target zid=%d reason=%s state=%s kdState=%s sinceKd=%s suppressed=%s",
-                            rid, tostring(why), tostring(okS and rst or "?"),
-                            tostring(mk and mk.st or "-"),
-                            mk and tostring(now - mk.at) or "-",
-                            tostring(inSup and true or false)))
-                    end
-                end
-                -- 교전 상태 전환. 헬기와 달리 히스테리시스를 두지 않는다 --
-                -- 드론은 락온을 매 발 재선정하므로 대상 유무만 보면 된다.
-                local players0 = getOnlinePlayers()
-                if z and not job.engaged then
-                    job.engaged = true
-                    for k = 0, players0:size() - 1 do
-                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneEngage", { own = job.own })
-                    end
-                elseif (not z) and job.engaged then
-                    job.engaged = false
-                    for k = 0, players0:size() - 1 do
-                        sendServerCommand(players0:get(k), "PongDuFireSupport", "DroneClear", { own = job.own })
-                    end
-                end
-                local payload = { ox = dx, oy = dy, oz = job.oz, sender = job.sender,
-                                  own = job.own }
-                if z then
-                    payload.id = z:getOnlineID()
-                    payload.tx = z:getX()
-                    payload.ty = z:getY()
-                    payload.tz = z:getZ()
-                    -- 크리티컬 굴림은 반드시 서버에서. 클라마다 굴리면 같은 탄인데
-                    -- 클라별로 데미지가 갈린다(저격과 동일한 이유). 데미지 수치
-                    -- 적용은 소유 클라가 샌드박스를 읽어서 한다.
-                    --
-                    -- 넉다운 굴림도 같이 서버로 올렸다. 클라측 굴림이면 (a) 클라별로
-                    -- 넘어진 놈이 갈리고 (b) 서버가 자기가 넘긴 대상을 몰라서
-                    -- 억제창을 걸 수 없다. 결과는 kdHit 로 내려보낸다.
-                    -- 불리언 false 는 테이블 직렬화에서 사라질 수 있어 1/0 정수 사용.
-                    local zid = payload.id
-                    job.nShot = job.nShot + 1
-                    if ZombRand(100) < job.kc then
-                        payload.crit = 1
-                        job.nCrit = job.nCrit + 1
-                        droneSuppress(job, zid, now)
-                    else
-                        payload.crit = 0
-                        local kdHit = ZombRand(100) < job.kd
-                        payload.kdHit = kdHit and 1 or 0    -- 일반 데미지 + (넉다운 or 움찔)
-                        if kdHit then
-                            job.nKd = job.nKd + 1
-                            droneSuppress(job, zid, now)
-                            local okK, kst = pcall(function() return z:getRealState() end)
-                            droneKdMark(job, zid, okK and kst or nil, now)
-                        end
-                    end
-                    if job.lastId ~= zid then
-                        if job.lastId then job.nSwitch = job.nSwitch + 1 end
-                        job.lastId = zid
-                    end
-                end
-                -- 대상 없는 발은 아예 보내지 않는다. 클라 handleDroneFire 가
-                -- id 없는 패킷을 즉시 return 으로 버리므로 100% 낭비였다
-                -- (iv 25ms 기준 무교전 구간 내내 초당 40패킷 x 접속자 수).
-                if payload.id then
-                    fsBroadcastFire("DroneFire", payload)
-                end
-            end
         end
+        -- 사격은 대상 플레이어 클라가 한다(DroneShots). 서버는 수명만 관리.
     end
 end
 

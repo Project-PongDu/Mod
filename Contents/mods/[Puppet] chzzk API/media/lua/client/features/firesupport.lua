@@ -1310,8 +1310,8 @@ local function droneCenter(d)
     return nil
 end
 
--- 서버 droneComputePos와 **반드시 같은 식**. 한쪽만 고치면 실차량과 탄착점이
--- 어긋난다. theta 증가 = 화면상 시계방향(IsoUtils.XToScreen ∝ x-y,
+-- 공전 위치(서버엔 사본이 없다 -- 사격이 클라 권한이라 서버는 위치를 안 쓴다).
+-- 파일럿 클라(실차량 이동)와 사격 클라(ORBIT 판정)가 같이 쓴다. theta 증가 = 화면상 시계방향(IsoUtils.XToScreen ∝ x-y,
 -- YToScreen ∝ x+y 로 4방위 검산 완료).
 local function droneComputePos(d)
     if not d then return nil end
@@ -1544,6 +1544,13 @@ local function droneRemove(own, reason)
     local d = _drones[own]
     if not d then return end
     _drones[own] = nil
+    if d.st then
+        -- 대상 플레이어 클라의 조준 집계. A/L/N/D = 우선순위 군별 발수,
+        -- idle = 대상이 없어 쉰 발. D 비중이 크면 폴백(제압 중 좀비)을 많이 쐈다는 뜻.
+        print(string.format(
+            "[PongDu] fire_support/drone local summary shots=%d crits=%d kds=%d A=%d L=%d N=%d D=%d idle=%d",
+            d.st.shots, d.st.crits, d.st.kds, d.st.A, d.st.L, d.st.N, d.st.D, d.st.idle))
+    end
     print("[PongDu] fire_support/drone: instance removed own=" .. tostring(own)
         .. " (" .. tostring(reason) .. ") remaining=" .. tostring(tcount(_drones)))
     if own == myOnlineID() then droneTimerHide() end
@@ -1578,6 +1585,11 @@ local function droneUpsert(args)
         target   = args.target,
         bladeStep = 0,
         engaged  = false,
+        -- 사격 파라미터. 대상 플레이어 클라만 쓴다(droneFireTick).
+        dr = tonumber(args.dr) or 20,
+        iv = tonumber(args.iv) or 25,
+        kc = tonumber(args.kc) or 10,
+        kd = tonumber(args.kd) or 80,
     }
     -- SP에선 양쪽 onlineID가 모두 -1이라 자동으로 파일럿이 된다(헬기와 동일).
     d.amPilot = (me ~= nil) and (args.pilot ~= nil)
@@ -1606,88 +1618,301 @@ local function droneExtend(args)
     end
     local addMs = tonumber(args.addMs) or 0
     d.orbitMs = d.orbitMs + addMs
+    -- 파라미터는 최신 후원 기준으로 갱신(서버 job 갱신과 동일 정책).
+    if args.dr then d.dr = tonumber(args.dr) or d.dr end
+    if args.iv then d.iv = tonumber(args.iv) or d.iv end
+    if args.kc then d.kc = tonumber(args.kc) or d.kc end
+    if args.kd then d.kd = tonumber(args.kd) or d.kd end
     if d.stopAt then d.stopAt = d.stopAt + addMs end
     if own == myOnlineID() and _droneEndAt then _droneEndAt = _droneEndAt + addMs end
     print("[PongDu] fire_support/drone: extended +" .. tostring(addMs)
         .. "ms own=" .. tostring(own))
 end
 
--- ── 사격 1발 처리 ──────────────────────────────────────────────────────────
--- 드론: 저격 SniperFire와 같은 구조지만 관통이 없고, 크리티컬/넉다운 판정은
--- 서버가 이미 굴려서 내려보낸 결과를 그대로 적용한다.
-local function handleDroneFire(args)
-    local ox = tonumber(args.ox) or 0
-    local oy = tonumber(args.oy) or 0
-    local oz = tonumber(args.oz) or 0
-    local id = tonumber(args.id)
-
-    if not id then
-        -- 인식 반경 내 대상 없음. 연출 없이 스킵(로그도 남기지 않는다 --
-        -- iv가 100ms라 대상 없는 구간에서 콘솔이 폭발한다).
-        return
-    end
-
-    -- 실차량(또는 계산 좌표 폴백)을 예광탄 원점으로 쓴다 -- 서버 발사 시점
-    -- 좌표보다 화면의 드론과 정확히 일치한다.
-    local own = tonumber(args.own)
-    local d = own and _drones[own] or nil
-    if d then
-        local dx2, dy2 = droneCurPos(d)
-        if dx2 then ox, oy = dx2, dy2 end
-    end
-
-    local z = findZombieById(id)
-    -- 서버 좌표는 선정 시점 값이라 그 사이 움직였을 수 있다. 살아있으면 현재
-    -- 좌표로 조준한다(저격과 동일).
-    local tx, ty, tz = tonumber(args.tx) or 0, tonumber(args.ty) or 0, tonumber(args.tz) or 0
-    if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
-    addTracer(ox, oy, oz, tx, ty, tz, DRONE_ALT_PX, TRACER_ALPHA_FAINT)
-
-    if not z or z:isDead() then return end
-
-    -- 크리티컬/일반 모두 명중. 넉다운은 일반탄에만 서버가 kdHit(1/0)로 굴려준다.
-    local crit = tonumber(args.crit) == 1
-    local kd   = (not crit) and tonumber(args.kdHit) == 1
-    fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
-end
-
--- 헬기: 락온 좀비에 매 발 명중. crit=1 이면 크리티컬, 0 이면 일반 데미지.
--- (구버전의 "사살 아니면 ±2타일 빗나감" 연출은 데미지 방식 전환으로 제거)
--- 헬기 원점 고도(px). 예광탄은 실제 3D 렌더와 무관한 수제 스크린좌표 연출이라
--- HELI_FLY_ALT(물리 y)와 원래 안 이어져 있었다. 정확한 물리y->스크린px 변환식은
--- 엔진 렌더러 내부값이라 알 수 없어서, 처음 튜닝됐던 3.0px<->260px
--- 비율(≈86.7px/unit)을 그대로 적용해 최소한 "같이 움직이게"는 만든다.
+-- ═══════════════════════════════════════════════════════════════════════════
+--  발사 재생 (헬기/드론 공용)
+--
+--  서버 틱은 약 10Hz(실측: 드론 25ms 설정에서 60초 590발)라 한 틱 1발 구조로는
+--  100ms 보다 짧은 간격이 불가능했다. 이제 한 패킷에 여러 발(shots 배열)이
+--  오고, 각 발의 dt(ms) 만큼 지연 재생해서 연사 간격을 복원한다.
+--    헬기: 서버가 틱마다 밀린 발수를 몰아 굴려 보낸다(server.lua HELI_MAX_BURST).
+--    드론: 대상 플레이어 클라가 직접 쏘고 약 100ms 마다 묶어 보고한 걸 서버가
+--          다른 클라에 중계한다(droneFireTick / server.lua DroneShots).
+-- ═══════════════════════════════════════════════════════════════════════════
 local HELI_ALT_PX_PER_UNIT = 86.7
 local HELI_ALT     = HELI_FLY_ALT * HELI_ALT_PX_PER_UNIT
+-- ↑ 헬기 원점 고도(px). 예광탄은 실제 3D 렌더와 무관한 수제 스크린좌표 연출이라
+--   물리 y->스크린px 변환식을 알 수 없어, 처음 튜닝된 3.0px<->260px 비율
+--   (≈86.7px/unit)로 최소한 "같이 움직이게"만 만든다.
 
-local function handleHeliFire(args)
-    local ox = tonumber(args.ox) or 0
-    local oy = tonumber(args.oy) or 0
-    local oz = tonumber(args.oz) or 0
-    local id = tonumber(args.id)
-    local tx = tonumber(args.x) or 0
-    local ty = tonumber(args.y) or 0
-    local tz = tonumber(args.z) or 0
-    local crit = tonumber(args.crit) == 1
+local _fsQueue = {}   -- { at, kind, own, ox, oy, oz, shot }
 
+-- 헬기 1발: 락온 좀비에 명중. crit=1 크리티컬, 0 일반.
+local function heliShotPlay(own, ox, oy, oz, sh)
+    local id = tonumber(sh.id)
+    local tx, ty, tz = tonumber(sh.x) or 0, tonumber(sh.y) or 0, tonumber(sh.z) or 0
     local z = id and findZombieById(id) or nil
     if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
-
-    -- 실차량(또는 폴백 경로 보간) 좌표를 예광탄 원점으로 쓴다 -- 서버 발사
-    -- 시점 좌표(ox,oy)보다 화면의 헬기와 정확히 일치한다.
-    local own = tonumber(args.own)
+    -- 실차량(또는 폴백 경로 보간) 좌표를 예광탄 원점으로 쓴다.
     local h = own and _helis[own] or nil
     if h then
         local px2, py2 = heliCurPos(h)
         if px2 then ox, oy = px2, py2 end
     end
-
     addTracer(ox, oy, oz, tx, ty, tz, HELI_ALT)
+    -- 총성은 pongdu_heli_lmg 루프가 교전 내내 재생 중이라 발당 트리거 없음.
+    fsApplyShot(z, id, fsShotHp("heli", tonumber(sh.crit) == 1), tonumber(sh.crit) == 1, false, "heli")
+end
 
-    -- 발당 트리거 없음: 총성은 pongdu_heli_lmg 루프가 교전 구간 내내 재생
-    -- 중이라 여기선 예광탄/데미지만 처리한다. 볼륨 갱신도 OnTick 이 맡는다.
+-- 드론 1발(중계 수신측). 넉다운은 일반탄에만 발사 클라가 굴려 보낸다.
+local function droneShotPlay(own, ox, oy, oz, sh)
+    local id = tonumber(sh.id)
+    local d = own and _drones[own] or nil
+    if d then
+        local dx2, dy2 = droneCurPos(d)
+        if dx2 then ox, oy = dx2, dy2 end
+    end
+    local z = id and findZombieById(id) or nil
+    local tx, ty, tz = tonumber(sh.tx) or 0, tonumber(sh.ty) or 0, tonumber(sh.tz) or 0
+    if z then tx, ty, tz = z:getX(), z:getY(), z:getZ() end
+    addTracer(ox, oy, oz, tx, ty, tz, DRONE_ALT_PX, TRACER_ALPHA_FAINT)
+    if not z or z:isDead() then return end
+    local crit = tonumber(sh.crit) == 1
+    local kd   = (not crit) and tonumber(sh.kd) == 1
+    fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
+end
 
-    fsApplyShot(z, id, fsShotHp("heli", crit), crit, false, "heli")
+local function fsPlay(kind, own, ox, oy, oz, sh)
+    local ok, err = pcall(function()
+        if kind == "heli" then heliShotPlay(own, ox, oy, oz, sh)
+        else droneShotPlay(own, ox, oy, oz, sh) end
+    end)
+    if not ok then
+        print("[PongDu] fire_support/" .. kind .. " shot play FAILED err=" .. tostring(err))
+    end
+end
+
+-- shots 배열 수신: dt<=0 은 즉시, 나머지는 큐에 넣어 OnTick 에서 재생.
+local function fsReceiveShots(kind, args)
+    local own = tonumber(args.own)
+    local ox, oy, oz = tonumber(args.ox) or 0, tonumber(args.oy) or 0, tonumber(args.oz) or 0
+    local shots = args.shots
+    local n = tonumber(args.n) or 0
+    if not shots or n <= 0 then
+        print("[PongDu] fire_support/" .. kind .. ": fire packet without shots")
+        return
+    end
+    local now = getTimestampMs()
+    for i = 1, n do
+        local sh = shots[i]
+        if sh then
+            local dt = tonumber(sh.dt) or 0
+            if dt <= 0 then
+                fsPlay(kind, own, ox, oy, oz, sh)
+            else
+                _fsQueue[#_fsQueue + 1] = { at = now + dt, kind = kind, own = own,
+                                            ox = ox, oy = oy, oz = oz, shot = sh }
+            end
+        end
+    end
+end
+
+local function fsQueueTick(now)
+    if #_fsQueue == 0 then return end
+    -- 순회 중 삭제 대신 남는 항목으로 새 배열을 만든다(Kahlua 안전).
+    local keep = {}
+    local q = _fsQueue
+    _fsQueue = keep
+    for i = 1, #q do
+        local e = q[i]
+        if now >= e.at then
+            fsPlay(e.kind, e.own, e.ox, e.oy, e.oz, e.shot)
+        else
+            keep[#keep + 1] = e
+        end
+    end
+end
+
+local function handleHeliFire(args)  fsReceiveShots("heli", args)  end
+local function handleDroneFire(args) fsReceiveShots("drone", args) end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  드론 조준/사격 (대상 플레이어 클라 권한)
+--
+--  [왜 클라인가] 서버가 보는 좀비 위치/realState 는 혼자일 때 최대 4초 늦고
+--  isOnFloor() 는 아예 안 온다(server.lua DroneShots 주석). 대상 플레이어 클라는
+--  주변 좀비 대부분의 소유자라 위치/상태/사망을 지연 없이 안다.
+--
+--  [우선순위] 각 군 안에서는 플레이어 최근접.
+--    A 공격 판정 중(attack)  >  L 돌진 중(lunge)  >  N 정상(걷기/추적)
+--    >  D 제압 중(넘어짐/기상/피격 반응) 또는 방금 쏜 원격 소유 좀비
+--  D 는 다른 후보가 없을 때만 쏜다(폴백 -- 현행 정책 유지).
+--
+--  [상태 읽기]
+--    내가 소유한 좀비: getActionStateName() -- 실제 상태머신 현재 상태.
+--      + isOnFloor()/isKnockedDown() -- 전환 프레임 사이도 잡는다.
+--    다른 클라 소유(원격) 좀비: getRealState() -- 소유 클라 패킷 값.
+--      이 경우는 근처에 다른 플레이어가 있다는 뜻이라 주기 200ms.
+--      isOnFloor 는 원격 좀비엔 동기화되지 않으므로 쓰지 않는다.
+--  [홀드] 내가 쏜 크리티컬/넉다운은 원격 좀비면 중계 왕복 + 상대 패킷
+--    동안 결과를 모르니 DRONE_REMOTE_HOLD_MS 동안 D 로 둔다. 로컬 좀비는
+--    다음 프레임 상태가 바로 보이지만 전환 1~2프레임 공백을 DRONE_LOCAL_HOLD_MS 로 덮는다.
+-- ═══════════════════════════════════════════════════════════════════════════
+local DRONE_BATCH_MS       = 100   -- 보고 묶음 주기
+local DRONE_MAX_BURST      = 8     -- 한 프레임 최대 발수(히칭 후 폭주 방지)
+local DRONE_LOCAL_HOLD_MS  = 150
+local DRONE_REMOTE_HOLD_MS = 800
+
+local DRONE_ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
+local DRONE_LUNGE_STATES  = { ["lunge"] = true, ["lunge-network"] = true }
+local DRONE_DOWN_STATES   = {
+    ["hitreaction"] = true, ["hitreaction-hit"] = true, ["hitwhilestaggered"] = true,
+    ["staggerback"] = true, ["falldown"] = true, ["onground"] = true, ["getup"] = true,
+}
+
+local function droneZombieState(z, remote)
+    local ok, st
+    if remote then
+        ok, st = pcall(function() return z:getRealState() end)
+    else
+        ok, st = pcall(function() return z:getActionStateName() end)
+    end
+    if ok and st then return tostring(st) end
+    return nil
+end
+
+-- 반환: 대상 좀비, 우선순위 군("A"|"L"|"N"|"D")
+local function dronePickTarget(d, cx, cy, now)
+    local cell = getCell()
+    local zl = cell and cell:getZombieList()
+    if not zl then return nil end
+    local dr2 = d.dr * d.dr
+    local hold = d.hold
+    local bA, dA, bL, dL, bN, dN, bD, dD
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local dx, dy = z:getX() - cx, z:getY() - cy
+            local d2 = dx * dx + dy * dy
+            if d2 <= dr2 then
+                local remote = z:isRemoteZombie()
+                local st = droneZombieState(z, remote)
+                local down = (st and DRONE_DOWN_STATES[st]) and true or false
+                if not remote and not down then
+                    local okF, fl = pcall(function() return z:isOnFloor() or z:isKnockedDown() end)
+                    down = okF and fl or false
+                end
+                local h = hold[z]   -- 객체 키: SP 는 onlineID 가 전부 -1 이라 id 키면 충돌
+                if h and now < h then down = true end
+
+                if down then
+                    if not dD or d2 < dD then bD, dD = z, d2 end
+                elseif st and DRONE_ATTACK_STATES[st] then
+                    if not dA or d2 < dA then bA, dA = z, d2 end
+                elseif st and DRONE_LUNGE_STATES[st] then
+                    if not dL or d2 < dL then bL, dL = z, d2 end
+                else
+                    if not dN or d2 < dN then bN, dN = z, d2 end
+                end
+            end
+        end
+    end
+    if bA then return bA, "A" end
+    if bL then return bL, "L" end
+    if bN then return bN, "N" end
+    if bD then return bD, "D" end
+    return nil
+end
+
+local function droneSetEngaged(d, on)
+    if d.engaged == on then return end
+    d.engaged = on
+    sendClientCommand("PongDuFireSupport", "DroneEngaged", { on = on and 1 or 0 })
+end
+
+local function droneFlush(d, ox, oy, now)
+    if not d.batchN or d.batchN == 0 then return end
+    sendClientCommand("PongDuFireSupport", "DroneShots", {
+        ox = ox, oy = oy, shots = d.batch, n = d.batchN,
+    })
+    d.batch, d.batchN, d.batchAt = {}, 0, nil
+    -- 만료 홀드 정리(새 테이블 재구성 -- Kahlua 안전)
+    local fresh = {}
+    for k, v in pairs(d.hold) do
+        if v > now then fresh[k] = v end
+    end
+    d.hold = fresh
+end
+
+-- 대상 플레이어 클라에서만 매 프레임 호출된다(OnTick).
+local function droneFireTick(d, now)
+    local ox, oy, oz, phase = droneComputePos(d)
+    if phase ~= "ORBIT" then
+        if ox then droneFlush(d, ox, oy, now) end
+        d.nextShotAt = nil
+        if phase == "DEPART" then droneSetEngaged(d, false) end
+        return
+    end
+    local vx, vy = droneCurPos(d)
+    if vx then ox, oy = vx, vy end
+    local cx, cy = droneCenter(d)
+    if not cx then return end
+
+    d.hold  = d.hold or {}
+    d.batch = d.batch or {}
+    d.batchN = d.batchN or 0
+    d.st = d.st or { shots = 0, crits = 0, kds = 0, A = 0, L = 0, N = 0, D = 0, idle = 0 }
+    if not d.nextShotAt then d.nextShotAt = now end
+
+    local burst = 0
+    while now >= d.nextShotAt and burst < DRONE_MAX_BURST do
+        local shotT = d.nextShotAt
+        d.nextShotAt = d.nextShotAt + d.iv
+        burst = burst + 1
+
+        local z, tier = dronePickTarget(d, cx, cy, now)
+        if not z then
+            d.st.idle = d.st.idle + 1
+            d.nextShotAt = now + d.iv
+            droneSetEngaged(d, false)
+            break
+        end
+        droneSetEngaged(d, true)
+
+        local crit = ZombRand(100) < d.kc
+        local kd   = (not crit) and ZombRand(100) < d.kd
+        local id   = z:getOnlineID()
+        local remote = z:isRemoteZombie()
+
+        -- 로컬 즉시 적용(서버 왕복 없음). 원격 소유 좀비면 연출만 되고
+        -- 데미지는 중계를 받은 소유 클라가 넣는다(fsApplyShot 참조).
+        addTracer(ox, oy, oz, z:getX(), z:getY(), z:getZ(), DRONE_ALT_PX, TRACER_ALPHA_FAINT)
+        fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
+
+        if crit or kd or remote then
+            d.hold[z] = now + (remote and DRONE_REMOTE_HOLD_MS or DRONE_LOCAL_HOLD_MS)
+        end
+
+        d.st.shots = d.st.shots + 1
+        d.st[tier] = d.st[tier] + 1
+        if crit then d.st.crits = d.st.crits + 1 end
+        if kd then d.st.kds = d.st.kds + 1 end
+
+        if d.batchN == 0 then d.batchAt = shotT end
+        d.batchN = d.batchN + 1
+        d.batch[d.batchN] = {
+            id = id, tx = z:getX(), ty = z:getY(), tz = z:getZ(),
+            crit = crit and 1 or 0, kd = kd and 1 or 0,
+            dt = shotT - d.batchAt,
+        }
+    end
+    if burst >= DRONE_MAX_BURST and now - d.nextShotAt > d.iv * DRONE_MAX_BURST then
+        -- 긴 히칭 뒤: 밀린 걸 다 쏘지 않고 재동기화.
+        d.nextShotAt = now + d.iv
+    end
+    if d.batchN > 0 and (now - d.batchAt >= DRONE_BATCH_MS) then
+        droneFlush(d, ox, oy, now)
+    end
 end
 
 -- ── 통합 틱 ────────────────────────────────────────────────────────────────
@@ -1717,6 +1942,7 @@ Events.OnTick.Add(function()
     heliSoundTick()
 
     -- 드론: 헬기와 독립적으로 동작한다(동시 발동 가능).
+    local me = myOnlineID()
     n = 0
     for own, d in pairs(_drones) do
         if d.stopAt and now > d.stopAt then
@@ -1725,6 +1951,14 @@ Events.OnTick.Add(function()
         else
             if d.amPilot then dronePilotTick(d) end
             droneBladeTick(d)
+            -- 사격은 대상 플레이어 클라만(SP 는 양쪽 -1 이라 자동 일치).
+            if me ~= nil and own == me then
+                local okF, errF = pcall(function() droneFireTick(d, now) end)
+                if not okF and not d.fireErr then
+                    d.fireErr = true
+                    print("[PongDu] fire_support/drone fire tick FAILED err=" .. tostring(errF))
+                end
+            end
         end
     end
     for i = 1, n do
@@ -1732,6 +1966,8 @@ Events.OnTick.Add(function()
         _expired[i] = nil
     end
     droneSoundTick()
+
+    fsQueueTick(now)
 end)
 
 -- 서버가 iv 간격으로 한 발씩 보내는 사격 명령 수신. 전 클라에 브로드캐스트되며,
