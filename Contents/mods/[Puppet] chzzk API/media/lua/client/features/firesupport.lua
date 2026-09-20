@@ -1807,15 +1807,31 @@ local function dronePickTarget(d, cx, cy, now)
             if d2 <= dr2 then
                 local remote = z:isRemoteZombie()
                 local st = droneZombieState(z, remote)
-                local down = (st and DRONE_DOWN_STATES[st]) and true or false
-                if not remote and not down then
-                    local okF, fl = pcall(function() return z:isOnFloor() or z:isKnockedDown() end)
-                    down = okF and fl or false
-                end
                 local h = hold[z]   -- 객체 키: SP 는 onlineID 가 전부 -1 이라 id 키면 충돌
-                if h and now < h then down = true end
+                local held = (h and now < h) and true or false
 
-                if down then
+                -- 판정 순서가 중요하다:
+                --  1) 홀드: 방금 넉다운/크리티컬을 넣은 좀비. knockDown() 직후 1~2프레임은
+                --     상태가 아직 attack 으로 남아 있어 먼저 걸러야 한다.
+                --  2) 공격/돌진: 누워 있든 기어오든 지금 무는 중이면 최우선.
+                --     크롤러는 onFloor 가 영구히 true(IsoZombie.toggleCrawling)라 예전엔
+                --     물고 있어도 "제압 중"으로 밀렸다.
+                --  3) 제압 중: 넉다운/기상/피격 반응 상태. isOnFloor 는 크롤러가 아닐 때만
+                --     넘어짐 신호로 쓴다(크롤러는 원래 바닥에 붙어 있다).
+                --  4) 그 외 정상(기어오는 크롤러 포함 -- 다가오는 위협이다).
+                local down = false
+                if not held and not (st and (DRONE_ATTACK_STATES[st] or DRONE_LUNGE_STATES[st])) then
+                    down = (st and DRONE_DOWN_STATES[st]) and true or false
+                    if not remote and not down then
+                        local okF, fl = pcall(function()
+                            if z:isKnockedDown() then return true end
+                            return z:isOnFloor() and not z:isCrawling()
+                        end)
+                        down = okF and fl or false
+                    end
+                end
+
+                if held or down then
                     if not dD or d2 < dD then bD, dD = z, d2 end
                 elseif st and DRONE_ATTACK_STATES[st] then
                     if not dA or d2 < dA then bA, dA = z, d2 end
