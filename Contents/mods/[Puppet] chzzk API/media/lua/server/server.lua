@@ -1988,6 +1988,10 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         vehicle = nil,
         -- zid -> 억제 만료(ms). 동기화 공백 동안 재타겟을 막는다.
         suppress = {},
+        -- zid -> { at = kd 판정 시각(ms), st = 그 시점 서버가 보던 realState }.
+        -- DRONE_KD_HOLD_MS 참조.
+        kdMark = {},
+        rtLogAt = 0,   -- re-target 로그 스로틀
         -- 튜닝용 집계. 정상 동작이면 nSwitch 가 (nCrit + nKd) 에 근접한다 --
         -- 넘기거나 크리티컬을 넣은 직후 다음 대상으로 옮겨갔다는 뜻이다. nSwitch 가
         -- 그보다 훨씬 작으면 같은 놈을 계속 두들기고 있는 것.
@@ -2048,9 +2052,10 @@ end
 --   packet.realState 에 싣고(:188~189), 서버가 applyZombie() 에서 그대로
 --   반영한다(NetworkZombiePacker.java:251). Lua 에서는 IsoZombie:getRealState()
 --   로 문자열을 읽는다. 값은 actiongroups/zombie/ 하위 디렉토리명과 1:1.
---   전파 지연도 짧다 -- ActionContext.postUpdate() 가 anim 상태 전환마다
---   networkAI.extraUpdate() 를 불러 소유 클라가 200~3800ms 타이머를 기다리지
---   않고 즉시 패킷을 보낸다.
+--   ※ 전파 지연은 짧지 않다. 상태 전환 시 extraUpdate() 가 불리긴 하지만
+--   큐에 넣기만 하고, 실제 전송은 서버가 정해준 주기(주변 120타일에 다른
+--   플레이어가 있으면 200ms, 없으면 4000ms)의 send() 에서만 일어난다.
+--   혼자 플레이 중이면 최대 4초 늦다 -- DRONE_KD_HOLD_MS 주석 참조.
 --
 -- [우선순위를 나누는 이유]
 --   realState 를 후순위(반응/제압 중) 판정에만 쓰다가, 위협도가 반대 방향인
@@ -2108,6 +2113,35 @@ local DRONE_SUPPRESS_MS = 1000
 -- 만료 항목 정리 + 신규 등록. pairs 순회 중 t[k]=nil 의 안전성이 Kahlua
 -- 에서 보장되지 않으므로 새 테이블로 재구성한다. 억제창이 1초라 항목 수는
 -- 항상 수십개 이하고, 호출은 킬/넉다운 시에만 발생한다.
+-- ── 넉다운 홀드 ──────────────────────────────────────────────────────────
+-- [왜 억제창(1초)만으로는 부족한가]
+--   소유 클라의 좀비 상태 패킷 주기는 서버가 정해준다(GameClient.
+--   receiveZombieSimulation): 120타일 안에 다른 플레이어가 있으면 200ms,
+--   없으면 4000ms. 상태 전환 시 extraUpdate() 는 ExtraSendQueue 에 넣기만
+--   하고, 그 큐도 같은 주기의 send() 에서만 비워진다(IsoCell.java:4198,
+--   NetworkZombieSimulator.send). 즉 혼자 플레이 중이면 서버의 realState 는
+--   최대 4초 늦는다 -- 넘어진 좀비가 서버엔 계속 walktoward/attack 으로 보여
+--   억제창 1초가 끝나면 다시 정상/최우선 대상으로 잡혔다.
+--   특히 attack/lunge 는 억제창보다 우선하므로, 물던 좀비를 넘어뜨리면
+--   낡은 "attack" 때문에 누운 채로 계속 1순위였다.
+--
+-- [홀드 규칙] kd 를 내린 건 서버 자신이므로 네트워크 상태보다 이 사실을 우선한다.
+--   kd 판정 시 그 순간의 realState 를 같이 저장하고, DRONE_KD_HOLD_MS 동안:
+--     realState == 저장값      -> 새 패킷이 아직 안 옴(낡은 정보) -> 후순위 고정
+--     realState 가 반응 상태   -> 넘어짐/기상 중 확인 -> 후순위
+--     그 외로 바뀜(attack 포함) -> 새 패킷으로 일어난 게 확인됨 -> 홀드 해제
+--   만료 후에는 기존 로직(realState + 억제창)으로 돌아간다.
+local DRONE_KD_HOLD_MS = 5000
+
+local function droneKdMark(job, zid, st, now)
+    local fresh = {}
+    for k, v in pairs(job.kdMark) do
+        if now - v.at < DRONE_KD_HOLD_MS then fresh[k] = v end
+    end
+    fresh[zid] = { at = now, st = st }
+    job.kdMark = fresh
+end
+
 local function droneSuppress(job, zid, now)
     local fresh = {}
     for k, v in pairs(job.suppress) do
@@ -2139,6 +2173,7 @@ local function pickDroneTarget(job, now)
 
     local dr2 = job.dr * job.dr
     local sup = job.suppress
+    local kdm = job.kdMark
     local bestA, bestAPD2 = nil, nil     -- 공격 판정 중
     local bestL, bestLPD2 = nil, nil     -- 돌진 접근 중
     local best,  bestPD2  = nil, nil     -- 정상 사격 대상
@@ -2153,7 +2188,21 @@ local function pickDroneTarget(job, now)
                 local okf, st = pcall(function() return z:getRealState() end)
                 st = okf and st or nil
 
-                if st and DRONE_ATTACKING_STATES[st] then
+                -- 넉다운 홀드(DRONE_KD_HOLD_MS 주석 참조). 걸리면 attack/lunge
+                -- 여부와 무관하게 후순위군으로 보낸다.
+                local held = false
+                local mark = kdm[z:getOnlineID()]
+                if mark and now - mark.at < DRONE_KD_HOLD_MS then
+                    if st == mark.st or (st and DRONE_REACTING_STATES[st]) then
+                        held = true
+                    end
+                end
+
+                if held then
+                    if (not bestDPD2) or pd2 < bestDPD2 then
+                        bestD, bestDPD2 = z, pd2
+                    end
+                elseif st and DRONE_ATTACKING_STATES[st] then
                     if (not bestAPD2) or pd2 < bestAPD2 then
                         bestA, bestAPD2 = z, pd2
                     end
@@ -2181,10 +2230,10 @@ local function pickDroneTarget(job, now)
             end
         end
     end
-    if bestA then return bestA end
-    if bestL then return bestL end
-    if best  then return best  end
-    return bestD
+    if bestA then return bestA, "attack" end
+    if bestL then return bestL, "lunge" end
+    if best  then return best,  "normal" end
+    return bestD, "fallback"
 end
 
 local function droneFinish(job, reason)
@@ -2242,7 +2291,27 @@ local function processDroneJobs()
             -- 사격은 ORBIT 단계에서만. 접근/이탈 중엔 쏘지 않는다.
             if phase == "ORBIT" and now >= job.nextAt then
                 job.nextAt = now + job.iv
-                local z = pickDroneTarget(job, now)
+                local z, why = pickDroneTarget(job, now)
+
+                -- 검증 로그: 최근 kd/억제를 건 좀비를 다시 쏘는 경우만 남긴다.
+                -- 폴백으로 누운 좀비를 연사하면 발당 찍혀서 500ms 스로틀.
+                if z and now - job.rtLogAt >= 500 then
+                    local rid  = z:getOnlineID()
+                    local mk   = job.kdMark[rid]
+                    local sexp = job.suppress[rid]
+                    local inKd  = mk and now - mk.at < DRONE_KD_HOLD_MS
+                    local inSup = sexp and now < sexp
+                    if inKd or inSup then
+                        job.rtLogAt = now
+                        local okS, rst = pcall(function() return z:getRealState() end)
+                        print(string.format(
+                            "[PongDu][Drone] re-target zid=%d reason=%s state=%s kdState=%s sinceKd=%s suppressed=%s",
+                            rid, tostring(why), tostring(okS and rst or "?"),
+                            tostring(mk and mk.st or "-"),
+                            mk and tostring(now - mk.at) or "-",
+                            tostring(inSup and true or false)))
+                    end
+                end
                 -- 교전 상태 전환. 헬기와 달리 히스테리시스를 두지 않는다 --
                 -- 드론은 락온을 매 발 재선정하므로 대상 유무만 보면 된다.
                 local players0 = getOnlinePlayers()
@@ -2285,6 +2354,8 @@ local function processDroneJobs()
                         if kdHit then
                             job.nKd = job.nKd + 1
                             droneSuppress(job, zid, now)
+                            local okK, kst = pcall(function() return z:getRealState() end)
+                            droneKdMark(job, zid, okK and kst or nil, now)
                         end
                     end
                     if job.lastId ~= zid then

@@ -453,9 +453,61 @@ local function fsShotHp(kind, crit)
     return sv.FireSupport_NormalDamage
 end
 
+-- ── 검증 로그 ──────────────────────────────────────────────────────────────
+-- 드론은 초당 수십 발이라 발당 로그는 콘솔을 터뜨린다. 대신:
+--   ① 좀비별 누적 집계 -> 사망 시 KILL 로그 한 줄(hits/crits/dealt/hp0)
+--   ② 교전 시작(같은 tag 로 FS_VERIFY_GAP_MS 이상 쉬었다 재개) 후 첫
+--      FS_VERIFY_SHOTS 발만 VERIFY 로그(체력 전/후/기대값 + 부작용 복구 결과)
+--   ③ 폴백 경로 진입은 세션당 1회
+-- 집계는 소유 클라에서만 쌓인다(데미지를 실제로 넣는 쪽). 소유권이 중간에
+-- 넘어가면 새 소유 클라는 그 시점부터 센다.
+local FS_VERIFY_SHOTS  = 3
+local FS_VERIFY_GAP_MS = 5000
+local FS_STATS_MAX     = 256     -- 이 이상 쌓이면 오래된 항목 정리
+local FS_STATS_TTL_MS  = 60000   -- 마지막 피격 후 이 시간 지나면 정리 대상
+
+local _fsStats  = {}   -- zid -> { hits, crits, dealt, hp0, t }
+local _fsStatsN = 0
+local _fsVerify = {}   -- tag -> { n, lastAt }
+local _fsFallbackWarned = false
+
+local function fsStatsGet(id, z, now)
+    local st = _fsStats[id]
+    if st then return st end
+    if _fsStatsN >= FS_STATS_MAX then
+        -- pairs 순회 중 삭제는 Kahlua 에서 보장되지 않으므로 새 테이블로 재구성.
+        local fresh, n = {}, 0
+        for k, v in pairs(_fsStats) do
+            if now - v.t < FS_STATS_TTL_MS then
+                fresh[k] = v
+                n = n + 1
+            end
+        end
+        print("[PongDu] fire_support: stats pruned " .. tostring(_fsStatsN) .. " -> " .. tostring(n))
+        _fsStats, _fsStatsN = fresh, n
+    end
+    st = { hits = 0, crits = 0, dealt = 0, hp0 = z:getHealth(), t = now }
+    _fsStats[id] = st
+    _fsStatsN = _fsStatsN + 1
+    return st
+end
+
+local function fsVerifyTick(tag, now)
+    local v = _fsVerify[tag]
+    if not v then
+        v = { n = 0, lastAt = 0 }
+        _fsVerify[tag] = v
+    end
+    if now - v.lastAt > FS_VERIFY_GAP_MS then v.n = 0 end
+    v.lastAt = now
+    v.n = v.n + 1
+    return v.n <= FS_VERIFY_SHOTS
+end
+
 -- 한 발 적용. 사운드/혈흔은 전 클라 로컬 연출, 데미지는 소유 클라만.
+-- crit: 서버가 굴린 크리티컬 여부(집계/로그용 -- hp 는 이미 반영돼 들어온다).
 -- kd: true 면 생존 시 넘어뜨린다(드론 일반탄, 서버가 굴린 결과).
-local function fsApplyShot(z, id, hp, kd, tag)
+local function fsApplyShot(z, id, hp, crit, kd, tag)
     if not z or z:isDead() then return end
     pcall(function() z:playSound("BulletHitBody") end)
     pcall(function() z:splatBlood(2, 0.3) end)
@@ -463,10 +515,24 @@ local function fsApplyShot(z, id, hp, kd, tag)
     if z:isRemoteZombie() then return end
 
     local ok, err = pcall(function()
+        local now    = getTimestampMs()
+        local st     = fsStatsGet(id, z, now)
+        local verify = fsVerifyTick(tag, now)
+        local before = z:getHealth()
+        st.hits = st.hits + 1
+        if crit then st.crits = st.crits + 1 end
+        st.t = now
+
         local gun = sniperWeapon()
         if not gun then
             -- 폴백: 총기 생성 실패. 체력만 직접 깎는다(모션 없음).
-            local left = z:getHealth() - hp
+            if not _fsFallbackWarned then
+                _fsFallbackWarned = true
+                print("[PongDu] fire_support/" .. tag
+                    .. " FALLBACK: no weapon item, applying setHealth directly (no hit anim)")
+            end
+            st.dealt = st.dealt + math.min(hp, before)
+            local left = before - hp
             if left <= 0 then
                 killZombieNow(z)
             else
@@ -483,16 +549,46 @@ local function fsApplyShot(z, id, hp, kd, tag)
         z:setBumpDone(true)
         z:setHitReaction(GRAZE_REACTIONS[ZombRand(#GRAZE_REACTIONS) + 1])
         z:Hit(gun, fake, hp / HIT_SCALE, false, 1, false)
+        local hitTimeAfter = z:getHitTime()   -- 1 이어야 정상(0 에서 +1)
         z:setHitTime(prevHitTime)
 
-        if z:isDead() then
-            z:setAttackedBy(fake)
-            print("[PongDu] fire_support/" .. tag .. " KILL zid=" .. tostring(id)
-                .. " hp=" .. tostring(hp))
-        else
-            z:setTarget(prevTarget)
-            if not prevCrawler then z:setBecomeCrawler(false) end
+        local after = z:getHealth()
+        st.dealt = st.dealt + (before - after)
+        local dead = z:isDead()
+
+        local crawlerBlocked = false
+        local targetKept = true
+        if not dead then
+            if z:getTarget() ~= prevTarget then
+                z:setTarget(prevTarget)
+                targetKept = (z:getTarget() == prevTarget)
+            end
+            if not prevCrawler and z:isBecomeCrawler() then
+                z:setBecomeCrawler(false)
+                crawlerBlocked = true
+                print("[PongDu] fire_support/" .. tag .. " crawler blocked zid=" .. tostring(id))
+            end
             if kd then z:knockDown(false) end
+        end
+
+        if verify then
+            -- expected 는 요청 hp 와 남은 체력 중 작은 값(체력보다 많이 깎을 순 없다).
+            -- delta 가 expected 와 다르면 HIT_SCALE(0.1575) 가정이 틀린 것.
+            print(string.format(
+                "[PongDu] fire_support/%s VERIFY zid=%s crit=%d in=%.3f before=%.3f after=%.3f delta=%.3f expected=%.3f hitTime=%d->%d(restored %d) target=%s crawlerBlocked=%s dead=%s",
+                tag, tostring(id), crit and 1 or 0, hp / HIT_SCALE, before, after,
+                before - after, math.min(hp, before), hitTimeAfter, prevHitTime,
+                z:getHitTime(), targetKept and "kept" or "LOST",
+                tostring(crawlerBlocked), tostring(dead)))
+        end
+
+        if dead then
+            z:setAttackedBy(fake)
+            print(string.format(
+                "[PongDu] fire_support/%s KILL zid=%s hits=%d crits=%d dealt=%.3f hp0=%.3f last=%.3f",
+                tag, tostring(id), st.hits, st.crits, st.dealt, st.hp0, hp))
+            _fsStats[id] = nil
+            _fsStatsN = _fsStatsN - 1
         end
     end)
     if not ok then
@@ -1552,7 +1648,7 @@ local function handleDroneFire(args)
     -- 크리티컬/일반 모두 명중. 넉다운은 일반탄에만 서버가 kdHit(1/0)로 굴려준다.
     local crit = tonumber(args.crit) == 1
     local kd   = (not crit) and tonumber(args.kdHit) == 1
-    fsApplyShot(z, id, fsShotHp("drone", crit), kd, "drone")
+    fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
 end
 
 -- 헬기: 락온 좀비에 매 발 명중. crit=1 이면 크리티컬, 0 이면 일반 데미지.
@@ -1591,7 +1687,7 @@ local function handleHeliFire(args)
     -- 발당 트리거 없음: 총성은 pongdu_heli_lmg 루프가 교전 구간 내내 재생
     -- 중이라 여기선 예광탄/데미지만 처리한다. 볼륨 갱신도 OnTick 이 맡는다.
 
-    fsApplyShot(z, id, fsShotHp("heli", crit), false, "heli")
+    fsApplyShot(z, id, fsShotHp("heli", crit), crit, false, "heli")
 end
 
 -- ── 통합 틱 ────────────────────────────────────────────────────────────────
