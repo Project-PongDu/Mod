@@ -506,8 +506,10 @@ end
 
 -- 한 발 적용. 사운드/혈흔은 전 클라 로컬 연출, 데미지는 소유 클라만.
 -- crit: 서버가 굴린 크리티컬 여부(집계/로그용 -- hp 는 이미 반영돼 들어온다).
--- kd: true 면 생존 시 넘어뜨린다(드론 일반탄, 서버가 굴린 결과).
-local function fsApplyShot(z, id, hp, crit, kd, tag)
+-- kd: true 면 생존 시 넘어뜨린다(드론 일반탄).
+-- own: 화력지원 대상 플레이어 onlineID. 사살 시 서버에 FsKill 로 보고해
+--      종료 시 서버 콘솔 사살 수 로그([FireSupport] result)에 쓰인다.
+local function fsApplyShot(z, id, hp, crit, kd, tag, own)
     if not z or z:isDead() then return end
     pcall(function() z:playSound("BulletHitBody") end)
     pcall(function() z:splatBlood(2, 0.3) end)
@@ -535,6 +537,9 @@ local function fsApplyShot(z, id, hp, crit, kd, tag)
             local left = before - hp
             if left <= 0 then
                 killZombieNow(z)
+                if own ~= nil then
+                    sendClientCommand("PongDuFireSupport", "FsKill", { own = own, kind = tag })
+                end
             else
                 z:setHealth(left)
             end
@@ -587,6 +592,11 @@ local function fsApplyShot(z, id, hp, crit, kd, tag)
             print(string.format(
                 "[PongDu] fire_support/%s KILL zid=%s hits=%d crits=%d dealt=%.3f hp0=%.3f last=%.3f",
                 tag, tostring(id), st.hits, st.crits, st.dealt, st.hp0, hp))
+            if own ~= nil then
+                sendClientCommand("PongDuFireSupport", "FsKill", { own = own, kind = tag })
+            else
+                print("[PongDu] fire_support/" .. tag .. " KILL without own -- not reported")
+            end
             _fsStats[id] = nil
             _fsStatsN = _fsStatsN - 1
         end
@@ -1661,7 +1671,7 @@ local function heliShotPlay(own, ox, oy, oz, sh)
     end
     addTracer(ox, oy, oz, tx, ty, tz, HELI_ALT)
     -- 총성은 pongdu_heli_lmg 루프가 교전 내내 재생 중이라 발당 트리거 없음.
-    fsApplyShot(z, id, fsShotHp("heli", tonumber(sh.crit) == 1), tonumber(sh.crit) == 1, false, "heli")
+    fsApplyShot(z, id, fsShotHp("heli", tonumber(sh.crit) == 1), tonumber(sh.crit) == 1, false, "heli", own)
 end
 
 -- 드론 1발(중계 수신측). 넉다운은 일반탄에만 발사 클라가 굴려 보낸다.
@@ -1679,7 +1689,7 @@ local function droneShotPlay(own, ox, oy, oz, sh)
     if not z or z:isDead() then return end
     local crit = tonumber(sh.crit) == 1
     local kd   = (not crit) and tonumber(sh.kd) == 1
-    fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
+    fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone", own)
 end
 
 local function fsPlay(kind, own, ox, oy, oz, sh)
@@ -1887,7 +1897,7 @@ local function droneFireTick(d, now)
         -- 로컬 즉시 적용(서버 왕복 없음). 원격 소유 좀비면 연출만 되고
         -- 데미지는 중계를 받은 소유 클라가 넣는다(fsApplyShot 참조).
         addTracer(ox, oy, oz, z:getX(), z:getY(), z:getZ(), DRONE_ALT_PX, TRACER_ALPHA_FAINT)
-        fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone")
+        fsApplyShot(z, id, fsShotHp("drone", crit), crit, kd, "drone", d.own)
 
         if crit or kd or remote then
             d.hold[z] = now + (remote and DRONE_REMOTE_HOLD_MS or DRONE_LOCAL_HOLD_MS)

@@ -413,6 +413,22 @@ end
 -- 안 된다(그 사이 좀비가 죽거나 자리를 뜨면 허공에 쏘거나 뒤늦게 안 맞는
 -- 문제가 생긴다). 대신 job을 큐에 넣고 매 iv마다 그 시점의 플레이어 좌표
 -- 기준으로 재선정한다.
+-- ── 화력지원 결과(사살 수) 로그 ────────────────────────────────────────────
+-- 종료 시 사살 수를 서버 콘솔에 남긴다.
+-- 헬기/드론의 사망은 데미지를 넣은 소유 클라만 알기 때문에 그 클라가 FsKill 로
+-- 보고한 걸 센다(server.lua 하단 FsKill). 종료 직전에 나간 탄(지연 재생 dt,
+-- 네트워크 왕복)의 보고가 종료 뒤에 도착하므로 FS_RESULT_GRACE_MS 만큼 집계를
+-- 더 받은 뒤 찍는다. 저격은 서버가 사살을 직접 판정하므로 보고 없이 센다.
+local FS_RESULT_GRACE_MS = 1500
+local _fsResults = {}   -- { own, kind, kills, sendAt }
+
+local function fsQueueResult(own, kind, kills)
+    _fsResults[#_fsResults + 1] = {
+        own = own, kind = kind, kills = kills or 0,
+        sendAt = getTimestampMs() + FS_RESULT_GRACE_MS,
+    }
+end
+
 local _sniperJobs = {}
 
 local function sniperBroadcastStart(job)
@@ -570,6 +586,7 @@ local function processSniperJobs()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "SniperStop", { own = job.own })
             end
+            fsQueueResult(job.own, "sniper", job.nKill + job.nPierce)
             print(string.format(
                 "[PongDu][Sniper] job finished own=%s shots=%d kills=%d (main=%d pierce=%d) grazed=%d",
                 tostring(job.own), job.nShot, job.nKill + job.nPierce,
@@ -977,6 +994,7 @@ DOServer["PongDuFireSupport"]["Heli"] = function(player, data)
         -- 결과 집계(종료 로그용). 크리티컬 판정(kc 굴림)은 서버가 내리므로 여기서 센다.
         -- 실제 사망 여부는 소유 클라가 데미지를 적용한 결과라 서버는 모른다.
         nShot = 0, nCrit = 0,
+        nKill = 0,   -- 소유 클라 FsKill 보고 누적
     }
     _heliJobs[#_heliJobs + 1] = job
 
@@ -1114,8 +1132,9 @@ local function processHeliJobs()
                     sendServerCommand(playersT:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
                 end
             end
-            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d crits=%d",
-                tostring(why), job.nShot or 0, job.nCrit or 0))
+            fsQueueResult(job.own, "heli", job.nKill)
+            print(string.format("[PongDu][Heli] job aborted (%s) shots=%d crits=%d kills(so far)=%d",
+                tostring(why), job.nShot or 0, job.nCrit or 0, job.nKill or 0))
         elseif now >= job.expireAt then
             heliRemoveVehicle(job, "job finished")
             table.remove(_heliJobs, i)
@@ -1123,8 +1142,9 @@ local function processHeliJobs()
             for k = 0, players:size() - 1 do
                 sendServerCommand(players:get(k), "PongDuFireSupport", "HeliStop", { own = job.own })
             end
-            print(string.format("[PongDu][Heli] job finished shots=%d crits=%d",
-                job.nShot or 0, job.nCrit or 0))
+            fsQueueResult(job.own, "heli", job.nKill)
+            print(string.format("[PongDu][Heli] job finished shots=%d crits=%d kills(so far)=%d",
+                job.nShot or 0, job.nCrit or 0, job.nKill or 0))
         elseif now >= job.nextAt then
             -- 헬기 현재 위치: 현재 leg의 A -> B 선형 보간. leg 롤오버가 위에서
             -- 이미 처리됐으므로 여기서 t가 1을 넘는 일은 없다.
@@ -1991,6 +2011,7 @@ DOServer["PongDuFireSupport"]["Drone"] = function(player, data)
         -- zid -> 억제 만료(ms). 동기화 공백 동안 재타겟을 막는다.
         -- 집계(종료 로그용). 사격은 클라가 하고 DroneShots 로 보고한 걸 센다.
         nShot = 0, nCrit = 0, nKd = 0, nBatch = 0,
+        nKill = 0,   -- 소유 클라 FsKill 보고 누적
     }
 
     local v = droneSpawnVehicle(sx, sy, oz)
@@ -2129,9 +2150,11 @@ local function droneFinish(job, reason)
     for k = 0, players:size() - 1 do
         sendServerCommand(players:get(k), "PongDuFireSupport", "DroneStop", { own = job.own })
     end
+    fsQueueResult(job.own, "drone", job.nKill)
     print(string.format(
-        "[PongDu][Drone] job finished (%s) shots=%d crits=%d knockdowns=%d batches=%d",
-        tostring(reason), job.nShot or 0, job.nCrit or 0, job.nKd or 0, job.nBatch or 0))
+        "[PongDu][Drone] job finished (%s) shots=%d crits=%d knockdowns=%d batches=%d kills(so far)=%d",
+        tostring(reason), job.nShot or 0, job.nCrit or 0, job.nKd or 0, job.nBatch or 0,
+        job.nKill or 0))
 end
 
 local function processDroneJobs()
@@ -2165,6 +2188,46 @@ local function processDroneJobs()
 end
 
 addServerTick(processDroneJobs)
+
+-- 소유 클라의 사살 보고. 진행 중 job 에 먼저, 없으면 결과 대기열(유예 중)에 센다.
+-- 헬기/드론 job 은 대상 플레이어당 하나라 own 으로 유일하게 찾힌다.
+DOServer["PongDuFireSupport"]["FsKill"] = function(player, data)
+    local own  = tonumber(data and data.own)
+    local kind = data and data.kind
+    if own == nil or (kind ~= "heli" and kind ~= "drone") then
+        print("[PongDu][FireSupport] FsKill malformed own=" .. tostring(own) .. " kind=" .. tostring(kind))
+        return
+    end
+    local list = (kind == "heli") and _heliJobs or _droneJobs
+    for i = 1, #list do
+        if list[i].own == own then
+            list[i].nKill = (list[i].nKill or 0) + 1
+            return
+        end
+    end
+    for i = 1, #_fsResults do
+        local r = _fsResults[i]
+        if r.own == own and r.kind == kind then
+            r.kills = r.kills + 1
+            return
+        end
+    end
+    print("[PongDu][FireSupport] FsKill after result sent (dropped) own=" .. tostring(own) .. " kind=" .. kind)
+end
+
+local function fsResultTick()
+    if #_fsResults == 0 then return end
+    local now = getTimestampMs()
+    for i = #_fsResults, 1, -1 do
+        local r = _fsResults[i]
+        if now >= r.sendAt then
+            table.remove(_fsResults, i)
+            print(string.format("[PongDu][FireSupport] result own=%s kind=%s kills=%d",
+                tostring(r.own), r.kind, r.kills))
+        end
+    end
+end
+addServerTick(fsResultTick)
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화력지원 실차량 고아(orphan) 정리
