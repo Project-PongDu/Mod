@@ -48,8 +48,12 @@ end
 --
 -- 효과음/반경 표시는 utils/fx 로 처리한다: 본인은 즉시 로컬 재생/렌더,
 -- 나머지 접속자는 서버 거리컷 브로드캐스트로 같은 소리와 같은 연출을 받는다.
--- 반경 표시 자체는 샌드박스 RiseUp_ShowRadius 를 따른다 — 꺼져 있으면
--- 마커든 가스든 반경 0 으로 나가므로 누구에게도 안 뜬다.
+-- 원형 마커는 샌드박스 RiseUp_ShowRadius 를 따른다 — 꺼져 있으면 반경 0 으로
+-- 나가므로 누구에게도 안 뜬다.
+-- 가스 안개는 예외로 항상 띄운다. 좀비 공습의 수송기 투하 그림자와 같은 취급이다:
+-- "반경을 알려주는 UI"가 아니라 그 방식의 고유 연출이고, 가스 방식엔 애초에 원형
+-- 마커가 없어서 옵션을 껐을 때 남는 게 효과음뿐이 된다. 부활 로직은 서버가
+-- RiseUp_Radius 로 처리하므로 여기서 무엇을 그리든 게임플레이에는 영향이 없다.
 local function doFire(player)
     if not player then return end
     local radius = SandboxVars.PongDu.RiseUp_Radius
@@ -65,6 +69,7 @@ local function doFire(player)
 
     print("[PongDuRiseUp] fire style=" .. tostring(style) .. " r=" .. tostring(radius)
         .. " showRadius=" .. tostring(showRadius)
+        .. " marker=" .. tostring((not isGas) and shownR or 0)
         .. " gasMs=" .. tostring(isGas and gasMs or 0))
 
     fx.playAt(sound, px, py)
@@ -74,7 +79,8 @@ local function doFire(player)
         sound = sound,
         markerRadius = (not isGas) and shownR or 0,
         markerMs = MARKER_DURATION_MS,
-        gasRadius = isGas and shownR or 0,
+        -- 가스는 shownR 이 아니라 radius -- 반경 표시 옵션과 무관하게 항상 나간다.
+        gasRadius = isGas and radius or 0,
         gasMs = gasMs,
     })
     sendClientCommand("PongDuRiseUp", "RiseUp", {
@@ -83,13 +89,11 @@ local function doFire(player)
         ["r"] = radius,
     })
 
-    -- 도네이터 본인 화면에 반경 표시 (부활 시점과 동시)
-    if showRadius then
-        if isGas then
-            gasCloud.spawn(px, py, pz, "rise_up_dead_man", radius, gasMs)
-        else
-            fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
-        end
+    -- 도네이터 본인 화면 (부활 시점과 동시). 가스는 옵션 무관 항상, 마커만 옵션 적용.
+    if isGas then
+        gasCloud.spawn(px, py, pz, "rise_up_dead_man", radius, gasMs)
+    elseif showRadius then
+        fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
     end
 end
 
