@@ -2,7 +2,7 @@ local _a = _a or {}
 require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
-local textOutline = require("utils/textOutline")
+local timerText = require("utils/timerText")
 local deltaTime = require("utils/deltaTime")
 
 -- 대기시간은 ms 단위로 modData.bombRemainMs 에 저장한다 (프레임 독립 감산, utils/deltaTime).
@@ -70,8 +70,9 @@ Events.OnResolutionChange.Add(DOTex.SizeChange)
 function BombardTimerDisplay:new(a, b)
     local c = getCore():getScreenWidth()
     -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
-    -- 폭 220 -> 240: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
-    local e = ISPanel:new(c / 2 - 120, 0, 240, 30)
+    -- 폭/높이는 카운터 패널 공통 규격(utils/timerText)을 따른다.
+    local e = ISPanel:new((c - timerText.PANEL_W) / 2, 0,
+        timerText.PANEL_W, timerText.PANEL_H)
     setmetatable(e, self)
     self.__index = self
     e.player      = a
@@ -85,9 +86,7 @@ function BombardTimerDisplay:render()
     local b = math.floor(a / 60)
     local c = a % 60
     local col = colorMap.get("missile")
-    textOutline.drawCentre(self, getText("IGUI_donation_bombard_timer")
-        .. " " .. string.format("%02d:%02d", b, c),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    timerText.draw(self, getText("IGUI_donation_bombard_timer"), b * 60 + c, col)
 end
 function BombardTimerDisplay:update()
     local a = self.player:getModData()

@@ -11,7 +11,8 @@ require("ISUI/ISPanel")
 --      당겨받아 한 칸씩 내려온다(빈 자리 없이 재정렬).
 local _a = {}
 
-local ROW_HEIGHT   = 34   -- 슬롯 높이(패널 30) + 슬롯 간 여백(4)
+local ROW_HEIGHT   = 38   -- 슬롯 높이(패널 timerText.PANEL_H=32) + 슬롯 간 여백(6).
+                           -- 기능명 폰트가 Medium -> Large 로 커지면서 같이 올렸다.
 local TOOLTIP_GAP  = 3    -- 큐박스 툴팁과의 최소 간격
 local FALLBACK_PAD = 210  -- DonationReceiver 미로드 등 극단적 상황에서만 쓰이는 안전망.
                            -- 큐박스 기본 앵커(핫바 바로 위) 위치를 대략 근사한 값.

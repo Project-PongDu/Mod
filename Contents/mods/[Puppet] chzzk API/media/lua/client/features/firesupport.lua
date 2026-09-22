@@ -3,7 +3,7 @@ local _a = {}
 local global = require("global")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
-local textOutline = require("utils/textOutline")
+local timerText = require("utils/timerText")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  화력 지원 (fire_support): 저격 / 드론 / 헬기 / 공수 중 1종 랜덤 발동. [스텁]
@@ -772,7 +772,9 @@ local SniperTimerDisplay = ISPanel:derive("SniperTimerDisplay")
 
 function SniperTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
+    -- 폭/높이는 카운터 패널 공통 규격(utils/timerText)을 따른다.
+    local o = ISPanel:new((w - timerText.PANEL_W) / 2, 0,
+        timerText.PANEL_W, timerText.PANEL_H)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -785,10 +787,7 @@ function SniperTimerDisplay:render()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
     local col = colorMap.get("fire_support")
-    textOutline.drawCentre(self, getText("IGUI_donation_fire_support_sniper_timer")
-        .. " " .. string.format("%02d:%02d",
-            math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    timerText.draw(self, getText("IGUI_donation_fire_support_sniper_timer"), totalSec, col)
 end
 
 function SniperTimerDisplay:update()
@@ -833,7 +832,9 @@ local HeliTimerDisplay = ISPanel:derive("HeliTimerDisplay")
 
 function HeliTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
+    -- 폭/높이는 카운터 패널 공통 규격(utils/timerText)을 따른다.
+    local o = ISPanel:new((w - timerText.PANEL_W) / 2, 0,
+        timerText.PANEL_W, timerText.PANEL_H)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -846,10 +847,7 @@ function HeliTimerDisplay:render()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
     local col = colorMap.get("fire_support")
-    textOutline.drawCentre(self, getText("IGUI_donation_fire_support_heli_timer")
-        .. " " .. string.format("%02d:%02d",
-            math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    timerText.draw(self, getText("IGUI_donation_fire_support_heli_timer"), totalSec, col)
 end
 
 function HeliTimerDisplay:update()
@@ -896,6 +894,25 @@ end
 local HELI_FLY_ALT = 8.0   -- 물리 y 고도. iso 층수 환산 = y/2.46 (BaseVehicle.java:1456),
                            -- 8.0 ≈ 3.25층. 초기값 3.0(BH 조종 상한)은 1.2층이라 너무 낮았다.
 local HELI_YAW_OFF = 0     -- fbx 전방축 보정(도). 기수 방향이 틀어져 보이면 여기로 교정.
+
+-- ── 실차량 미도착/유실 복구 ────────────────────────────────────────────────
+-- [증상] 로터음·예광탄·타이머는 정상인데 기체와 그림자만 안 보인다.
+-- [원인] 서버는 스폰 지점을 "서버에서 그 스퀘어가 로드돼 있는가"(getSquare)로만
+--   고르는데, 스폰점 A 는 플레이어에서 r+50(기본 80) 타일이다. 서버의 청크 유지
+--   반경(GameServer: ChunkGridWidth*4*10)은 그보다 훨씬 넓어서 스폰은 성공하지만,
+--   클라로 차량을 보낼지 판정하는 UdpConnection.RelevantTo 는 ReleventRange*10
+--   박스라 그 거리가 경계에 걸린다. 그래서 차량이 아예 안 오거나(=영구 미출현)
+--   왔다가 leg 끝에서 회수된다. 실측(console.txt): 도착까지 150~1800ms 로 들쭉,
+--   3회 연속 끝내 미도착한 세션도 있었다.
+-- [데드락] 차량이 없으면 파일럿 틱이 못 움직이고, 못 움직이니 영영 플레이어
+--   쪽으로 가까워지지 않아 스트리밍 기회도 다시 오지 않는다.
+-- [복구] 경로상 현재 위치가 플레이어 근처(=확실히 스트리밍되는 거리)에 왔을 때만
+--   서버에 재스폰을 요청한다. 멀리 있는 동안 요청해봐야 같은 이유로 또 안 오고,
+--   화면 밖이라 보일 필요도 없다.
+local HELI_LOST_GRACE_MS   = 1500   -- 정상 스트리밍 지연은 이만큼 기다린다
+local HELI_RESPAWN_DIST    = 45     -- 이 거리(타일) 안으로 들어왔을 때만 요청
+local HELI_RESPAWN_COOL_MS = 4000   -- 요청 쿨다운(서버에도 같은 가드가 있다)
+local HELI_LOST_LOG_MS     = 3000   -- 유실 상태 반복 로그 주기
 
 local function heliPathPos(h)
     if not h or not h.total then return nil end
@@ -967,18 +984,54 @@ local function heliSetYaw(h, v)
     end
 end
 
+-- 차량을 못 잡고 있는 동안의 처리(파일럿 클라 전용).
+-- 유실 시각을 기록하고, 조건이 맞으면 서버에 재스폰을 요청한다.
+local function heliLostTick(h)
+    local now = getTimestampMs()
+    if not h.lostAt then
+        h.lostAt    = now
+        h.lostLogAt = 0
+    end
+    local lostMs = now - h.lostAt
+    if now - (h.lostLogAt or 0) >= HELI_LOST_LOG_MS then
+        h.lostLogAt = now
+        print(string.format(
+            "[PongDu] fire_support/heli: vehicle missing %dms own=%s vid=%s",
+            lostMs, tostring(h.own), tostring(h.vid)))
+    end
+    if lostMs < HELI_LOST_GRACE_MS then return end
+
+    -- 경로상 현재 위치가 내 근처까지 와야 재스폰이 의미가 있다.
+    local wx, wy = heliPathPos(h)
+    if not wx then return end
+    local p = getSpecificPlayer(0)
+    if not p then return end
+    local dx, dy = wx - p:getX(), wy - p:getY()
+    local d2 = dx * dx + dy * dy
+    if d2 > (HELI_RESPAWN_DIST * HELI_RESPAWN_DIST) then return end
+
+    if h.respawnAt and now - h.respawnAt < HELI_RESPAWN_COOL_MS then return end
+    h.respawnAt = now
+    print(string.format(
+        "[PongDu] fire_support/heli: RESPAWN requested own=%s vid=%s lost=%dms dist=%.1f",
+        tostring(h.own), tostring(h.vid), lostMs, math.sqrt(d2)))
+    sendClientCommand("PongDuFireSupport", "HeliRespawn", { own = h.own })
+end
+
 -- 파일럿 틱: 경로 보간 좌표로 텔레포트. 권한 클라에서만 호출된다.
 local function heliPilotTick(h)
     local v = findHeliVehicle(h)
     if not v then
-        if not h.warned then
-            h.warned = true
-            print("[PongDu] fire_support/heli: pilot tick but vehicle not streamed yet own="
-                .. tostring(h.own) .. " vid=" .. tostring(h.vid))
-        end
+        heliLostTick(h)
         return
     end
-    h.warned = false
+    if h.lostAt then
+        -- 최초 스폰 직후에도 한 번 찍힌다 = 차량 스트리밍에 걸린 실제 시간.
+        print(string.format(
+            "[PongDu] fire_support/heli: vehicle acquired own=%s vid=%s after %dms",
+            tostring(h.own), tostring(h.vid), getTimestampMs() - h.lostAt))
+        h.lostAt = nil
+    end
     local wx, wy = heliPathPos(h)
     if not wx then return end
     if not h.yawSet then
@@ -1279,7 +1332,9 @@ local DroneTimerDisplay = ISPanel:derive("DroneTimerDisplay")
 
 function DroneTimerDisplay:new()
     local w = getCore():getScreenWidth()
-    local o = ISPanel:new(w / 2 - 120, 0, 240, 30)
+    -- 폭/높이는 카운터 패널 공통 규격(utils/timerText)을 따른다.
+    local o = ISPanel:new((w - timerText.PANEL_W) / 2, 0,
+        timerText.PANEL_W, timerText.PANEL_H)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -1292,10 +1347,7 @@ function DroneTimerDisplay:render()
     if ms < 0 then ms = 0 end
     local totalSec = math.floor(ms / 1000)
     local col = colorMap.get("fire_support")
-    textOutline.drawCentre(self, getText("IGUI_donation_fire_support_drone_timer")
-        .. " " .. string.format("%02d:%02d",
-            math.floor(totalSec / 60), totalSec % 60),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    timerText.draw(self, getText("IGUI_donation_fire_support_drone_timer"), totalSec, col)
 end
 
 function DroneTimerDisplay:update()

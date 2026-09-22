@@ -667,7 +667,9 @@ local _heliJobs = {}
 -- firesupport.lua가 텔레포트로 수행하고 엔진 물리 스트림이 전 클라에 보간
 -- 전파한다. 스폰 실패 시 클라는 경로 보간 폴백(소리/탄/타이머)으로 동작하므로
 -- 후원 자체는 죽지 않는다.
-local function heliSpawnVehicle(job)
+-- sx0/sy0: 스폰 기준점. 생략하면 leg 시작점 A. 재스폰(HeliRespawn)은 헬기의
+-- "현재 위치"를 넘겨서 비행 도중에도 경로가 튀지 않게 한다.
+local function heliSpawnVehicle(job, sx0, sy0)
     local okP, px, py = pcall(function()
         return job.player:getX(), job.player:getY()
     end)
@@ -675,11 +677,13 @@ local function heliSpawnVehicle(job)
         print("[PongDu][Heli] vehicle spawn FAILED: player invalid")
         return
     end
+    local ox = sx0 or job.ax
+    local oy = sy0 or job.ay
     local sq = nil
     for step = 0, 9 do
         local t  = step * 0.1
-        local sx = math.floor(job.ax + (px - job.ax) * t)
-        local sy = math.floor(job.ay + (py - job.ay) * t)
+        local sx = math.floor(ox + (px - ox) * t)
+        local sy = math.floor(oy + (py - oy) * t)
         sq = getSquare(sx, sy, 0)
         if sq then break end
     end
@@ -1050,6 +1054,51 @@ DOServer["PongDuFireSupport"]["HeliEngaged"] = function(player, data)
             sendServerCommand(p, "PongDuFireSupport", cmd, { own = job.own })
         end
     end
+end
+
+-- ── 실차량 재스폰: 클라 요청 ───────────────────────────────────────────────
+-- [왜 필요한가]
+--   스폰점 A 는 플레이어에서 r+50(기본 80) 타일이다. 서버는 getSquare 로 "서버에
+--   청크가 로드됐는가"만 보고 스폰하는데, 클라로 차량을 보낼지 판정하는
+--   UdpConnection.RelevantTo(ReleventRange*10 박스)는 그보다 좁아서 그 거리가
+--   경계에 걸린다. 그래서 차량이 클라에 아예 안 가거나 비행 중 회수되고, 그러면
+--   파일럿 클라가 getVehicleById 로 못 잡아 헬기가 스폰 지점에 영영 멈춘다
+--   (사운드/사격/타이머는 경로 보간 폴백이라 정상 -- 기체와 그림자만 안 보인다).
+--
+-- [어떻게 고치나]
+--   파일럿 클라가 "차량이 없는 채로 HELI_LOST_GRACE_MS 이상 지났고, 경로상
+--   현재 위치가 내 근처(HELI_RESPAWN_DIST)까지 왔다"고 판단하면 이 명령을 보낸다.
+--   가까운 좌표에 다시 스폰하므로 이번엔 확실히 스트리밍된다. 비행 반경 자체는
+--   건드리지 않으므로 연출은 그대로다.
+--
+--   heliBroadcastStart 를 다시 보내 새 vid/pilot 을 전 클라에 알린다. 페이로드가
+--   현재 leg 의 elapsed/total 을 그대로 담으므로 경로/타이머 연속성은 유지되고,
+--   클라 heliUpsert 가 yawSet 을 리셋해 기수 방향도 새 차량에 다시 잡힌다.
+local HELI_RESPAWN_COOL_MS = 3000   -- 클라 쿨다운(4000ms)보다 짧게 -- 중복 요청 차단용
+
+DOServer["PongDuFireSupport"]["HeliRespawn"] = function(player, data)
+    local job = heliJobOf(player)
+    if not job then
+        print("[PongDu][Heli] respawn request ignored (no job) from "
+            .. tostring(player and player:getUsername()))
+        return
+    end
+    local now = getTimestampMs()
+    if job.respawnAt and now - job.respawnAt < HELI_RESPAWN_COOL_MS then return end
+    job.respawnAt = now
+
+    local cx, cy = heliCurrentPos(job)
+    heliRemoveVehicle(job, "respawn requested by pilot")
+    heliSpawnVehicle(job, cx, cy)
+    if not job.vehicle then
+        print("[PongDu][Heli] RESPAWN failed -- no loaded square near "
+            .. math.floor(cx) .. "," .. math.floor(cy))
+        return
+    end
+    heliBroadcastStart(job)
+    print(string.format("[PongDu][Heli] vehicle RESPAWNED vid=%s at %d,%d for %s",
+        tostring(job.vid), math.floor(cx), math.floor(cy),
+        tostring(player:getUsername())))
 end
 
 local function processHeliJobs()

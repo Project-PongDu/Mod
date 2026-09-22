@@ -3,7 +3,7 @@ require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
 local labelKey = require("utils/labelKey")
-local textOutline = require("utils/textOutline")
+local timerText = require("utils/timerText")
 local fx = require("utils/fx")
 local deltaTime = require("utils/deltaTime")
 local mutantspawn = require("features/mutantspawn")
@@ -208,8 +208,9 @@ local RainTimerDisplay = ISPanel:derive("RainTimerDisplay")
 function RainTimerDisplay:new()
     local w = getCore():getScreenWidth()
     -- y좌표는 timerStack이 등록 순서에 맞춰 잡아준다(register 전까지는 임시값 0).
-    -- 폭 160 -> 180: 폰트를 한 단계(Small -> Medium) 키우면서 텍스트 폭도 늘어남.
-    local o = ISPanel:new(w / 2 - 90, 0, 180, 30)
+    -- 폭/높이는 카운터 패널 공통 규격(utils/timerText)을 따른다.
+    local o = ISPanel:new((w - timerText.PANEL_W) / 2, 0,
+        timerText.PANEL_W, timerText.PANEL_H)
     setmetatable(o, self)
     self.__index = self
     o:noBackground()
@@ -221,14 +222,11 @@ function RainTimerDisplay:render()
     -- 시작 순간 설정값(예: 30초)이 그대로 보이게 한다. 00:00 은 마지막 1초 동안 표시.
     local totalSec = math.ceil((_rainRemainMs - SERVER_PREP_MS) / 1000)
     if totalSec < 0 then totalSec = 0 end
-    local m = math.floor(totalSec / 60)
-    local s = totalSec % 60
     local col = colorMap.get("zombie_rain")
     -- 카테고리 이름("좀비 공습")이 아니라 지금 설정된 방식 이름을 쓴다 --
     -- 큐박스 슬롯/호버 툴팁과 같은 이름이 떠야 한다.
     -- 방식 -> 번역키 판정은 utils/labelKey.resolve 한 곳에만 둔다.
-    textOutline.drawCentre(self, getText(labelKey.resolve("zombie_rain")) .. " " .. string.format("%02d:%02d", m, s),
-        self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
+    timerText.draw(self, getText(labelKey.resolve("zombie_rain")), totalSec, col)
 end
 
 function RainTimerDisplay:update()
