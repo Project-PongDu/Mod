@@ -1,6 +1,7 @@
 local _fx = {}
 
 local colorMap = require("utils/colorMap")
+local gasCloud = require("utils/gasCloud")
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  후원 이펙트 브로드캐스트 (사운드 + 바닥 반경 마커)  [module: PongDuFx]
@@ -63,10 +64,11 @@ _fx.FX_RADIUS = FX_RADIUS
 -- 추적은 사운드 길이만큼만. SOUND_MS 는 media/sound/*.wav 실측값이므로 파일을
 -- 교체하면 여기도 같이 고칠 것 (어긋나도 조기 종료 or 무의미한 갱신일 뿐이다).
 local SOUND_MS = {
-    ["necromance"]  = 7000,
-    ["zombie_rain"] = 7000,
-    ["anomaly"]     = 2300,
-    ["alert"]       = 12000,
+    ["necromance"]         = 7000,
+    ["zombie_rain"]        = 7000,
+    ["anomaly"]            = 2300,
+    ["alert"]              = 12000,
+    ["pongdu_gas_deploy"]  = 7000,
 }
 local SOUND_MS_DEFAULT = 5000
 
@@ -178,10 +180,12 @@ function _fx.marker(x, y, z, featureId, radius, durationMs)
 end
 
 -- broadcast{ f=featureId, x=, y=, z=, sound=, markerRadius=, markerMs=,
---            noteKey=, noteName=, noteId= }
+--            gasRadius=, gasMs=, noteKey=, noteName=, noteId= }
 --   sound        : 효과음 이름(생략 시 소리 없음)
 --   soundScale   : 수신측 볼륨 배율(기본 1.0). 발동 본인의 로컬 재생엔 적용되지 않는다.
 --   markerRadius : 0 또는 생략이면 마커 없음(샌드박스 반경표시 옵션이 꺼진 경우)
+--   gasRadius    : 0 또는 생략이면 가스 연출 없음. 마커와 배타적으로 쓴다 --
+--                  강령술의 "가스 살포" 방식이 보라 마커 대신 쓰는 채널이다.
 --   noteKey      : 머리 위 말풍선 번역키(생략 시 알림 없음). %1 에 noteName 이 들어간다.
 -- 발동 클라 본인 몫(로컬 재생/렌더)은 호출부가 따로 처리한다.
 -- sr(효과음+알림 공용 반경)은 둘 다 없으면 0으로 나간다 — 그래야 서버가
@@ -200,6 +204,8 @@ function _fx.broadcast(t)
         ["sr"]  = (snd ~= "" or note ~= "") and FX_RADIUS or 0,
         ["mr"]  = t.markerRadius or 0,
         ["ms"]  = t.markerMs or 3000,
+        ["gr"]  = t.gasRadius or 0,
+        ["gms"] = t.gasMs or 0,
         ["nk"]  = note,
         ["nn"]  = t.noteName or "",
         ["nid"] = t.noteId or -1,
@@ -277,6 +283,13 @@ Events.OnServerCommand.Add(function(module, command, args)
     local mr = tonumber(args["mr"]) or 0
     if mr > 0 then
         _fx.marker(x, y, tonumber(args["z"]) or 0, feature, mr, tonumber(args["ms"]) or 3000)
+    end
+
+    -- 가스 연출: 마커와 같은 자리를 차지하는 대체 채널이라 거리 판정도 마커와
+    -- 같다(서버 컷만 믿는다 -- 화면 밖이면 gasCloud 가 알아서 그리지 않는다).
+    local gr = tonumber(args["gr"]) or 0
+    if gr > 0 then
+        gasCloud.spawn(x, y, tonumber(args["z"]) or 0, gr, tonumber(args["gms"]) or 0)
     end
 
     -- 머리 위 알림: 효과음과 같은 sr 반경을 공유한다.

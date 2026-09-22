@@ -2,6 +2,7 @@ local _a = {}
 
 local aggro = require("features/aggro")
 local fx    = require("utils/fx")
+local gasCloud = require("utils/gasCloud")
 -- 대기 인디케이터용. 셋 다 leaf 모듈(서로/features 를 require 하지 않음)이라
 -- 순환 의존이 생기지 않는다 -- hordenight/bloodmoon 과 동일한 조합.
 local moodleStack = require("utils/moodleStack")
@@ -24,28 +25,57 @@ local zone        = require("utils/zone")
 
 local MARKER_DURATION_MS = 3000   -- 반경 표시 유지 시간
 
+-- ── 연출 방식 ─────────────────────────────────────────────────────────────
+-- 부활 로직(반경/최소 시체 수/우선순위/서버 처리)은 방식과 무관하게 완전히
+-- 동일하다. 바뀌는 건 "반경을 뭘로 보여주고 무슨 소리를 내느냐" 뿐이다.
+--   1 = 강령술      : 보라색 원형 마커 + necromance (오컬트 톤, 기존 동작)
+--   2 = 가스 살포   : 바닥 황록 가스 확산 + pongdu_gas_deploy (생화학 톤)
+-- 좀비 공습의 Rain_Style 과 같은 구조다. 새 방식 추가 시: 여기 + STYLE_MAX +
+-- sandbox-options.txt numValues + Sandbox_KO option<N> 을 함께 늘린다.
+local STYLE_NECRO = 1
+local STYLE_GAS   = 2
+local STYLE_MAX   = 2
+
+local function styleNow()
+    local st = SandboxVars.PongDu.RiseUp_Style
+    if type(st) ~= "number" or st < 1 or st > STYLE_MAX then return STYLE_NECRO end
+    return st
+end
+
 -- 도네 발동 진입점. 서버에 좌표/반경만 넘기고 실제 부활은 server.lua 의
 -- DOServer["PongDuRiseUp"]["RiseUp"] 이 수행한다.
 -- SandboxVars는 파일 로드 시점엔 비어있을 수 있으므로 사용 시점에 읽는다.
 --
--- 효과음/반경 마커는 utils/fx 로 처리한다: 본인은 즉시 로컬 재생/렌더,
--- 나머지 접속자는 서버 거리컷 브로드캐스트로 동일한 necromance 음과 마커를
--- 받는다 (기존엔 본인만 necromance, 나머지는 alert 였다).
+-- 효과음/반경 표시는 utils/fx 로 처리한다: 본인은 즉시 로컬 재생/렌더,
+-- 나머지 접속자는 서버 거리컷 브로드캐스트로 같은 소리와 같은 연출을 받는다.
 -- 반경 표시 자체는 샌드박스 RiseUp_ShowRadius 를 따른다 — 꺼져 있으면
--- markerRadius=0 으로 나가므로 누구에게도 안 뜬다.
+-- 마커든 가스든 반경 0 으로 나가므로 누구에게도 안 뜬다.
 local function doFire(player)
     if not player then return end
     local radius = SandboxVars.PongDu.RiseUp_Radius
     local showRadius = SandboxVars.PongDu.RiseUp_ShowRadius
+    local style = styleNow()
     local px, py, pz = player:getX(), player:getY(), player:getZ()
 
-    fx.playAt("necromance", px, py)
+    local isGas = (style == STYLE_GAS)
+    local sound = isGas and "pongdu_gas_deploy" or "necromance"
+    -- 가스는 퍼졌다 걷히는 시간이 필요해 마커(3초 고정)보다 길다.
+    local gasMs = SandboxVars.PongDu.RiseUp_GasDuration * 1000
+    local shownR = showRadius and radius or 0
+
+    print("[PongDuRiseUp] fire style=" .. tostring(style) .. " r=" .. tostring(radius)
+        .. " showRadius=" .. tostring(showRadius)
+        .. " gasMs=" .. tostring(isGas and gasMs or 0))
+
+    fx.playAt(sound, px, py)
     fx.broadcast({
         f = "rise_up_dead_man",
         x = px, y = py, z = pz,
-        sound = "necromance",
-        markerRadius = showRadius and radius or 0,
+        sound = sound,
+        markerRadius = (not isGas) and shownR or 0,
         markerMs = MARKER_DURATION_MS,
+        gasRadius = isGas and shownR or 0,
+        gasMs = gasMs,
     })
     sendClientCommand("PongDuRiseUp", "RiseUp", {
         ["x"] = px,
@@ -53,9 +83,13 @@ local function doFire(player)
         ["r"] = radius,
     })
 
-    -- 도네이터 본인 화면에 반경 표시 (부활 시점과 동시, 3초간)
+    -- 도네이터 본인 화면에 반경 표시 (부활 시점과 동시)
     if showRadius then
-        fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
+        if isGas then
+            gasCloud.spawn(px, py, pz, radius, gasMs)
+        else
+            fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
+        end
     end
 end
 

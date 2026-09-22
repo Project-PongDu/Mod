@@ -137,6 +137,23 @@ module Base
         }
     }
 
+    /* 강령술 - "재활성화 가스 살포" 방식의 살포음. 캐니스터 착탄 -> 밸브 개방
+       -> 고압 분사 -> 잔류 누출이 한 파일(7초)에 이어져 있다. 연출 길이는
+       RiseUp_GasDuration 으로 따로 조절되므로 이 음원과 길이가 달라도 된다.
+       loop = false -- 한 번만 재생된다. 거리 볼륨은 utils/fx 의 playAt 이 관리.
+       pongdu_gas_deploy.wav 는 합성 음원 -- 교체 시 파일명만 유지할 것.
+       SOUND_MS(utils/fx.lua) 항목도 파일 길이와 함께 고쳐야 한다. */
+    sound pongdu_gas_deploy
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/pongdu_gas_deploy.wav,
+            volume = 0.5,
+        }
+    }
+
     /* 좀비 공습 - 수송기 투하 방식의 엔진음. 헬기 로터음과 같은 이유로 loop = true.
        재생/정지와 거리 볼륨은 features/zombierain.lua가 emitter 핸들로 관리.
        airdrop_plane.wav는 합성 임시 음원(6초 무이음 루프) -- 교체 시 파일명만 유지. */

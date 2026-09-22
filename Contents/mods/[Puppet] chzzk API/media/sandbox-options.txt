@@ -761,6 +761,18 @@ option PongDu.Delay_rise_up_dead_man = {
     page = PongDu_Debuff, translation = PongDu_Delay_rise_up_dead_man,
 }
 
+option PongDu.RiseUp_Style = {
+    type = enum, numValues = 2, default = 1,
+    page = PongDu_Debuff,
+    translation = PongDu_RiseUp_Style,
+    valueTranslation = PongDu_RiseUp_Style,
+}
+
+option PongDu.RiseUp_GasDuration = {
+    type = integer, min = 3, max = 15, default = 7,
+    page = PongDu_Debuff, translation = PongDu_RiseUp_GasDuration,
+}
+
 option PongDu.RiseUp_Radius = {
     type = integer, min = 5, max = 60, default = 30,
     page = PongDu_Debuff, translation = PongDu_RiseUp_Radius,

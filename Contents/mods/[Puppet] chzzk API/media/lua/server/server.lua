@@ -1188,9 +1188,14 @@ DOServer["PongDuFx"]["Play"] = function(player, data)
     local cy = tonumber(data["y"]) or player:getY()
     local sr = tonumber(data["sr"]) or 0
     local mr = tonumber(data["mr"]) or 0
+    -- 가스 연출(강령술 "가스 살포" 방식)은 마커와 배타적으로 쓰는 채널이라
+    -- 중계 반경 계산도 마커와 같게 잡는다. 이걸 빼먹으면 소리 없는 가스 발동이
+    -- send=0 으로 잘려서 주변 접속자에게 아무것도 안 간다.
+    local gr = tonumber(data["gr"]) or 0
 
     local send = sr
     if mr > 0 and (mr + FX_VIEW_MARGIN) > send then send = mr + FX_VIEW_MARGIN end
+    if gr > 0 and (gr + FX_VIEW_MARGIN) > send then send = gr + FX_VIEW_MARGIN end
     if send <= 0 then return end
     local s2 = send * send
 
@@ -1209,6 +1214,7 @@ DOServer["PongDuFx"]["Play"] = function(player, data)
     end
     print("[PongDu][Fx] relay feature=" .. tostring(data["f"])
         .. " sound=" .. tostring(data["s"]) .. " mr=" .. tostring(mr)
+        .. " gr=" .. tostring(gr)
         .. " note=" .. tostring(data["nk"]) .. " r=" .. tostring(send)
         .. " targets=" .. tostring(relayed))
 end
