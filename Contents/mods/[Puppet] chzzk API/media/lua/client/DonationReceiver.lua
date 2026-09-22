@@ -138,7 +138,33 @@ local iconTexPath = {
     ["bandit_melee"]         = "media/textures/donation/bandit_melee.png",
     ["bandit_ranged"]        = "media/textures/donation/bandit_ranged.png",
 }
-local iconTexCache = {}   -- featureId -> Texture 객체 (또는 없으면 false로 캐시)
+-- 샌드박스 방식에 따라 아이콘까지 갈리는 기능. 표시 이름을 가르는 기준
+-- (utils/labelKey.resolve)과 같은 옵션을 본다 -- 이름과 그림이 따로 놀면 안 된다.
+--   zombie_rain      : Rain_Style   1 -> 좀비 레인(기존) / 2 -> 좀비 공중투하
+--   rise_up_dead_man : RiseUp_Style 1 -> 강령술(기존)   / 2 -> 재활성화 가스 살포
+local iconTexPathByStyle = {
+    ["zombie_rain"]      = { [2] = "media/textures/donation/zombie_rain_airdrop.png" },
+    ["rise_up_dead_man"] = { [2] = "media/textures/donation/rise_up_gas.png" },
+}
+
+local function resolveIconPath(featureId)
+    local styled = iconTexPathByStyle[featureId]
+    if styled then
+        local st
+        if featureId == "zombie_rain" then
+            st = SandboxVars.PongDu.Rain_Style
+        else
+            st = SandboxVars.PongDu.RiseUp_Style
+        end
+        local p = styled[st]
+        if p then return p end
+    end
+    return iconTexPath[featureId]
+end
+
+-- 캐시 키는 featureId 가 아니라 "해석된 경로"다. 방식에 따라 한 featureId 가
+-- 두 텍스처를 쓰게 됐으므로 featureId 로 캐시하면 방식을 바꿔도 예전 그림이 남는다.
+local iconTexCache = {}   -- 텍스처 경로 -> Texture 객체 (또는 없으면 false로 캐시)
 
 -- ── 둥근모서리 슬롯 마스크 텍스처 ──────────────────────────────────────────────
 -- PZ 바닐라 drawRect/drawRectBorder는 각진 사각형만 그릴 수 있어서, 둥근 모서리는
@@ -169,17 +195,17 @@ local function drawTextOutlined(uiElement, text, x, y, r, g, b, a, font)
 end
 
 local function getIconTexture(featureId)
-    local path = iconTexPath[featureId]
+    local path = resolveIconPath(featureId)
     if not path then
         -- 내장 기능에 없으면 애드온이 register(def.icon)로 넘긴 경로를 쓴다.
         local meta = PongDuAddon.getMeta(featureId)
         path = meta and meta.icon
     end
     if not path then return nil end
-    local cached = iconTexCache[featureId]
+    local cached = iconTexCache[path]
     if cached == nil then
         cached = getTexture(path) or false
-        iconTexCache[featureId] = cached
+        iconTexCache[path] = cached
         if cached == false then
             print("[PongDu] queue icon texture not found: " .. path
                 .. " (featureId=" .. tostring(featureId) .. ") -- using colour slot")
@@ -199,31 +225,19 @@ local function donationTextArg(featureId)
     return nil
 end
 
--- featureId -> 실제로 쓸 번역 키. 대부분은 labelKey 그대로지만, 샌드박스 설정에 따라
--- 표시 이름 자체가 갈리는 효과가 있어서 사용 시점에 한 번 더 걸러준다.
--- missile: PongDu.Bombard_Injure(플레이어 부상 여부)에 따라
---   켜짐 -> "유도 폭격" (플레이어도 맞음), 꺼짐 -> "지원 폭격" (플레이어는 안 맞음).
--- SandboxVars는 게임 로드 후에만 존재하므로 파일 로드 시점이 아니라 여기서 읽는다.
-local function resolveLabelKey(featureId)
-    if featureId == "missile" then
-        if SandboxVars.PongDu.Bombard_Injure then
-            return "IGUI_donation_bombard_guided"
-        end
-        return "IGUI_donation_bombard_support"
-    end
-    return labelKey[featureId]
-end
-
 -- 순수 효과 이름만 (후원 메시지 안 붙임) -- 큐박스 호버 툴팁 전용.
+-- 샌드박스 설정에 따라 이름이 갈리는 기능(폭격/좀비 공습/좀비 부활)의 분기는
+-- utils/labelKey.resolve 가 전담한다 -- 예전엔 여기와 DonationTestMenu 에
+-- 같은 분기가 복사돼 있었다.
 local function effectName(featureId)
-    local key = resolveLabelKey(featureId)
+    local key = labelKey.resolve(featureId)
     if not key then return "Effect " .. tostring(featureId) end
     local arg = donationTextArg(featureId)
     return arg and getText(key, arg) or getText(key)
 end
 
 local function buildLabel(featureId, sender, message)
-    local key = labelKey[featureId]
+    local key = labelKey.resolve(featureId)
     local arg = donationTextArg(featureId)
     local label = key and (arg and getText(key, arg) or getText(key)) or ("Effect " .. tostring(featureId))
     if featureId == "vaccine" and message and message ~= "" then

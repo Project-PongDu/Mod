@@ -182,14 +182,10 @@ end
 -- missile은 DonationReceiver.lua의 resolveLabelKey()와 동일 기준
 -- (SandboxVars.PongDu.Bombard_Injure)으로 큐박스 UI와 같은 문구
 -- ("지원 폭격"/"유도 폭격")를 쓴다.
+-- 샌드박스 설정에 따라 이름이 갈리는 기능(폭격/좀비 공습/좀비 부활)의 분기는
+-- utils/labelKey.resolve 가 전담한다 (예전엔 폭격 분기가 여기 복사돼 있었다).
 local function displayLabel(featureId)
-    if featureId == "missile" then
-        if SandboxVars.PongDu.Bombard_Injure then
-            return getText("IGUI_donation_bombard_guided")
-        end
-        return getText("IGUI_donation_bombard_support")
-    end
-    local key = labelKey[featureId]
+    local key = labelKey.resolve(featureId)
     if key then return getText(key) end
     return featureId
 end

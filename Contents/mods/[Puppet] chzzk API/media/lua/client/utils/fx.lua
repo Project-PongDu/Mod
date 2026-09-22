@@ -289,7 +289,7 @@ Events.OnServerCommand.Add(function(module, command, args)
     -- 같다(서버 컷만 믿는다 -- 화면 밖이면 gasCloud 가 알아서 그리지 않는다).
     local gr = tonumber(args["gr"]) or 0
     if gr > 0 then
-        gasCloud.spawn(x, y, tonumber(args["z"]) or 0, gr, tonumber(args["gms"]) or 0)
+        gasCloud.spawn(x, y, tonumber(args["z"]) or 0, feature, gr, tonumber(args["gms"]) or 0)
     end
 
     -- 머리 위 알림: 효과음과 같은 sr 반경을 공유한다.

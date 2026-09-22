@@ -86,7 +86,7 @@ local function doFire(player)
     -- 도네이터 본인 화면에 반경 표시 (부활 시점과 동시)
     if showRadius then
         if isGas then
-            gasCloud.spawn(px, py, pz, radius, gasMs)
+            gasCloud.spawn(px, py, pz, "rise_up_dead_man", radius, gasMs)
         else
             fx.marker(px, py, pz, "rise_up_dead_man", radius, MARKER_DURATION_MS)
         end

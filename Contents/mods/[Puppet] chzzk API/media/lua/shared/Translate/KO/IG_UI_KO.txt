@@ -149,10 +149,13 @@ IGUI_KO = {
     
 
     IGUI_donation_rise_up_dead_man = "강령술",
+    IGUI_donation_rise_up_gas = "재활성화 가스 살포",
 
 
 
     IGUI_donation_zombie_rain = "좀비 공습",
+    IGUI_donation_zombie_rain_fall = "좀비 레인",
+    IGUI_donation_zombie_rain_airdrop = "좀비 공중투하",
 
 
 

@@ -1,11 +1,13 @@
 local _gas = {}
 
+local colorMap = require("utils/colorMap")
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  바닥 가스 확산 연출  [leaf 모듈 -- features/ 를 require 하지 않는다]
 --
---  강령술(rise_up_dead_man)의 "재활성화 가스 살포" 방식에서 보라색 반경 마커
---  대신 쓰는 연출이다. 발동 지점을 중심으로 황록색 가스가 반경까지 퍼졌다가
---  서서히 걷힌다.
+--  강령술(rise_up_dead_man)의 "재활성화 가스 살포" 방식에서 원형 반경 마커
+--  대신 쓰는 연출이다. 발동 지점을 중심으로 가스가 반경까지 퍼졌다가 서서히
+--  걷힌다. 색은 colorMap 의 featureId 색을 그대로 쓴다(강령술이면 보라).
 --
 --  왜 WorldMarkers 가 아닌 직접 렌더인가:
 --   · addGridSquareMarker 는 단색 원 하나가 전부다. 색만 초록으로 바꿔도
@@ -41,13 +43,25 @@ local PUFF_MAX    = 40     -- 프레임당 renderPoly 호출 상한. 반경 60�
 local PUFF_IN_MS  = 400    -- 퍼프 하나가 나타나는 시간
 local SPREAD_CAP  = 1500   -- 중앙 -> 가장자리 확산 시간 상한(ms)
 local FADE_CAP    = 2000   -- 소산 시간 상한(ms)
-local ALPHA_MAX   = 0.30   -- 퍼프 1장 기준. 겹치면 중심부가 더 진해진다
+-- 퍼프 1장 기준 알파. 실제 화면 농도는 이 값 그대로가 아니다:
+--  · 텍스처 자체 알파가 최대 0.665 라 실효 알파는 이 값의 약 2/3
+--  · 퍼프가 평균 2장쯤 겹치므로 겹친 자리는 다시 그만큼 진해진다
+-- 0.58 기준 -- 가장자리(1장) 약 39%, 보통(2장) 62%, 중심(3장) 77% 불투명.
+-- 더 올리면 가스 안에서 일어나는 시체가 안 보이기 시작하므로 여기가 상한에 가깝다.
+local ALPHA_MAX   = 0.58
 local SCALE_IN    = 0.55   -- 등장 시작 크기 배율 (1.0 까지 커진다)
 local VIEW_MARGIN = 60     -- 반경 + 이 값보다 멀면 그리지 않는다(타일)
 
--- 텍스처는 회색조다. 색은 renderPoly 의 r,g,b 로 입힌다 -- 틴트를 바꾸고 싶으면
--- 파일이 아니라 아래 세 값만 고치면 된다.
-local TINT_R, TINT_G, TINT_B = 0.72, 0.88, 0.18   -- 황록(생화학 경고 톤)
+-- 텍스처는 회색조다. 색은 renderPoly 의 r,g,b 로 입히며, 값은 colorMap(도네
+-- 큐박스 색상표)에서 featureId 로 가져온다 -- 큐박스/기존 보라 마커와 같은 색이
+-- 바닥에 그대로 뜬다. 색을 바꾸려면 이 파일이 아니라 colorMap 을 고친다.
+--
+-- TINT_LIFT: 색을 흰색 쪽으로 살짝 끌어올린다. renderPoly 의 r,g,b 는 텍스처
+-- 색에 곱해지는 값이라 0 인 채널은 그대로 0 이 된다. 강령술 보라 {0.45, 0, 0.6}
+-- 을 날것으로 쓰면 초록 채널이 0 이라 풀밭 위에서 "물든다"가 아니라 "어두워진다"로
+-- 보인다. 바닥 마커(addGridSquareMarker)는 자체 블렌딩이라 이 문제가 없었다.
+-- 알파를 올리면 lift 가 높을수록 뿌옇게 뜨므로 같이 조금 낮춘다.
+local TINT_LIFT = 0.20
 
 local TEX = {}
 local TEX_OK = true
@@ -67,10 +81,12 @@ local function clamp(v, lo, hi)
     return v
 end
 
--- spawn(x, y, z, radius, durationMs)
--- 발동 지점 기준 반경 안에 퍼프를 흩뿌린다. 호출한 클라 화면에만 그려지므로
--- 주변 접속자 몫은 호출부가 utils/fx 브로드캐스트로 따로 보내야 한다.
-function _gas.spawn(x, y, z, radius, durationMs)
+-- spawn(x, y, z, featureId, radius, durationMs)
+-- 발동 지점 기준 반경 안에 퍼프를 흩뿌린다. 인자 순서는 utils/fx 의 marker() 와
+-- 맞춰뒀다 -- 둘은 같은 자리를 대신 차지하는 연출이라 호출부가 헷갈리면 안 된다.
+-- 호출한 클라 화면에만 그려지므로 주변 접속자 몫은 호출부가 utils/fx
+-- 브로드캐스트로 따로 보내야 한다.
+function _gas.spawn(x, y, z, featureId, radius, durationMs)
     if not TEX_OK then
         print("[PongDu][Gas] spawn skipped (textures not loaded)")
         return
@@ -134,6 +150,7 @@ function _gas.spawn(x, y, z, radius, durationMs)
         }
     end
 
+    local col = colorMap.get(featureId)
     _clouds[#_clouds + 1] = {
         x = x, y = y,
         r = r,
@@ -141,8 +158,13 @@ function _gas.spawn(x, y, z, radius, durationMs)
         dur = dur,
         fade = fade,
         puffs = puffs,
+        -- 틴트는 구름마다 한 번만 계산해둔다(프레임당 퍼프 수만큼 곱하지 않게)
+        tr = col[1] + (1 - col[1]) * TINT_LIFT,
+        tg = col[2] + (1 - col[2]) * TINT_LIFT,
+        tb = col[3] + (1 - col[3]) * TINT_LIFT,
     }
-    print("[PongDu][Gas] spawn r=" .. tostring(r) .. " durMs=" .. tostring(math.floor(dur))
+    print("[PongDu][Gas] spawn feature=" .. tostring(featureId)
+        .. " r=" .. tostring(r) .. " durMs=" .. tostring(math.floor(dur))
         .. " puffs=" .. tostring(n) .. " place=" .. tostring(math.floor(place * 10) / 10)
         .. " puffSize=" .. tostring(math.floor(puffSize * 10) / 10)
         .. " spreadMs=" .. tostring(math.floor(spread)))
@@ -208,7 +230,7 @@ local function drawClouds(z)
                                 (wx2 - wy2) * bx - offX, (wx2 + wy2) * by - offY,
                                 (wx3 - wy3) * bx - offX, (wx3 + wy3) * by - offY,
                                 (wx4 - wy4) * bx - offX, (wx4 + wy4) * by - offY,
-                                TINT_R, TINT_G, TINT_B, a)
+                                c.tr, c.tg, c.tb, a)
                         end
                     end
                 end

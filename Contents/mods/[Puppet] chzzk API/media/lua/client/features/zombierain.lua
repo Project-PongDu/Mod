@@ -2,6 +2,7 @@ local _a = {}
 require("ISUI/ISPanel")
 local timerStack = require("utils/timerStack")
 local colorMap = require("utils/colorMap")
+local labelKey = require("utils/labelKey")
 local textOutline = require("utils/textOutline")
 local fx = require("utils/fx")
 local deltaTime = require("utils/deltaTime")
@@ -223,7 +224,10 @@ function RainTimerDisplay:render()
     local m = math.floor(totalSec / 60)
     local s = totalSec % 60
     local col = colorMap.get("zombie_rain")
-    textOutline.drawCentre(self, getText("IGUI_donation_zombie_rain") .. " " .. string.format("%02d:%02d", m, s),
+    -- 카테고리 이름("좀비 공습")이 아니라 지금 설정된 방식 이름을 쓴다 --
+    -- 큐박스 슬롯/호버 툴팁과 같은 이름이 떠야 한다.
+    -- 방식 -> 번역키 판정은 utils/labelKey.resolve 한 곳에만 둔다.
+    textOutline.drawCentre(self, getText(labelKey.resolve("zombie_rain")) .. " " .. string.format("%02d:%02d", m, s),
         self.width / 2, 0, col[1], col[2], col[3], 1, UIFont.Medium)
 end
 
