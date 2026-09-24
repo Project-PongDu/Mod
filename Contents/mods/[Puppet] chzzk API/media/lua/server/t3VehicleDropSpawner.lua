@@ -323,12 +323,34 @@ local function findChuteCargo(job)
     return nil
 end
 
+-- MP 물리 권한 상태 한 줄 요약 (BaseVehicle.getAuthorizationDescription).
+local function chuteAuthDesc(v)
+    if not v then return "nil" end
+    local ok, s = pcall(function() return v:getAuthorizationDescription() end)
+    if ok then return tostring(s) end
+    return "auth-read-failed(" .. tostring(s) .. ")"
+end
+
 local function spawnChuteRig(x, y, z)
+    -- 스크립트 파싱 실패/파일 누락이면 addVehicleDebug가 스크립트 없는 차량을 만든다.
+    -- 원인 파악이 어려운 증상이라 여기서 먼저 걸러 로그를 남긴다.
+    local okS, rigScript = pcall(function() return getScriptManager():getVehicle(CHUTE_RIG_SCRIPT) end)
+    if not okS or not rigScript then
+        print("[t3VehicleDrop] Chute rig script " .. CHUTE_RIG_SCRIPT
+            .. " NOT LOADED (pongdu_chute_rig_vehicle.txt missing or parse error)")
+        return nil
+    end
+
     local cell = getCell()
+    local skippedNil, skippedIndoor = 0, 0
     for i = 1, #CHUTE_RIG_OFFSETS do
         local o = CHUTE_RIG_OFFSETS[i]
         local sq = cell:getGridSquare(x + o[1], y + o[2], z)
-        if sq and sq:isOutside() then
+        if not sq then
+            skippedNil = skippedNil + 1
+        elseif not sq:isOutside() then
+            skippedIndoor = skippedIndoor + 1
+        else
             local ok, v = pcall(function()
                 return addVehicleDebug(CHUTE_RIG_SCRIPT, IsoDirections.N, 0, sq)
             end)
@@ -347,6 +369,8 @@ local function spawnChuteRig(x, y, z)
             end
         end
     end
+    print(string.format("[t3VehicleDrop] Chute rig: no usable square around %d,%d,%d (candidates=%d unloaded=%d indoor=%d)",
+        x, y, z, #CHUTE_RIG_OFFSETS, skippedNil, skippedIndoor))
     return nil
 end
 
@@ -385,8 +409,10 @@ local function finishChuteJob(job, reason)
     --    (누가 타서 권한을 가져가면 다시 떨어진다). 로그로 구분해 둔다.
     if isServer() then
         local okA, errA = pcall(function() cargo:authorizationChanged(nil) end)
-        if not okA then
-            print("[t3VehicleDrop] Chute authority reset FAILED err=" .. tostring(errA))
+        if okA then
+            print("[t3VehicleDrop] Chute authority reset to Server: " .. chuteAuthDesc(cargo))
+        else
+            print("[t3VehicleDrop] Chute authority reset FAILED err=" .. tostring(errA) .. " " .. chuteAuthDesc(cargo))
         end
     end
 
@@ -398,6 +424,15 @@ local function finishChuteJob(job, reason)
         tostring(reason), tostring(job.cargoVid), cargo:getX(), cargo:getY(), placed))
 end
 
+-- finishChuteJob 안에서 에러가 나면 리그/권한/낙하산이 어중간하게 남으므로 원인을 로그로 남긴다.
+local function safeFinishChuteJob(job, reason)
+    local ok, err = pcall(finishChuteJob, job, reason)
+    if not ok then
+        print("[t3VehicleDrop] Chute finish (" .. tostring(reason) .. ") FAILED cargo vid="
+            .. tostring(job.cargoVid) .. " rig vid=" .. tostring(job.rigVid) .. " err=" .. tostring(err))
+    end
+end
+
 -- 착지 보고(개봉자 클라 -> 서버, SP는 직접 호출). reporter가 있으면 그 job의 개봉자인지 확인한다.
 function t3VehicleDrop.chuteLanded(cargoVid, reporter)
     local vid = tonumber(cargoVid)
@@ -407,11 +442,14 @@ function t3VehicleDrop.chuteLanded(cargoVid, reporter)
         return
     end
     if reporter and job.pilotId and reporter:getOnlineID() ~= job.pilotId then
-        print("[t3VehicleDrop] ChuteLanded ignored: reporter is not the pilot (vid=" .. tostring(vid) .. ")")
+        print("[t3VehicleDrop] ChuteLanded ignored: reporter " .. tostring(reporter:getOnlineID())
+            .. " is not the pilot " .. tostring(job.pilotId) .. " (vid=" .. tostring(vid) .. ")")
         return
     end
     t3VehicleDrop._chuteJobs[vid] = nil
-    finishChuteJob(job, "landed")
+    print(string.format("[t3VehicleDrop] ChuteLanded received vid=%s after %dms",
+        tostring(vid), getTimestampMs() - job.startedAt))
+    safeFinishChuteJob(job, "landed")
 end
 
 -- 하강 연출 시작. 리그 스폰에 실패하면 false -> 호출부가 예전처럼 즉시 착지 처리.
@@ -436,6 +474,7 @@ local function startChuteDrop(player, vehicle, x, y, z)
         x = x, y = y, z = z,
         player      = player,
         owner       = player and player:getUsername() or "",
+        startedAt   = now,
         deadline    = now + CHUTE_STREAM_WAIT_MS + chuteDescentMs() + CHUTE_SETTLE_MS + CHUTE_DEADLINE_PAD_MS,
     }
 
@@ -446,7 +485,10 @@ local function startChuteDrop(player, vehicle, x, y, z)
             vehicle:authorizationChanged(player)
             rig:authorizationChanged(player)
         end)
-        if not okA then
+        if okA then
+            print("[t3VehicleDrop] Chute authority granted pilot=" .. tostring(job.pilotId)
+                .. " cargo[" .. chuteAuthDesc(vehicle) .. "] rig[" .. chuteAuthDesc(rig) .. "]")
+        else
             print("[t3VehicleDrop] Chute authority grant FAILED err=" .. tostring(errA))
         end
     end
@@ -524,7 +566,7 @@ local function chuteServerTick()
                 t3VehicleDrop._chuteJobs[expired[i]] = nil
                 print("[t3VehicleDrop] Chute job deadline reached vid=" .. tostring(expired[i])
                     .. " (pilot lost or vehicle not streamed), forcing finish")
-                finishChuteJob(job, "deadline")
+                safeFinishChuteJob(job, "deadline")
             end
         end
     end
@@ -534,8 +576,23 @@ local function chuteServerTick()
     end
 end
 
+-- OnTick 핸들러 에러는 매 틱 반복되므로 첫 회 + 10초마다 한 번만 남긴다.
+local _chuteTickErrAt = 0
+local _chuteTickErrCount = 0
+local function chuteServerTickSafe()
+    local ok, err = pcall(chuteServerTick)
+    if not ok then
+        _chuteTickErrCount = _chuteTickErrCount + 1
+        local now = getTimestampMs()
+        if _chuteTickErrCount == 1 or now - _chuteTickErrAt >= 10000 then
+            _chuteTickErrAt = now
+            print("[t3VehicleDrop] Chute server tick FAILED count=" .. tostring(_chuteTickErrCount) .. " err=" .. tostring(err))
+        end
+    end
+end
+
 if not isClient() then
-    Events.OnTick.Add(chuteServerTick)
+    Events.OnTick.Add(chuteServerTickSafe)
 end
 
 function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
