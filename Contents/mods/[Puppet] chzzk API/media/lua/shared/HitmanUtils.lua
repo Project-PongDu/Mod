@@ -493,32 +493,56 @@ function HitmanUtils.GetClosestEnemyHitmanLocation(character)
     return result
 end
 
-function HitmanUtils.GetTarget(character, config)
-
-    local closestZombie = HitmanUtils.GetClosestZombieLocation(character)
-    local closestHitman = HitmanUtils.GetClosestEnemyHitmanLocation(character)
-    local closestPlayer = HitmanUtils.GetClosestPlayerLocation(character, config)
-
-    -- NPC targets (restored from the original Bandits GetTarget, which the
-    -- slim pass removed): nearest ordinary zombie -- this includes Bandit
-    -- NPCs, which carry no "Hitman" variable and therefore live in
-    -- CacheLightZ -- or nearest hostile hitman from another clan. This is
-    -- what makes hitmen actively close in on out-of-range NPC enemies
-    -- instead of standing still until ManageCombat's weapon range is reached.
-    local target = closestZombie
-    local enemy = HitmanZombie.Cache[target.id]
-
-    if closestHitman.dist < closestZombie.dist then
-        target = closestHitman
-        enemy = HitmanZombie.Cache[target.id]
+-- player the hitman heads for when nobody is seen or heard:
+-- the player who summoned it (donation recipient), else the closest player
+function HitmanUtils.GetTrackedPlayer(character)
+    local masterId = Hitman.GetMaster(character)
+    if masterId then
+        local master = HitmanPlayer.GetMasterPlayer(character)
+        if master and master:isAlive() and not HitmanPlayer.IsGhost(master) then
+            return master
+        end
     end
 
-    -- Player has absolute priority, consistent with ManageCombat: whenever a
-    -- player is detectable at all (CanSee or within hearDist), chase the
-    -- player over any NPC. Same unconditional behavior as before this change.
-    if closestPlayer.x then
-        target = closestPlayer
+    local cx, cy = character:getX(), character:getY()
+    local best, bestDist
+    local playerList = HitmanPlayer.GetPlayers()
+    for i=0, playerList:size()-1 do
+        local player = playerList:get(i)
+        if player and player:isAlive() and not HitmanPlayer.IsGhost(player) then
+            local dist = HitmanUtils.DistTo(cx, cy, player:getX(), player:getY())
+            if not bestDist or dist < bestDist then
+                best, bestDist = player, dist
+            end
+        end
+    end
+    return best
+end
+
+function HitmanUtils.GetTarget(character, config)
+
+    -- PONGDU: hitmen hunt players only. Zombies and other NPCs are never chased;
+    -- the zombies that get in the way are dealt with by ManageCombat
+    -- (zombies aggro'd on the hitman within 3 tiles have top priority there).
+    local target = HitmanUtils.GetClosestPlayerLocation(character, config)
+    local enemy
+
+    if target.x then
+        -- a player is seen or heard
         enemy = HitmanPlayer.GetPlayerById(target.id)
+    else
+        -- nobody detected: track the summoner / closest player anyway
+        local player = HitmanUtils.GetTrackedPlayer(character)
+        if player then
+            target = {}
+            target.x = player:getX()
+            target.y = player:getY()
+            target.z = player:getZ()
+            target.id = HitmanUtils.GetCharacterID(player)
+            target.dist = HitmanUtils.DistTo(character:getX(), character:getY(), target.x, target.y)
+            target.tracked = true -- no .d: no lead prediction on a target the hitman cannot perceive
+            enemy = player
+        end
     end
 
     if target.x and target.y and target.d then

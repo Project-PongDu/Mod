@@ -99,7 +99,8 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot)
         local time = aimTimeMin + aimTimeSurp +aimTimeIndividual
         if time > 60 then time = 60 end
 
-        local task = {action="Aim", anim=anim, sound=sound, x=enemyCharacter:getX(), y=enemyCharacter:getY(), time=time}
+        local eid = HitmanUtils.GetCharacterID(enemyCharacter)
+        local task = {action="Aim", anim=anim, sound=sound, x=enemyCharacter:getX(), y=enemyCharacter:getY(), time=time, eid=eid}
         table.insert(tasks, task)
     end
     return tasks

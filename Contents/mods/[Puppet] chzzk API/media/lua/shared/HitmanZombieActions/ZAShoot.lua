@@ -218,7 +218,7 @@ local function hit(shooter, item, victim)
                     HitmanCompatibility.Splash(victim, item, fakeZombie)
 
                     local h = victim:getHealth()
-                    local id = HitmanUtils.GetCharacterID(hitman)
+                    local id = HitmanUtils.GetCharacterID(victim)
                     local args = {id=id, h=h}
                     sendClientCommand(getSpecificPlayer(0), 'Hitman_Sync', 'Health', args)
 
@@ -292,16 +292,39 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
     local player = getSpecificPlayer(0)
     local piercing = weaponItem:isPiercingBullets()
     local projectiles = getProjectileCount(weaponItem:getWeaponReloadType())
+    local shooterId = HitmanUtils.GetCharacterID(shooter)
+
+    -- characters standing on the square take the bullet
+    -- returns true if anyone was there (hit roll is done inside hit())
+    local function hitCharacters(square)
+        local chrs = square:getMovingObjects()
+        local wasHit = false
+        for j=0, chrs:size()-1 do
+            local chr = chrs:get(j)
+            if instanceof(chr, "IsoZombie") or instanceof(chr, "IsoPlayer") then
+                if shooterId ~= HitmanUtils.GetCharacterID(chr) then
+                    hit(shooter, weaponItem, chr)
+                    wasHit = true
+                    if j + 1 >= projectiles then break end
+                end
+            end
+        end
+        return wasHit
+    end
 
     -- Bresenham's line of fire to detect what needs to destroyed between shooter and target
     local i = 0
     while true do
 
         -- last iterations
+        local isLast = (cx == x1 and cy == y1)
         local list = {}
-        if cx == x1 and cy == y1 then
-            for x = -2, 2 do
-                for y = -2, 2 do
+        if isLast then
+            -- point blank (target reached within the first 2 steps): narrower sweep
+            -- so friendlies standing next to the shooter do not soak the bullet
+            local r = (i > 1) and 2 or 1
+            for x = -r, r do
+                for y = -r, r do
                     table.insert(list, {x = cx + x, y = cy + y, z=cz})
                 end
             end
@@ -311,7 +334,12 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
 
         for _, c in pairs(list) do
             local square = cell:getGridSquare(c.x, c.y, c.z)
-            if i > 1 and square then
+            if i <= 1 and isLast and square then
+                -- point blank: the first 2 steps are the shooter's own/adjacent squares
+                -- and are skipped by the obstacle sweep below, so resolve characters only
+                if hitCharacters(square) and not piercing then return false end
+
+            elseif i > 1 and square then
                 -- manage wall obstacle
                 local props = square:getProperties()
                 if props then
@@ -415,20 +443,7 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
                 end
 
                 -- manage character "obstacles"
-                local chrs = square:getMovingObjects()
-                local wasHit = false
-                --for i=0, math.min(chrs:size()-1, projectiles) do
-                for i=0, chrs:size()-1 do
-                    local chr = chrs:get(i)
-                    if instanceof(chr, "IsoZombie") or instanceof(chr, "IsoPlayer") then
-                        if HitmanUtils.GetCharacterID(shooter) ~= HitmanUtils.GetCharacterID(chr) then 
-                            hit(shooter, weaponItem, chr)
-                            wasHit = true
-                            if i + 1 >= projectiles then break end
-                        end
-                    end
-                end
-                if not piercing and wasHit then return false end
+                if hitCharacters(square) and not piercing then return false end
 
             end
         end
@@ -493,6 +508,9 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
     if not HitmanUtils.IsFacing(sx, sy, sd, enemy:getX(), enemy:getY(), 5) then 
         return true
     end
+
+    -- burst tasks are queued up front and may outlast the magazine: no phantom rounds
+    if weapon.bulletsLeft <= 0 then return true end
 
     -- deplete round
     weapon.bulletsLeft = weapon.bulletsLeft - 1

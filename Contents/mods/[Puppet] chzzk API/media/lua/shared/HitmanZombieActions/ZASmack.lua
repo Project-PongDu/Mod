@@ -369,7 +369,7 @@ local function Hit(attacker, item, victim)
                 end
             end
         else
-            if victim:isSprinting() or victim:isRunning() and ZombRand(6) == 1 then
+            if (victim:isSprinting() or victim:isRunning()) and ZombRand(6) == 1 then
                 victim:clearVariable("BumpFallType")
                 victim:setBumpType("stagger")
                 victim:setBumpFall(true)

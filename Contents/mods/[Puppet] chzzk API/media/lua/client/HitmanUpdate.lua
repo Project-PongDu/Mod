@@ -136,15 +136,19 @@ local function IsShotClear (shooter, enemy)
     local cx, cy, cz = x0, y0, z
 
     local brainShooter = HitmanBrain.Get(shooter)
+    local shooterId = HitmanUtils.GetCharacterID(shooter)
 
     local i = 0
     while true do
 
         -- last iteration
+        -- must mirror the sweep in ZAShoot manageLineOfFire
+        local isLast = (cx == x1 and cy == y1)
         local list = {}
-        if cx == x1 and cy == y1 then
-            for x = -2, 2 do
-                for y = -2, 2 do
+        if isLast then
+            local r = (i > 1) and 2 or 1
+            for x = -r, r do
+                for y = -r, r do
                     table.insert(list, {x = cx + x, y = cy + y, z=cz})
                 end
             end
@@ -154,7 +158,8 @@ local function IsShotClear (shooter, enemy)
 
         for _, c in pairs(list) do
             local square = cell:getGridSquare(c.x, c.y, c.z)
-            if i > 1 and square then
+            -- point blank: the target square is reached within the first 2 steps
+            if (i > 1 or isLast) and square then
 
                 local chrs = square:getMovingObjects()
                 for i=0, chrs:size()-1 do
@@ -162,7 +167,7 @@ local function IsShotClear (shooter, enemy)
                     if instanceof(chr, "IsoPlayer") and not (brainShooter.hostile or brainShooter.hostileP) then
                         -- shooter:addLineChatElement("PLAYER IN LINE", 0.8, 0.8, 0.1)
                         return false
-                    elseif instanceof(chr, "IsoZombie") then
+                    elseif instanceof(chr, "IsoZombie") and HitmanUtils.GetCharacterID(chr) ~= shooterId then
                         local brainEnemy = HitmanBrain.Get(chr)
                         if not HitmanUtils.AreEnemies(brainEnemy, brainShooter) then
                         -- if brainEnemy and brainEnemy.clan and brainShooter.clan == brainEnemy.clan and (not brainShooter.hostile or brainEnemy.hostile) then
@@ -975,10 +980,96 @@ local function ManageCollisions(hitman)
     return tasks
 end
 
+-- PONGDU: combat tuning
+-- zombies aggro'd on the hitman (UpdateZombies sets their target within 3 tiles)
+-- are the top priority; only these plain zombies are ever fought
+local THREAT_DIST = 3
+-- a ranged hitman shoves with the gun in hand when an enemy is this close
+local GUN_SHOVE_DIST = 1.0
+-- after a gun shove the hitman keeps shooting, even at contact range, for this long (ms)
+local GUN_SHOVE_COOLDOWN = 2500
+
+local gunShoveTime = {}   -- [hitman id] = timestamp of the last gun shove
+local combatLogKey = {}   -- [hitman id] = last logged target key
+
+-- logs target changes only, so the console is not flooded every tick
+local function LogTarget(brain, tier, enemy, dist, gunSlot)
+    local eid = enemy and HitmanUtils.GetCharacterID(enemy)
+    local key = tier .. ":" .. tostring(eid)
+    if combatLogKey[brain.id] == key then return end
+    combatLogKey[brain.id] = key
+    if enemy then
+        print(string.format("[PongDu][Hitman] id=%s target=%s eid=%s dist=%.2f mode=%s", tostring(brain.id), tier, tostring(eid), dist, gunSlot and ("gun:" .. gunSlot) or "melee"))
+    else
+        print("[PongDu][Hitman] id=" .. tostring(brain.id) .. " target=none")
+    end
+end
+
+-- drops per-hitman combat state when the hitman dies
+local function ClearCombatState(brain)
+    gunShoveTime[brain.id] = nil
+    combatLogKey[brain.id] = nil
+end
+
+-- true while the gun slot has ammo anywhere (loaded, magazines or loose rounds)
+local function SlotHasAmmo(w)
+    if not w or not w.name then return false end
+    if (w.bulletsLeft or 0) > 0 then return true end
+    if w.type == "mag" and (w.magCount or 0) > 0 then return true end
+    if w.type == "nomag" and (w.ammoCount or 0) > 0 then return true end
+    return false
+end
+
+-- gun slot a ranged hitman fights with; nil once every gun is dry (melee mode)
+local function GetGunSlot(hitman, weapons)
+    local p, s = weapons.primary, weapons.secondary
+    if p.name and (p.bulletsLeft or 0) > 0 then return "primary" end
+    -- rifle is empty but the pistol in hand is loaded: keep shooting instead of reloading
+    if s.name and (s.bulletsLeft or 0) > 0 and hitman:isPrimaryEquipped(s.name) then return "secondary" end
+    if SlotHasAmmo(p) then return "primary" end
+    if SlotHasAmmo(s) then return "secondary" end
+    return nil
+end
+
+-- closest plain zombie that is targeting this hitman within THREAT_DIST
+local function FindThreatZombie(hitman, zx, zy, zz)
+    local cache = HitmanZombie.Cache
+    local best, bestDist
+    for id, light in pairs(HitmanZombie.CacheLightZ) do
+        local dx, dy = light.x - zx, light.y - zy
+        if math.abs(dx) <= THREAT_DIST and math.abs(dy) <= THREAT_DIST then
+            local dist = math.sqrt((dx * dx) + (dy * dy))
+            if dist <= THREAT_DIST and (not bestDist or dist < bestDist) then
+                local zombie = cache[id]
+                if zombie and zombie:isAlive() and math.abs(zombie:getZ() - zz) < 0.5
+                   and not zombie:getVariableBoolean("Bandit")
+                   and zombie:getTarget() == hitman
+                   and HitmanUtils.LineClear(hitman, zombie) then
+                    best, bestDist = zombie, dist
+                end
+            end
+        end
+    end
+    return best, bestDist
+end
+
+-- standing targets only; knocked down / climbing ones get shot instead
+local function CanBeShoved(enemy)
+    if enemy:isProne() then return false end
+    local asn = enemy:getActionStateName()
+    return asn ~= "onground" and asn ~= "sitonground" and asn ~= "climbfence" and asn ~= "bumped"
+       and asn ~= "getup" and asn ~= "falldown"
+end
+
 -- manages melee and weapon combat
+-- target priority: 1) zombies aggro'd on the hitman within THREAT_DIST
+--                  2) players
+--                  3) hitmen of other clans / Bandits NPCs
+-- ranged mode: while any gun has ammo the hitman never uses melee weapons;
+--              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)
 
-    if hitman:isCrawling() then return {} end 
+    if hitman:isCrawling() then return {} end
     if Hitman.IsSleeping(hitman) then return {} end
     -- if hitman:getActionStateName() == "bumped" then return {} end
 
@@ -986,30 +1077,30 @@ local function ManageCombat(hitman)
     local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
     local brain = HitmanBrain.Get(hitman)
     local weapons = brain.weapons
-    local isOutOfAmmo = HitmanBrain.IsOutOfAmmo(brain)
+    local gunSlot = GetGunSlot(hitman, weapons)
     local isNeedPrimary = HitmanBrain.NeedResupplySlot(brain, "primary")
     local isNeedSecondary = HitmanBrain.NeedResupplySlot(brain, "secondary")
     local isBareHands = HitmanBrain.IsBareHands(brain)
     local isOutside = hitman:getSquare():isOutside()
 
     local bestDist = 40
-    local enemyCharacter, switchTo
+    local enemyCharacter, switchTo, fireSlot
+    local tier = "none"
     local reload, resupply = false, false
     local combat, switch, firing, shove, escape = false, false, false, false, false
-    local maxRangeMelee, maxRangePistol, maxRangeRifle
     local friendlies, friendliesBwd, enemies, enemiesBwd = 0, 0, 0, 0
     local sx, sy = 0, 0
 
     -- THIS GOVERNS LOW-PRIORITY TASKS
     if not HitmanBrain.HasActionTask(brain) then
-        
+
         -- PEACFUL RELOAD FLAG
         for _, slot in pairs({"primary", "secondary"}) do
             if weapons[slot].name then
                 if (weapons[slot].type == "mag" and weapons[slot].bulletsLeft <= 0 and weapons[slot].magCount > 0) or
-                   (weapons[slot].type == "nomag" and weapons[slot].bulletsLeft < weapons[slot].ammoSize and weapons[slot].ammoCount > 0) or 
-                    weapons[slot].racked == false then 
-                    
+                   (weapons[slot].type == "nomag" and weapons[slot].bulletsLeft < weapons[slot].ammoSize and weapons[slot].ammoCount > 0) or
+                    weapons[slot].racked == false then
+
                     if hitman:isPrimaryEquipped(weapons[slot].name) then
                         reload = true
                     end
@@ -1026,110 +1117,56 @@ local function ManageCombat(hitman)
     -- SWITCH WEAPON DISTANCES
     local meleeDist = isOutside and 2.6 or 1.2
     local meleeDistPlayer = isOutside and 3.5 or 1.2
-    local rifleDist = 5.5
     local escapeDist = 5.2
     local bwdDist = 2.8
 
-    -- COMBAT AGAIST PLAYERS 
-    if brain.hostile or brain.hostileP then
+    -- PRIORITY 1: ZOMBIES AGGRO'D ON THIS HITMAN
+    local threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
+    if threat then
+        bestDist, enemyCharacter, tier = threatDist, threat, "threat"
+    end
+
+    -- PRIORITY 2: PLAYERS
+    if not enemyCharacter and (brain.hostile or brain.hostileP) then
         local playerList = HitmanPlayer.GetPlayers()
 
         for i=0, playerList:size()-1 do
             local potentialEnemy = playerList:get(i)
             if potentialEnemy and potentialEnemy:isAlive() and hitman:CanSee(potentialEnemy) and not potentialEnemy:isBehind(hitman) and (instanceof(potentialEnemy, "IsoPlayer") and not HitmanPlayer.IsGhost(potentialEnemy)) then
                 local px, py, pz = potentialEnemy:getX(), potentialEnemy:getY(), potentialEnemy:getZ()
-                -- local dist = HitmanUtils.DistTo(zx, zy, px, py)
                 local dist = math.sqrt(((zx - px) * (zx - px)) + ((zy - py) * (zy - py))) -- no function call for performance
                 if dist < bestDist and math.abs(zz - pz) < 0.5 then
                     local spottedScore = CalcSpottedScore(potentialEnemy, dist)
                     if not hitman:getSquare():isSomethingTo(potentialEnemy:getSquare()) and spottedScore > 0.32 then
-                        bestDist, enemyCharacter = dist, potentialEnemy
-
-                        --reset action flags, only one can be true
-                        combat, switch, firing, shove, escape = false, false, false, false, false
-
-                        --determine if hitman will be in combat mode
-                        if weapons.melee then
-                            if not maxRangeMelee then
-                                maxRangeMelee = GetMeleeRangeCached(weapons.melee)
-                            end
-                            local prone = potentialEnemy:isProne()
-                            
-                            if dist <= meleeDistPlayer then 
-                                if hitman:isPrimaryEquipped(weapons.melee) then
-                                    if dist <= maxRangeMelee then
-                                        local asn = enemyCharacter:getActionStateName()
-                                        shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "sitonground" and asn ~= "climbfence" and asn ~= "bumped"
-                                            and not Hitman.HasExpertise(hitman, Hitman.Expertise.Knifemaster)
-                                        combat = not shove
-                                    end
-                                else
-                                    switch = true
-                                    switchTo = weapons.melee
-                                end
-                            end
-                        end
-
-                        --determine if hitman will be in shooting mode
-                        if not isOutOfAmmo and dist > meleeDistPlayer + 1 and not combat and not shove then
-                            if weapons.primary.name and weapons.primary.bulletsLeft > 0 then
-                                if not maxRangeRifle then
-                                    maxRangeRifle = GetRangedRangeCached(weapons.primary.name, brain)
-                                end
-                                if dist < maxRangeRifle then
-                                    if hitman:isPrimaryEquipped(weapons.primary.name) then
-                                        if dist < maxRangeRifle + rifleDist and IsShotClear(hitman, potentialEnemy) then
-                                            firing = true
-                                        end
-                                    elseif not reload then
-                                        Hitman.Say(hitman, "SPOTTED")
-                                        switch = true
-                                        switchTo = weapons.primary.name
-                                    end
-                                end
-                            elseif weapons.secondary.name and weapons.secondary.bulletsLeft > 0 then
-                                if not maxRangePistol then
-                                    maxRangePistol = GetRangedRangeCached(weapons.secondary.name, brain)
-                                end
-                                if dist < maxRangePistol then
-                                    if hitman:isPrimaryEquipped(weapons.secondary.name) then
-                                        if dist < maxRangePistol + rifleDist and IsShotClear(hitman, potentialEnemy) then
-                                            firing = true
-                                        end
-                                    elseif not reload then
-                                        Hitman.Say(hitman, "SPOTTED")
-                                        switch = true
-                                        switchTo = weapons.secondary.name
-                                    end
-                                end
-                            end
-                        end
+                        bestDist, enemyCharacter, tier = dist, potentialEnemy, "player"
                     end
                 end
             end
         end
     end
-    
-    -- COMBAT AGAINST ZOMBIES AND HITMANS FROM OTHER CLAN
-    -- Player has absolute priority: only scan for NPC targets (bandits, zombies,
-    -- other hitman clans) when no player is currently locked as enemyCharacter.
-    -- This prevents a closer bandit/zombie from ever pulling focus off a spotted player.
-    if not (enemyCharacter and instanceof(enemyCharacter, "IsoPlayer")) then
+
+    -- PRIORITY 3: HITMANS FROM OTHER CLANS AND BANDITS NPCS
+    -- Plain zombies are never picked here: hitmen hunt players and only kill the
+    -- zombies that come for them (priority 1). The loop also counts nearby
+    -- enemies/friendlies for the backward swing and the B42 backpedal.
+    local scanTargets = not enemyCharacter
     local cache, potentialEnemyList = HitmanZombie.Cache, HitmanZombie.CacheLight
-    for id, potentialEnemy in pairs(potentialEnemyList) do
+    for id, light in pairs(potentialEnemyList) do
 
         -- quick manhattan check for performance boost
-        -- if HitmanUtils.DistToManhattan(potentialEnemy.x, potentialEnemy.y, zx, zy) < 36 then
-        if math.abs(potentialEnemy.x - zx) + math.abs(potentialEnemy.y - zy) < 57 then
+        -- once a target is locked only the counting radius (escapeDist) matters
+        local mdist = math.abs(light.x - zx) + math.abs(light.y - zy)
+        if mdist < 57 and (scanTargets or mdist < 8) then
 
-            if HitmanUtils.AreEnemies(potentialEnemy.brain, brain) then
-            -- if not potentialEnemy.brain or (brain.clan ~= potentialEnemy.brain.clan and (brain.hostile or potentialEnemy.brain.hostile)) then
-     
+            if HitmanUtils.AreEnemies(light.brain, brain) then
+
                 -- PERF: reject by cached distance before the costly CanSee / light checks.
                 -- A candidate only matters if it can beat bestDist or counts toward
                 -- escape (escapeDist). +1 tile margin covers cache staleness (rebuilt every 4 ticks).
-                local ldx, ldy = potentialEnemy.x - zx, potentialEnemy.y - zy
-                local limit = (bestDist > escapeDist and bestDist or escapeDist) + 1
+                -- plain zombies are never candidates, so they only need the counting radius
+                local candidate = scanTargets and (light.brain or (cache[id] and cache[id]:getVariableBoolean("Bandit")))
+                local ldx, ldy = light.x - zx, light.y - zy
+                local limit = ((candidate and bestDist > escapeDist) and bestDist or escapeDist) + 1
                 local inRange = (ldx * ldx) + (ldy * ldy) < limit * limit
 
                 -- load real instance here
@@ -1138,7 +1175,6 @@ local function ManageCombat(hitman)
                     local pesq = potentialEnemy:getSquare()
                     if pesq and pesq:getLightLevel(0) > 0.31 and not hitman:getSquare():isSomethingTo(pesq) then
                         local px, py, pz = potentialEnemy:getX(), potentialEnemy:getY(), potentialEnemy:getZ()
-                        -- local dist = HitmanUtils.DistTo(zx, zy, potentialEnemy:getX(), potentialEnemy:getY())
                         local dist = math.sqrt(((zx - px) * (zx - px)) + ((zy - py) * (zy - py)))
                         if dist < escapeDist then
                             local rad = math.rad(potentialEnemy:getDirectionAngle())
@@ -1149,80 +1185,13 @@ local function ManageCombat(hitman)
                                 enemiesBwd = enemiesBwd + 1
                             end
                         end
-                        if dist < bestDist then
-                            bestDist, enemyCharacter = dist, potentialEnemy
-
-                            --reset action flags, only one can be true
-                            combat, switch, firing, shove, escape = false, false, false, false, false
-                            
-                            local asn = enemyCharacter:getActionStateName()
-
-                            --determine if hitman will be in combat mode
-                            if weapons.melee and math.abs(zz - pz) < 0.5 and asn ~= "falldown" then
-                                if dist <= meleeDist then
-                                    if hitman:isPrimaryEquipped(weapons.melee) then
-
-                                        if not maxRangeMelee then
-                                            maxRangeMelee = GetMeleeRangeCached(weapons.melee)
-                                        end
-                                        local prone = enemyCharacter:isProne()
-                                        local fix = 0.1
-                                        if prone then fix = -0.2 end
-
-                                        if dist <= maxRangeMelee + fix then
-                                            shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "climbfence" and asn ~= "bumped" and asn ~= "getup" and asn ~= "falldown"
-                                                and not Hitman.HasExpertise(hitman, Hitman.Expertise.Knifemaster)
-                                            combat = not shove
-                                        end
-                                    else
-                                        switch = true
-                                        switchTo = weapons.melee
-                                        -- hitman:addLineChatElement("Melee" .. dist, 0.8, 0.8, 0.1)
-                                    end
-                                end
-                            end
-
-                            --determine if hitman will be in shooting mode
-                            if not isOutOfAmmo and dist > meleeDist + 1 and not combat and not shove then
-                                if weapons.primary.name and weapons.primary.bulletsLeft > 0 then
-                                    if not maxRangeRifle then
-                                        maxRangeRifle = GetRangedRangeCached(weapons.primary.name, brain)
-                                    end
-                                    if dist < maxRangeRifle then
-                                        if hitman:isPrimaryEquipped(weapons.primary.name) then
-                                            if dist < maxRangeRifle + rifleDist and IsShotClear(hitman, potentialEnemy) then
-                                                firing = true
-                                            end
-                                        elseif not reload then
-                                            Hitman.Say(hitman, "SPOTTED")
-                                            switch = true
-                                            switchTo = weapons.primary.name
-                                            -- hitman:addLineChatElement("Primary" .. dist, 0.8, 0.8, 0.1)
-                                        end
-                                    end
-                                elseif weapons.secondary.name and weapons.secondary.bulletsLeft > 0 then
-                                    if not maxRangePistol then
-                                        maxRangePistol = GetRangedRangeCached(weapons.secondary.name, brain)
-                                    end
-                                    if dist < maxRangePistol then
-                                        if hitman:isPrimaryEquipped(weapons.secondary.name) then
-                                            if dist < maxRangePistol + rifleDist and IsShotClear(hitman, potentialEnemy) then
-                                                firing = true
-                                            end
-                                        elseif not reload then
-                                            Hitman.Say(hitman, "SPOTTED")
-                                            switch = true
-                                            switchTo = weapons.secondary.name
-                                            -- hitman:addLineChatElement("Secondary" .. dist, 0.8, 0.8, 0.1)
-                                        end
-                                    end
-                                end
-                            end
+                        if candidate and dist < bestDist then
+                            bestDist, enemyCharacter, tier = dist, potentialEnemy, "npc"
                         end
                     end
                 end
             else
-                local distSq = ((zx - potentialEnemy.x) * (zx - potentialEnemy.x)) + ((zy - potentialEnemy.y) * (zy - potentialEnemy.y))
+                local distSq = ((zx - light.x) * (zx - light.x)) + ((zy - light.y) * (zy - light.y))
                 if distSq < 27.04 then
                     friendlies = friendlies + 1
                     if distSq < 5.76 then
@@ -1232,10 +1201,69 @@ local function ManageCombat(hitman)
             end
         end
     end
-    end -- COMPAT: end of player-priority guard for NPC combat scan
-    
+
+    LogTarget(brain, tier, enemyCharacter, bestDist, gunSlot)
+
+    -- DECIDE THE ACTION AGAINST THE CHOSEN TARGET, only one flag can be true
+    if enemyCharacter then
+        local isPlayer = instanceof(enemyCharacter, "IsoPlayer")
+        local sameFloor = math.abs(zz - enemyCharacter:getZ()) < 0.5
+        local asn = enemyCharacter:getActionStateName()
+
+        if gunSlot then
+            -- RANGED MODE: guns only until every round is spent
+            local gunName = weapons[gunSlot].name
+            if not hitman:isPrimaryEquipped(gunName) then
+                Hitman.Say(hitman, "SPOTTED")
+                switch = true
+                switchTo = gunName
+            else
+                local lastShove = gunShoveTime[brain.id] or 0
+                local shoveReady = getTimestampMs() - lastShove > GUN_SHOVE_COOLDOWN
+                -- a shot that is already lined up is not thrown away for a shove
+                if sameFloor and bestDist < GUN_SHOVE_DIST and shoveReady and CanBeShoved(enemyCharacter)
+                   and not HitmanBrain.HasTaskType(brain, "Shoot") then
+                    shove = true
+                else
+                    local maxRangeGun = GetRangedRangeCached(gunName, brain)
+                    if bestDist < maxRangeGun and IsShotClear(hitman, enemyCharacter) then
+                        firing = true
+                        fireSlot = gunSlot
+                    end
+                end
+            end
+
+        elseif weapons.melee and sameFloor and (isPlayer or asn ~= "falldown") then
+            -- MELEE MODE: no ammo left in any gun
+            local dist = bestDist
+            if dist <= (isPlayer and meleeDistPlayer or meleeDist) then
+                if hitman:isPrimaryEquipped(weapons.melee) then
+                    local maxRangeMelee = GetMeleeRangeCached(weapons.melee)
+                    local prone = enemyCharacter:isProne()
+                    local fix = 0
+                    if not isPlayer then
+                        fix = prone and -0.2 or 0.1
+                    end
+
+                    if dist <= maxRangeMelee + fix then
+                        if isPlayer then
+                            shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "sitonground" and asn ~= "climbfence" and asn ~= "bumped"
+                        else
+                            shove = dist < 0.5 and not prone and asn ~= "onground" and asn ~= "climbfence" and asn ~= "bumped" and asn ~= "getup" and asn ~= "falldown"
+                        end
+                        shove = shove and not Hitman.HasExpertise(hitman, Hitman.Expertise.Knifemaster)
+                        combat = not shove
+                    end
+                else
+                    switch = true
+                    switchTo = weapons.melee
+                end
+            end
+        end
+    end
+
     if shove then
-        if not HitmanBrain.HasTaskType(brain, "Shove") then
+        if not HitmanBrain.HasTaskType(brain, "Push") then
             Hitman.ClearTasks(hitman)
             local veh = enemyCharacter:getVehicle()
             if veh then Hitman.Say(hitman, "CAR") end
@@ -1244,6 +1272,10 @@ local function ManageCombat(hitman)
                 local eid = HitmanUtils.GetCharacterID(enemyCharacter)
                 local task = {action="Push", anim="Shove", sound="AttackShove", time=60, endurance=-0.05, eid=eid, x=enemyCharacter:getX(), y=enemyCharacter:getY(), z=enemyCharacter:getZ()}
                 table.insert(tasks, task)
+                if gunSlot then
+                    gunShoveTime[brain.id] = getTimestampMs()
+                    print(string.format("[PongDu][Hitman] id=%s gun shove eid=%s dist=%.2f", tostring(brain.id), tostring(eid), bestDist))
+                end
             else
                 hitman:faceThisObject(enemyCharacter)
             end
@@ -1257,7 +1289,7 @@ local function ManageCombat(hitman)
         end
 
     elseif combat then
-        if not HitmanBrain.HasTaskTypes(brain, {"Smack", "Push", "Equip", "Unequip"}) then 
+        if not HitmanBrain.HasTaskTypes(brain, {"Smack", "Push", "Equip", "Unequip"}) then
             Hitman.ClearTasks(hitman)
             local veh = enemyCharacter:getVehicle()
             if veh then Hitman.Say(hitman, "CAR") end
@@ -1274,7 +1306,7 @@ local function ManageCombat(hitman)
                 hitman:faceThisObject(enemyCharacter)
             end
 
-        
+
         elseif instanceof(enemyCharacter, "IsoPlayer") and not Hitman.HasActionTask(hitman) then
             local task = {action="Time", anim="Smoke", time=250}
             table.insert(tasks, task)
@@ -1282,7 +1314,7 @@ local function ManageCombat(hitman)
         end
 
     elseif HitmanCompatibility.GetGameVersion() >= 42 and enemiesBwd >= 2 then
-        if not Hitman.HasMoveTask(hitman) and not Hitman.HasTaskType(hitman, "Shove") and not Hitman.HasTaskType(hitman, "Hit") then
+        if not Hitman.HasMoveTask(hitman) and not Hitman.HasTaskType(hitman, "Push") and not Hitman.HasTaskType(hitman, "Hit") then
             Hitman.ClearTasks(hitman)
             -- hitman:addLineChatElement("Slow", 0.8, 0.8, 0.1)
             local mrad = math.atan2(sy, sx)
@@ -1295,57 +1327,50 @@ local function ManageCombat(hitman)
             task.backwards = true
             task.lock = false
             table.insert(tasks, task)
-
-            --[[
-            local eid = HitmanUtils.GetCharacterID(enemyCharacter)
-            local task = {action="Shove", anim="Shove", sound="AttackShove", time=60, endurance=-0.05, eid=eid, x=enemyCharacter:getX(), y=enemyCharacter:getY(), z=enemyCharacter:getZ()}
-            -- local task = {action="Hit", time=65, endurance=-0.03, weapon=weapons.melee, eid=eid, x=enemyCharacter:getX(), y=enemyCharacter:getY(), z=enemyCharacter:getZ()}
-            table.insert(tasks, task)]]
         end
 
     elseif firing then
-        if not HitmanBrain.HasTaskTypes(brain, {"Shoot", "Aim", "Rack", "Equip", "Unequip", "Load", "Unload"}) then 
+        -- a zombie that came for the hitman overrides a shot lined up on someone else
+        local eid = HitmanUtils.GetCharacterID(enemyCharacter)
+        if tier == "threat" then
+            local cur = Hitman.GetTask(hitman)
+            if cur and (cur.action == "Aim" or cur.action == "Shoot") and cur.eid ~= eid then
+                Hitman.ClearTasks(hitman)
+                print("[PongDu][Hitman] id=" .. tostring(brain.id) .. " threat preempts shot, eid=" .. tostring(eid))
+            end
+        end
+
+        -- Push: a gun shove in progress must land before the follow-up shot is planned
+        if not HitmanBrain.HasTaskTypes(brain, {"Shoot", "Aim", "Rack", "Equip", "Unequip", "Load", "Unload", "Push"}) then
 
             Hitman.ClearTasks(hitman)
             if enemyCharacter:isAlive() then
-                
+
                 local veh = enemyCharacter:getVehicle()
                 if veh then Hitman.Say(hitman, "CAR") end
 
                 if hitman:isFacingObject(enemyCharacter, 0.1) then
-                    for _, slot in pairs({"primary", "secondary"}) do
-                        
-                        if weapons[slot].name then
+                    local weapon = weapons[fireSlot]
+                    if weapon.bulletsLeft > 0 then
+                        if not weapon.racked then
+                            local stasks = HitmanPrograms.Weapon.Rack(hitman, fireSlot)
+                            for _, t in pairs(stasks) do table.insert(tasks, t) end
 
-                            if weapons[slot].bulletsLeft > 0 then
-                                if not weapons[slot].racked then
-                                        local stasks = HitmanPrograms.Weapon.Rack(hitman, slot)
-                                        for _, t in pairs(stasks) do table.insert(tasks, t) end
+                        elseif not Hitman.IsAim(hitman) then
+                            local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot)
+                            for _, t in pairs(stasks) do table.insert(tasks, t) end
 
-                                elseif not Hitman.IsAim(hitman) then
-                                    local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, slot)
-                                    for _, t in pairs(stasks) do table.insert(tasks, t) end
-
-                                elseif weapons[slot].bulletsLeft > 0 then
-                                    local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, slot)
-                                    for _, t in pairs(stasks) do table.insert(tasks, t) end
-
-                                end
-
-                                break
-
-                            elseif (weapons[slot].type == "mag"  and weapons[slot].magCount > 0) or
-                                (weapons[slot].type == "nomag" and weapons[slot].ammoCount > 0) then
-
-                                Hitman.Say(hitman, "RELOADING")
-
-                                local stasks = HitmanPrograms.Weapon.Reload(hitman, slot)
-                                for _, t in pairs(stasks) do table.insert(tasks, t) end
-
-                                break
-                            end
-                            
+                        else
+                            local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, fireSlot)
+                            for _, t in pairs(stasks) do table.insert(tasks, t) end
                         end
+
+                    else
+                        -- loaded rounds are spent, reserve is left (GetGunSlot guarantees it)
+                        Hitman.Say(hitman, "RELOADING")
+
+                        local stasks = HitmanPrograms.Weapon.Reload(hitman, fireSlot)
+                        for _, t in pairs(stasks) do table.insert(tasks, t) end
                     end
                 else
                     hitman:faceThisObject(enemyCharacter)
@@ -1988,6 +2013,7 @@ local function OnZombieDead(zombie)
     if zombie:getVariableBoolean("Hitman") then 
 
         local brain = HitmanBrain.Get(zombie)
+        if brain then ClearCombatState(brain) end
         local inventory = zombie:getInventory()
         local items = ArrayList.new()
 
