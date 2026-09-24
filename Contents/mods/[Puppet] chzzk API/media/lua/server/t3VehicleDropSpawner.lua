@@ -13,27 +13,38 @@ local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 -- 차량을 중심에 두고 등각으로 벌려 놓고, 각 낙하산이 바깥을 보도록 모델을 돌린다.
 -- 실제로 놓인 타일 좌표를 "x,y,z" 문자열 배열로 돌려주고, 호출부가 차량 modData에
 -- 심어둔다. 플레이어가 그 차량에 타는 순간 회수하기 위한 것.
+--
+-- [중심 정렬] 세 낙하산의 산줄이 모이는 점(하네스)이 차량 중심 한 점에 오도록
+-- 아이템 원점을 "차량 중심 + 하네스 거리 x 바깥 방향"에 칸 안 오프셋까지 정확히 놓는다.
+-- 예전 방식은 세 가지가 겹쳐 중심이 어긋났다:
+--   ① 아이템 원점을 반경 5칸에 놓았는데 원점->하네스가 2.95칸이라 하네스가 중심에서 약 2칸 떨어짐
+--   ② 반경 오프셋을 정수 칸으로 반올림하고 칸 중앙(0.5,0.5)에 놓음 (최대 0.7칸 오차)
+--   ③ 기준점을 스폰 칸 모서리에서 y-1 보정(x 보정값은 선언만 되고 안 쓰임)
 local PARACHUTE_TYPE = "t3chzzkDonation.t3DeployedParachute"
 local PARACHUTE_COUNT = 3 -- 등각 분할 개수 (3이면 120도 간격)
-local PARACHUTE_RADIUS = 5 -- 차량 중심에서 띄울 거리 (타일)
 
--- 낙하산 메쉬의 기준 방향 보정값 (도).
+-- 모델 원점 -> 하네스 거리(타일). t3DeployedParachute.fbx 실측값:
+-- 노드 변환(x100) x 모델 스크립트 scale 0.005 적용 후 하네스는 로컬 (+2.95, 0.05),
+-- 캐노피 끝은 -x 쪽(-3.45). 메시를 교체하면 이 값도 다시 재야 한다.
+local PARACHUTE_HARNESS_DIST = 2.95
+-- 하네스를 차량 중심에서 바깥으로 더 뺄 거리(타일). 0이면 세 산줄이 차량 중심에서 만난다.
+local PARACHUTE_HARNESS_GAP = 0
+
+-- 낙하산 메쉬의 기준 방향 보정값 (도). 로컬 +x(하네스 쪽)가 차량 중심을 향하게 한다.
 local PARACHUTE_MODEL_ANGLE_OFFSET = 180
 
--- 등각 배치의 기준점을 차량 스폰 스퀘어에서 화면상 위(북쪽)로 살짝 밀어서 잡는다.
--- 차량 모델이 아이소메트릭 투영상 타일 원점보다 위쪽으로 그려지는 만큼, 원점 그대로
--- 쓰면 낙하산 고리 중심이 차량보다 아래로 처져 보인다 (실제 확인됨).
--- 이 게임 좌표계는 y가 작을수록 북쪽/화면 위쪽이다 (IsoGridSquare.java 기준:
-local PARACHUTE_CENTER_X_OFFSET = 4
-local PARACHUTE_CENTER_Y_OFFSET = 1
--- this.n = getGridSquare(this.x, this.y - 1, this.z)). 그래서 y만 뺀다.
+-- AddWorldInventoryItem의 x/y는 칸 안 오프셋(0~1)이다. 정확히 0이면
+-- IsoWorldInventoryObject 생성자가 무작위 값으로 바꿔버리므로(생성자 xoff == 0 분기) 살짝 띄운다.
+local function clampTileOffset(v)
+    if v < 0.001 then return 0.001 end
+    if v > 0.999 then return 0.999 end
+    return v
+end
 
-local function scatterParachutes(square)
+local function scatterParachutes(centerX, centerY, z)
     local cell = getCell()
-    local sx, sy, sz = square:getX(), square:getY(), square:getZ()
-    local cx = sx - PARACHUTE_CENTER_X_OFFSET
-    local cy = sy - PARACHUTE_CENTER_Y_OFFSET
     local placed = {}
+    local r = PARACHUTE_HARNESS_DIST + PARACHUTE_HARNESS_GAP
 
     -- 매번 같은 방위로 고정되면 티가 나므로 시작 각도만 무작위로 돌린다.
     -- (등각 간격 자체는 유지되므로 방사형 배치는 그대로)
@@ -43,10 +54,11 @@ local function scatterParachutes(square)
     for i = 0, PARACHUTE_COUNT - 1 do
         local angleDeg = (startAngle + step * i) % 360
         local rad = math.rad(angleDeg)
-        local dx = math.floor(PARACHUTE_RADIUS * math.cos(rad) + 0.5)
-        local dy = math.floor(PARACHUTE_RADIUS * math.sin(rad) + 0.5)
+        local px = centerX + r * math.cos(rad)
+        local py = centerY + r * math.sin(rad)
+        local tx, ty = math.floor(px), math.floor(py)
 
-        local sq = cell:getGridSquare(sx + dx, cy + dy, sz)
+        local sq = cell:getGridSquare(tx, ty, z)
         if sq and sq:isOutside() then
             -- 문자열 오버로드가 아니라 아이템 인스턴스를 먼저 만든다.
             -- IsoWorldInventoryObject 생성자가 worldZRotation < 0 일 때만 랜덤값을
@@ -54,11 +66,16 @@ local function scatterParachutes(square)
             local item = instanceItem(PARACHUTE_TYPE)
             if item then
                 item:setWorldZRotation(math.floor((angleDeg + PARACHUTE_MODEL_ANGLE_OFFSET) % 360))
-                sq:AddWorldInventoryItem(item, 0.5, 0.5, 0)
+                sq:AddWorldInventoryItem(item, clampTileOffset(px - tx), clampTileOffset(py - ty), 0)
                 placed[#placed + 1] = sq:getX() .. "," .. sq:getY() .. "," .. sq:getZ()
+                print(string.format("[t3VehicleDrop] Parachute %d placed at %.2f,%.2f (angle %d, center %.2f,%.2f)",
+                    i + 1, px, py, math.floor(angleDeg), centerX, centerY))
             else
                 print("[t3VehicleDrop] Failed to instance parachute item: " .. PARACHUTE_TYPE)
             end
+        else
+            print(string.format("[t3VehicleDrop] Parachute %d skipped at %.2f,%.2f (%s)",
+                i + 1, px, py, sq and "indoor" or "square not loaded"))
         end
     end
     return placed
@@ -239,15 +256,16 @@ end
 -- 착지 후 연출: 바닥 낙하산 아이템을 뿌리고, 탑승 시 회수할 수 있도록 좌표를 차량 modData에
 -- 심어둔다. 예전엔 스폰 직후 바로 실행했지만, 이제는 낙하산 하강 연출이 끝나 착지한 뒤
 -- (finishChuteJob) 실행한다. 리그 스폰 실패로 하강 연출을 못 하면 스폰 직후 바로 부른다.
--- square는 "착지한 실제 위치" 기준, t3DropCenter는 맵마커를 찍은 원래 투하 좌표 기준이다.
+-- 낙하산 중심은 착지한 차량의 실제 위치, t3DropCenter는 맵마커를 찍은 원래 투하 좌표 기준이다.
 --
 -- modData는 재조회(getVehicleById)한 실제 차량 인스턴스에 세팅해야 붙는다.
 -- transmitModData는 부르지 않는다 -- IsoObject 구현이 square의 Objects 인덱스를
 -- 전제하는데 차량은 거기 등록되지 않아 신뢰할 수 없다. 이 값은 서버에서만 읽으면 되고,
 -- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
-local function applyLandingDecor(vehicle, square, dropX, dropY, ownerUsername)
-    if not vehicle or not square then return 0 end
-    local parachuteSquares = scatterParachutes(square)
+local function applyLandingDecor(vehicle, z, dropX, dropY, ownerUsername)
+    if not vehicle then return 0 end
+    -- 착지한 차량의 실제(소수점) 위치를 중심으로 쓴다
+    local parachuteSquares = scatterParachutes(vehicle:getX(), vehicle:getY(), z)
     if #parachuteSquares > 0 then
         vehicle:getModData().t3ParachuteSquares = parachuteSquares
         -- 맵마커 정리 알림용. 마커는 개봉자 본인 맵에만 찍혀 있으므로 그 사람
@@ -423,9 +441,7 @@ local function finishChuteJob(job, reason)
     end
 
     -- 4) 착지 지점 기준 바닥 낙하산 + modData
-    local sq = getCell():getGridSquare(math.floor(cargo:getX()), math.floor(cargo:getY()), job.z)
-        or getCell():getGridSquare(job.x, job.y, job.z)
-    local placed = applyLandingDecor(cargo, sq, job.x, job.y, job.owner)
+    local placed = applyLandingDecor(cargo, job.z, job.x, job.y, job.owner)
     print(string.format("[t3VehicleDrop] Chute finish (%s): cargo vid=%s landed at %.1f,%.1f, parachutes placed=%d",
         tostring(reason), tostring(job.cargoVid), cargo:getX(), cargo:getY(), placed))
 end
@@ -703,7 +719,7 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     -- 낙하산 하강 연출. 바닥 낙하산 배치 + 탑승 회수용 modData는 착지 후(finishChuteJob)로
     -- 미뤄진다. 리그를 못 띄우면 예전처럼 스폰 지점에 바로 배치한다.
     if not startChuteDrop(player, vehicle, x, y, z) then
-        local placed = applyLandingDecor(vehicle, square, x, y, player and player:getUsername() or "")
+        local placed = applyLandingDecor(vehicle, z, x, y, player and player:getUsername() or "")
         print("[t3VehicleDrop] Instant landing decor placed=" .. tostring(placed))
     end
 end
