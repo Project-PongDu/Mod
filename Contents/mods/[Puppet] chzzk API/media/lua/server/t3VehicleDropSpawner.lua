@@ -236,6 +236,308 @@ local function removeAutoSpawnedKeys(vehicle)
     print("[t3VehicleDrop] Auto-spawned keys removed: " .. removed .. " (keyId " .. tostring(keyId) .. ")")
 end
 
+-- 착지 후 연출: 바닥 낙하산 아이템을 뿌리고, 탑승 시 회수할 수 있도록 좌표를 차량 modData에
+-- 심어둔다. 예전엔 스폰 직후 바로 실행했지만, 이제는 낙하산 하강 연출이 끝나 착지한 뒤
+-- (finishChuteJob) 실행한다. 리그 스폰 실패로 하강 연출을 못 하면 스폰 직후 바로 부른다.
+-- square는 "착지한 실제 위치" 기준, t3DropCenter는 맵마커를 찍은 원래 투하 좌표 기준이다.
+--
+-- modData는 재조회(getVehicleById)한 실제 차량 인스턴스에 세팅해야 붙는다.
+-- transmitModData는 부르지 않는다 -- IsoObject 구현이 square의 Objects 인덱스를
+-- 전제하는데 차량은 거기 등록되지 않아 신뢰할 수 없다. 이 값은 서버에서만 읽으면 되고,
+-- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
+local function applyLandingDecor(vehicle, square, dropX, dropY, ownerUsername)
+    if not vehicle or not square then return 0 end
+    local parachuteSquares = scatterParachutes(square)
+    if #parachuteSquares > 0 then
+        vehicle:getModData().t3ParachuteSquares = parachuteSquares
+        -- 맵마커 정리 알림용. 마커는 개봉자 본인 맵에만 찍혀 있으므로 그 사람
+        -- 유저네임과, 마커를 찍을 때 쓴 것과 동일한 좌표(x,y)를 같이 심어둔다.
+        vehicle:getModData().t3DropCenter = tostring(dropX) .. "," .. tostring(dropY)
+        vehicle:getModData().t3DropOwnerUsername = ownerUsername or ""
+    end
+    return #parachuteSquares
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  낙하산 하강 연출 (Base.PongDuChuteRig)
+--
+--  보급 차량을 지상에 스폰한 뒤, 개봉자 클라(VehicleDropChute.lua)가 차량을
+--  공중으로 올려 천천히 내리고, 낙하산 3개짜리 리그 차량을 차량 지붕 위에 붙여
+--  같이 내린다. 차량을 공중에 띄우는 방식은 헬기 화력지원과 동일하다
+--  (리플렉션 tempTransform -> setWorldTransform, firesupport.lua heliMoveTo).
+--
+--  MP 동기화 구조 (헬기와 동일):
+--   ① 서버: 보급 차량 + 리그 스폰 -> authorizationChanged(개봉자)로 Local 물리 권한
+--   ② 개봉자 클라: ChuteStart 수신 -> 매 틱 텔레포트 -> 엔진 물리 스트림으로 전파
+--   ③ 착지 후 개봉자 클라가 ChuteLanded 전송 -> 서버가 리그 제거 + 바닥 낙하산
+--      배치 + 차량 권한을 Server로 되돌림(평소 주차 차량과 같은 상태)
+--   ④ 개봉자 이탈/스트리밍 실패 대비: 서버 자체 데드라인에서 같은 마무리를 강제
+--
+--  리그를 보급 차량과 같은 칸에 스폰하면 IsoChunk.doSpawnedVehiclesInInvalidPosition의
+--  차량 간 충돌 검사에 걸려 월드에 추가되지 않는다(addVehicleDebug는 그래도 객체를
+--  돌려준다). 그래서 투하 영역(반경 7칸 전부 실외/빈칸, findDropSquare) 안에서
+--  몇 칸 떨어진 곳에 스폰하고, 클라가 첫 틱에 차량 지붕 위로 옮긴다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+local CHUTE_RIG_SCRIPT     = "Base.PongDuChuteRig"
+local CHUTE_START_ALT      = 10.0   -- 지면 대비 시작 고도(물리 y). 2.46 = 1층 -> 약 4층
+local CHUTE_RELEASE_ALT    = 0.4    -- 이 고도까지 내려오면 고정을 풀고 물리 낙하로 착지
+local CHUTE_SPEED          = 0.8    -- 하강 속도(물리 y/초). 10.0 -> 0.4 약 12초
+local CHUTE_SETTLE_MS      = 1200   -- 고정 해제 후 착지 안정 대기(ms)
+local CHUTE_STREAM_WAIT_MS = 15000  -- 클라가 차량을 받기까지 허용하는 대기(ms)
+local CHUTE_DEADLINE_PAD_MS = 8000  -- 서버 데드라인 여유(ms)
+local CHUTE_TICK_MS        = 1000   -- 서버 데드라인 검사 주기
+local CHUTE_ORPHAN_MS      = 10000  -- 추적 안 되는 리그 정리 주기
+
+-- 리그 스폰 후보 오프셋. 보급 차량은 IsoDirections.S로 스폰되어 y축으로 길다.
+-- 폭 방향(x)을 우선 쓰고, 투하 영역(반경 7) 밖으로도 한 번 더 넓혀 본다.
+local CHUTE_RIG_OFFSETS = {
+    { 6, 0 }, { -6, 0 }, { 5, 5 }, { -5, 5 }, { 5, -5 }, { -5, -5 },
+    { 0, 7 }, { 0, -7 }, { 9, 0 }, { -9, 0 }, { 0, 10 }, { 0, -10 },
+}
+
+-- [cargoVid] = job. 서버(또는 SP)에서만 채워진다. 이 파일은 MP 클라에서도
+-- 로드되지만 거기선 spawnVehicle이 호출되지 않으므로 항상 비어 있다.
+t3VehicleDrop._chuteJobs = t3VehicleDrop._chuteJobs or {}
+
+local function chuteDescentMs()
+    return math.floor((CHUTE_START_ALT - CHUTE_RELEASE_ALT) / CHUTE_SPEED * 1000)
+end
+
+local function findChuteRig(vid)
+    if not vid then return nil end
+    local v = getVehicleById(vid)
+    if not v then return nil end
+    local ok, sn = pcall(function() return v:getScriptName() end)
+    if ok and sn == CHUTE_RIG_SCRIPT then return v end
+    return nil
+end
+
+-- VehicleID는 서버에서 재활용되므로(VehicleIDMap freeID LIFO) 스크립트명까지 맞아야
+-- 우리 보급 차량으로 인정한다 (firesupport.lua findHeliVehicle과 같은 가드).
+local function findChuteCargo(job)
+    local v = getVehicleById(job.cargoVid)
+    if not v then return nil end
+    local ok, sn = pcall(function() return v:getScriptName() end)
+    if ok and sn == job.cargoScript then return v end
+    return nil
+end
+
+local function spawnChuteRig(x, y, z)
+    local cell = getCell()
+    for i = 1, #CHUTE_RIG_OFFSETS do
+        local o = CHUTE_RIG_OFFSETS[i]
+        local sq = cell:getGridSquare(x + o[1], y + o[2], z)
+        if sq and sq:isOutside() then
+            local ok, v = pcall(function()
+                return addVehicleDebug(CHUTE_RIG_SCRIPT, IsoDirections.N, 0, sq)
+            end)
+            if ok and v then
+                -- 충돌 검사에 걸리면 월드에 안 들어간 객체가 돌아오므로 재조회로 확인
+                local rig = getVehicleById(v:getId())
+                if rig then
+                    print(string.format("[t3VehicleDrop] Chute rig spawned vid=%s at %d,%d (offset %d,%d)",
+                        tostring(rig:getId()), sq:getX(), sq:getY(), o[1], o[2]))
+                    return rig
+                end
+                print(string.format("[t3VehicleDrop] Chute rig rejected at %d,%d (collision/indoor), trying next",
+                    sq:getX(), sq:getY()))
+            else
+                print("[t3VehicleDrop] Chute rig addVehicleDebug FAILED err=" .. tostring(v))
+            end
+        end
+    end
+    return nil
+end
+
+local function finishChuteJob(job, reason)
+    -- 1) 리그 제거: permanentlyRemove가 제거 패킷을 전 클라에 보내고 VehiclesDB에서도 지운다
+    local rig = findChuteRig(job.rigVid)
+    if rig then
+        local ok, err = pcall(function() rig:permanentlyRemove() end)
+        if ok then
+            print("[t3VehicleDrop] Chute rig removed vid=" .. tostring(job.rigVid))
+        else
+            print("[t3VehicleDrop] Chute rig remove FAILED vid=" .. tostring(job.rigVid) .. " err=" .. tostring(err))
+        end
+    else
+        print("[t3VehicleDrop] Chute rig not found on finish vid=" .. tostring(job.rigVid))
+    end
+
+    local cargo = findChuteCargo(job)
+    if not cargo then
+        -- 청크 언로드 등으로 서버가 차량을 못 잡으면 modData를 못 심는다.
+        -- 이때 낙하산을 뿌리면 탑승해도 영영 안 치워지므로 뿌리지 않는다.
+        print("[t3VehicleDrop] Chute finish (" .. tostring(reason) .. "): cargo vid="
+            .. tostring(job.cargoVid) .. " not found, landing decor skipped")
+        return
+    end
+
+    -- 2) 이미 누가 탔으면 탑승 회수 이벤트가 지나간 뒤라 낙하산을 뿌리면 안 치워진다.
+    --    권한도 운전자 것(authorizationServerOnSeat)이므로 건드리지 않는다.
+    if cargo:getDriver() then
+        print("[t3VehicleDrop] Chute finish (" .. tostring(reason) .. "): cargo already driven, decor/authority skipped")
+        return
+    end
+
+    -- 3) 물리 권한을 Server로 되돌린다(평소 주차 차량 상태 = 클라에서 static).
+    --    서버 데드라인으로 강제 종료된 경우 차량이 공중이면 그 자리에 굳을 수 있다
+    --    (누가 타서 권한을 가져가면 다시 떨어진다). 로그로 구분해 둔다.
+    if isServer() then
+        local okA, errA = pcall(function() cargo:authorizationChanged(nil) end)
+        if not okA then
+            print("[t3VehicleDrop] Chute authority reset FAILED err=" .. tostring(errA))
+        end
+    end
+
+    -- 4) 착지 지점 기준 바닥 낙하산 + modData
+    local sq = getCell():getGridSquare(math.floor(cargo:getX()), math.floor(cargo:getY()), job.z)
+        or getCell():getGridSquare(job.x, job.y, job.z)
+    local placed = applyLandingDecor(cargo, sq, job.x, job.y, job.owner)
+    print(string.format("[t3VehicleDrop] Chute finish (%s): cargo vid=%s landed at %.1f,%.1f, parachutes placed=%d",
+        tostring(reason), tostring(job.cargoVid), cargo:getX(), cargo:getY(), placed))
+end
+
+-- 착지 보고(개봉자 클라 -> 서버, SP는 직접 호출). reporter가 있으면 그 job의 개봉자인지 확인한다.
+function t3VehicleDrop.chuteLanded(cargoVid, reporter)
+    local vid = tonumber(cargoVid)
+    local job = vid and t3VehicleDrop._chuteJobs[vid]
+    if not job then
+        print("[t3VehicleDrop] ChuteLanded for unknown job vid=" .. tostring(cargoVid) .. " (already finished?)")
+        return
+    end
+    if reporter and job.pilotId and reporter:getOnlineID() ~= job.pilotId then
+        print("[t3VehicleDrop] ChuteLanded ignored: reporter is not the pilot (vid=" .. tostring(vid) .. ")")
+        return
+    end
+    t3VehicleDrop._chuteJobs[vid] = nil
+    finishChuteJob(job, "landed")
+end
+
+-- 하강 연출 시작. 리그 스폰에 실패하면 false -> 호출부가 예전처럼 즉시 착지 처리.
+local function startChuteDrop(player, vehicle, x, y, z)
+    if not t3VehicleDropChute and not isServer() then
+        -- SP인데 클라 모듈이 없으면(로드 실패) 연출을 돌릴 주체가 없다
+        print("[t3VehicleDrop] t3VehicleDropChute not loaded, chute descent skipped")
+        return false
+    end
+
+    local rig = spawnChuteRig(x, y, z)
+    if not rig then
+        print("[t3VehicleDrop] Chute rig spawn FAILED at all offsets, falling back to instant landing")
+        return false
+    end
+
+    local now = getTimestampMs()
+    local job = {
+        cargoVid    = vehicle:getId(),
+        cargoScript = vehicle:getScriptName(),
+        rigVid      = rig:getId(),
+        x = x, y = y, z = z,
+        player      = player,
+        owner       = player and player:getUsername() or "",
+        deadline    = now + CHUTE_STREAM_WAIT_MS + chuteDescentMs() + CHUTE_SETTLE_MS + CHUTE_DEADLINE_PAD_MS,
+    }
+
+    if isServer() then
+        -- 헬기와 같은 권한 부여 경로(authorizationServerCollide는 Kahlua short 변환 문제로 못 씀)
+        local okA, errA = pcall(function()
+            job.pilotId = player:getOnlineID()
+            vehicle:authorizationChanged(player)
+            rig:authorizationChanged(player)
+        end)
+        if not okA then
+            print("[t3VehicleDrop] Chute authority grant FAILED err=" .. tostring(errA))
+        end
+    end
+
+    t3VehicleDrop._chuteJobs[job.cargoVid] = job
+
+    local args = {
+        cargoVid    = job.cargoVid,
+        cargoScript = job.cargoScript,
+        rigVid      = job.rigVid,
+        rigScript   = CHUTE_RIG_SCRIPT,
+        startAlt    = CHUTE_START_ALT,
+        releaseAlt  = CHUTE_RELEASE_ALT,
+        speed       = CHUTE_SPEED,
+        settleMs    = CHUTE_SETTLE_MS,
+        timeoutMs   = job.deadline - now,
+    }
+    if isServer() then
+        sendServerCommand(player, "PongDuVehicleDrop", "ChuteStart", args)
+    else
+        t3VehicleDropChute.start(args)
+    end
+
+    print(string.format("[t3VehicleDrop] Chute descent started cargo=%s(%s) rig=%s alt=%.1f speed=%.2f deadline=%dms",
+        tostring(job.cargoVid), tostring(job.cargoScript), tostring(job.rigVid),
+        CHUTE_START_ALT, CHUTE_SPEED, job.deadline - now))
+    return true
+end
+
+-- 서버 데드라인 + 고아 리그 정리. 이 파일은 MP 클라에서도 로드되므로(server.lua
+-- addServerTick 주석 참고) 클라에서는 등록하지 않는다. SP는 isClient()가 false라 등록된다.
+local _chuteLastTick = 0
+local _chuteLastOrphan = 0
+
+local function chuteIsTrackedRig(vid)
+    for _, job in pairs(t3VehicleDrop._chuteJobs) do
+        if job.rigVid == vid then return true end
+    end
+    return false
+end
+
+-- 서버 재시작/세이브 로드 등으로 job 없이 남은 리그를 치운다 (화력지원 orphan sweep과 같은 이유).
+local function chuteSweepOrphanRigs()
+    local ok, cell = pcall(getCell)
+    if not ok or not cell then return end
+    local vehicles = cell:getVehicles()
+    if not vehicles then return end
+    for i = vehicles:size() - 1, 0, -1 do
+        local v = vehicles:get(i)
+        if v then
+            local okS, sn = pcall(function() return v:getScriptName() end)
+            if okS and sn == CHUTE_RIG_SCRIPT and not chuteIsTrackedRig(v:getId()) then
+                local okR, err = pcall(function() v:permanentlyRemove() end)
+                print("[t3VehicleDrop] Orphan chute rig vid=" .. tostring(v:getId())
+                    .. (okR and " removed" or (" remove FAILED err=" .. tostring(err))))
+            end
+        end
+    end
+end
+
+local function chuteServerTick()
+    local now = getTimestampMs()
+    if now - _chuteLastTick >= CHUTE_TICK_MS then
+        _chuteLastTick = now
+        local expired = nil
+        for vid, job in pairs(t3VehicleDrop._chuteJobs) do
+            if now > job.deadline then
+                expired = expired or {}
+                expired[#expired + 1] = vid
+            end
+        end
+        if expired then
+            for i = 1, #expired do
+                local job = t3VehicleDrop._chuteJobs[expired[i]]
+                t3VehicleDrop._chuteJobs[expired[i]] = nil
+                print("[t3VehicleDrop] Chute job deadline reached vid=" .. tostring(expired[i])
+                    .. " (pilot lost or vehicle not streamed), forcing finish")
+                finishChuteJob(job, "deadline")
+            end
+        end
+    end
+    if now - _chuteLastOrphan >= CHUTE_ORPHAN_MS then
+        _chuteLastOrphan = now
+        chuteSweepOrphanRigs()
+    end
+end
+
+if not isClient() then
+    Events.OnTick.Add(chuteServerTick)
+end
+
 function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     local square = getCell():getGridSquare(x, y, z)
     if not square then
@@ -249,27 +551,12 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
         return
     end
 
-    local parachuteSquares = scatterParachutes(square)
-
     -- addVehicleDebug 직후 반환값이 완전하지 않을 수 있어 재조회 (AirdroppedLUV와 동일 관례)
     local vehicleId = vehicle:getId()
     vehicle = getVehicleById(vehicleId)
     if not vehicle then
         print("[t3VehicleDrop] Failed to re-acquire vehicle after spawn: " .. tostring(vehicleType))
         return
-    end
-
-    -- 탑승 시 회수할 수 있도록 낙하산 위치를 차량에 심어둔다.
-    -- 재조회 이후에 세팅해야 modData가 실제 차량 인스턴스에 붙는다.
-    -- transmitModData는 부르지 않는다 -- IsoObject 구현이 square의 Objects 인덱스를
-    -- 전제하는데 차량은 거기 등록되지 않아 신뢰할 수 없다. 이 값은 서버에서만 읽으면 되고,
-    -- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
-    if #parachuteSquares > 0 then
-        vehicle:getModData().t3ParachuteSquares = parachuteSquares
-        -- 맵마커 정리 알림용. 마커는 개봉자 본인 맵에만 찍혀 있으므로 그 사람
-        -- 유저네임과, 마커를 찍을 때 쓴 것과 동일한 좌표(x,y)를 같이 심어둔다.
-        vehicle:getModData().t3DropCenter = tostring(x) .. "," .. tostring(y)
-        vehicle:getModData().t3DropOwnerUsername = player and player:getUsername() or ""
     end
 
     -- 바닐라가 자동으로 뿌린 키 회수 (우리 키만 유일한 키가 되도록)
@@ -347,4 +634,11 @@ function t3VehicleDrop.spawnVehicle(player, x, y, z, vehicleType, sender)
     end
 
     print("[t3VehicleDrop] " .. tostring(vehicleType) .. " spawned (donor: " .. tostring(sender) .. ")")
+
+    -- 낙하산 하강 연출. 바닥 낙하산 배치 + 탑승 회수용 modData는 착지 후(finishChuteJob)로
+    -- 미뤄진다. 리그를 못 띄우면 예전처럼 스폰 지점에 바로 배치한다.
+    if not startChuteDrop(player, vehicle, x, y, z) then
+        local placed = applyLandingDecor(vehicle, square, x, y, player and player:getUsername() or "")
+        print("[t3VehicleDrop] Instant landing decor placed=" .. tostring(placed))
+    end
 end

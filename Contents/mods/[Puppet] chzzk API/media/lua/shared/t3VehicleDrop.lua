@@ -180,6 +180,8 @@ local HARD_EXCLUDED = {
     -- PongDu 자체 화력 지원 차량 (드론/헬기 실체)
     ["Base.PongDuDrone"] = true,
     ["Base.PongDuHeli"] = true,
+    -- PongDu 차량 보급 낙하산 리그 (하강 연출 전용, 좌석은 있지만 탑승 대상 아님)
+    ["Base.PongDuChuteRig"] = true,
 
     -- 헬기 계열 워크샵 차량 (동체/꼬리 파트 포함)
     ["Base.UH60Green"] = true,

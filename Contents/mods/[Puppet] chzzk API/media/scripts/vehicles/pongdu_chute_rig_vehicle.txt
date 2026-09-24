@@ -1,0 +1,213 @@
+module Base
+{
+	/* ═══════════════════════════════════════════════════════════════════
+	   차량 보급 / 낙하산 리그 (vehicle_drop parachute rig)
+
+	   보급 차량이 공중에서 내려오는 동안 차량 지붕 위에 붙어 같이 내려오는
+	   연출 전용 차량. 이동은 전부 개봉자 클라의 VehicleDropChute.lua가
+	   텔레포트로 수행하고, 착지하면 서버가 permanentlyRemove()로 지운다.
+	   탑승/정비 대상이 아니다.
+
+	   메시: Parachute zombie troopers(워크샵 3793336449)의
+	   ParachuteArmyDeployed.fbx / ParachuteArmy.png 를 가져와서
+	   3개를 방사형(120도 간격, 바깥으로 30도 기울임)으로 합쳐 구웠다.
+	   - 모든 산줄(라이저)이 모이는 지점 = 메시 원점 = 차량 원점.
+	     클라가 리그 원점을 "보급 차량 지붕 + 여유"에 맞춘다.
+	   - B41 ImportedStaticMesh는 노드 변환을 무시하고 aiMesh 원시 정점을
+	     그대로 쓰므로 정점 자체를 Y-up으로 굽고 노드 행렬은 항등으로 내보냈다.
+	     원시 bbox: x -2.35~2.35, y 0~3.39, z -1.87~2.52 (scale 1.0 기준).
+	   - 스킨 텍스처는 알파를 전부 255로 채웠다. vehicle.frag가
+	     mix(col, 도색색, 1 - tex.a)로 칠하므로 원본 알파(최소 164)를 두면
+	     차량 랜덤 도색이 천에 번진다.
+
+	   ─── 스케일 ───
+	   파트 모델이 없고 본체 모델 하나뿐이라 BaseVehicle.updateTransform()의
+	   최종 배율은 vehicle>model{scale} x 본체ModelScript.scale 뿐이다.
+	   드론에서 문제가 됐던 본체/파트 배율 체인 불일치가 여기엔 없으므로,
+	   크기 조정은 아래 model{scale} 하나만 바꾸면 된다 (메시 재굽기 불필요).
+	   단 Loaded()가 extents / physicsChassisShape / shadowExtents 를
+	   model{scale}로 곱하므로, 그 값들은 "월드값 / model{scale}"로 적는다.
+	     1.8 기준 월드 크기: 높이 약 6.1, 가로폭 약 8.5
+
+	   ─── 헬기/드론에서 그대로 가져온 설계 ───
+	   - extents 최소화: PolygonalMap2.VehiclePoly의 이동 차단 폴리곤은
+	     extents 기반 2D 지면 폴리곤이라 고도를 무시한다.
+	   - part Engine 없음: trySpawnKey가 Engine 파트 존재를 게이트로 써서
+	     스폰 시 주변에 차키가 생성되지 않는다.
+	   - 엔진 사운드는 미정의 이름으로 무음 보장.
+	   ═══════════════════════════════════════════════════════════════════ */
+
+	model PongDuChuteCluster
+	{
+		mesh = vehicles/pongdu_chute_cluster,
+		shader = vehicle,
+		static = TRUE,
+		scale = 1.0,
+	}
+
+	vehicle PongDuChuteRig
+	{
+		mechanicType = 1,
+		offRoadEfficiency = 10.2,
+		engineRepairLevel = 8,
+		playerDamageProtection = 1.2,
+
+		model
+		{
+			file = PongDuChuteCluster,
+			scale = 1.8,
+			offset = 0.0000 0.0000 0.0000,
+		}
+
+		skin
+		{
+			texture = Vehicles/Vehicle_PongDuChute,
+		}
+
+		textureShadow = Shadows/shadowPongDuChute,
+		spawnOffsetY = 0.0000,
+
+		sound
+		{
+			horn = VehicleHorn,
+			engine = PongDuChuteSilence,
+			engineStart = PongDuChuteSilence,
+		}
+
+		/* 아래 값은 Loaded()에서 x1.8 된다.
+		   extents / physicsChassisShape  0.0442 -> 월드 0.0795 (드론과 동일한 미니 박스)
+		   shadowExtents                  5.0    -> 월드 9.0 (전체 폭. initShadowPoly가 /2 해서 쓴다)
+		   그림자 텍스처는 회전 무관한 원형이라 리그 방향과 상관없이 맞는다. */
+		extents = 0.0442 0.0442 0.0442,
+		mass = 120,
+		centerOfMassOffset = 0.0000 0.0000 0.0000,
+		shadowExtents = 5.0000 5.0000,
+		shadowOffset = 0.0000 0.0000,
+		physicsChassisShape = 0.0442 0.0442 0.0442,
+		engineForce = 15500,
+		maxSpeed = 70f,
+		engineLoudness = 0,
+		engineQuality = 70,
+		brakingForce = 50,
+		stoppingMovementForce = 4.0f,
+		rollInfluence = 1.0f,
+		steeringIncrement = 0.04,
+		steeringClamp = 0.3,
+		suspensionStiffness = 20,
+		suspensionCompression = 4.83,
+		suspensionDamping = 3.88,
+		maxSuspensionTravelCm = 14,
+		suspensionRestLength = 0.20f,
+		wheelFriction = 1.4f,
+		frontEndHealth = 165,
+		rearEndHealth = 130,
+		seats = 4,
+		template = PassengerSeat4,
+
+		/* 좌석/영역 구성은 드론(Base.PongDuDrone)과 동일. 영역이 원점 1x1이고
+		   그 자리는 보급 차량 폴리곤이 차지하므로 플레이어가 접근할 수 없다. */
+		passenger FrontLeft
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatFrontLeft,
+			}
+		}
+
+		passenger FrontRight
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatFrontRight,
+			}
+		}
+
+		passenger RearLeft
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatRearLeft,
+			}
+		}
+
+		passenger RearRight
+		{
+			position inside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+			}
+
+			position outside
+			{
+				offset = 0.0000 0.0000 0.0000,
+				rotate = 0.0000 0.0000 0.0000,
+				area = SeatRearRight,
+			}
+		}
+
+		area Engine
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatFrontLeft
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatFrontRight
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatRearLeft
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		area SeatRearRight
+		{
+			xywh = 0.0000 0.0000 1.0000 1.0000,
+		}
+
+		template = Seat/part/SeatFrontLeft,
+		template = Seat/part/SeatFrontRight,
+		template = Seat/part/SeatRearLeft,
+		template = Seat/part/SeatRearRight,
+
+		part PassengerCompartment
+		{
+			category = nodisplay,
+
+			lua
+			{
+				update = Vehicles.Update.PassengerCompartment,
+			}
+		}
+	}
+}

@@ -7,5 +7,8 @@ Events.OnClientCommand.Add(function(module, command, player, args)
         t3VehicleDrop.spawnVehicle(player, args.x, args.y, args.z, args.vehicleType, args.sender)
     elseif command == "ClearParachutes" then
         t3VehicleDrop.clearParachutes(getVehicleById(args.vehicleId))
+    elseif command == "ChuteLanded" then
+        -- 낙하산 하강 연출 종료 보고 (client/VehicleDropChute.lua)
+        t3VehicleDrop.chuteLanded(args.cargoVid, player)
     end
 end)
