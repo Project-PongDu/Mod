@@ -8,6 +8,83 @@ local function predicateAll(item)
 	return true
 end
 
+-- ============================================================================
+-- PERF helpers
+-- ============================================================================
+
+-- Frame counter driven by OnTick. Replaces the old shared uTick, which only
+-- advanced when a hitman update ran to the very end: a hitman sitting in an
+-- early-return state (onground, getup, staggerback...) froze it, so every
+-- zombie's UpdateZombies ran either every frame or never.
+local frameNo = 0
+
+-- zombie -> hitman repath throttle, keyed by zombie id, value = frame after
+-- which the zombie may re-evaluate/re-issue its path to a hitman
+local REPATH_INTERVAL_FRAMES = 30
+local repathTab = {}
+
+-- counters for the periodic diagnostics line (see OnHitmanTick)
+local PERF_LOG_INTERVAL_MS = 30000
+local perfLogAt = 0
+local perfStats = {repath = 0, repathThrottled = 0, remoteSkipped = 0, hitmanUpd = 0, hitmanMs = 0, hitmanMaxMs = 0}
+
+local function ResetPerfStats()
+    perfStats.repath = 0
+    perfStats.repathThrottled = 0
+    perfStats.remoteSkipped = 0
+    perfStats.hitmanUpd = 0
+    perfStats.hitmanMs = 0
+    perfStats.hitmanMaxMs = 0
+end
+
+-- Weapon ranges depend only on weapon type and scope tier, so cache them
+-- instead of instancing an InventoryItem (plus a scope item) on every combat
+-- scan. Ported from Bandits B42.
+local WeaponRangeCache = {melee = {}, ranged = {}}
+
+-- thresholds must stay identical to HitmanUtils.ModifyWeapon
+local function GetScopeTier(brain)
+    local sight = brain and brain.accuracyBoost or 0
+    if sight >= 1 and sight <= 2 then return "x2" end
+    if sight > 2 and sight <= 3 then return "x4" end
+    if sight > 3 then return "x8" end
+    return "none"
+end
+
+local function GetMeleeRangeCached(weaponType)
+    if not weaponType then return 0 end
+    local cached = WeaponRangeCache.melee[weaponType]
+    if cached then return cached end
+
+    local range = 0
+    local item = HitmanCompatibility.InstanceItem(weaponType)
+    if item then
+        range = item:getMaxRange()
+    else
+        print("[PongDu][Hitman] melee range: cannot instance " .. tostring(weaponType) .. ", using 0")
+    end
+    WeaponRangeCache.melee[weaponType] = range
+    return range
+end
+
+local function GetRangedRangeCached(weaponType, brain)
+    if not weaponType then return 0 end
+    local key = weaponType .. "|" .. GetScopeTier(brain)
+    local cached = WeaponRangeCache.ranged[key]
+    if cached then return cached end
+
+    local range = 0
+    local item = HitmanCompatibility.InstanceItem(weaponType)
+    if item then
+        item = HitmanUtils.ModifyWeapon(item, brain)
+        range = HitmanCompatibility.GetMaxRange(item)
+    else
+        print("[PongDu][Hitman] ranged range: cannot instance " .. tostring(weaponType) .. ", using 0")
+    end
+    WeaponRangeCache.ranged[key] = range
+    return range
+end
+
 local function CalcSpottedScore(player, dist)
     if not instanceof(player, "IsoPlayer") then return end
 
@@ -453,51 +530,47 @@ local function ManageSoundCoolDown(brain)
 end
 
 -- applies tweaks based on hitman action state
+-- action states that clear the task queue and stop this update
+local ClearTaskActionStates = {
+    ["getup"] = true,
+    ["getup-fromonback"] = true,
+    ["getup-fromonfront"] = true,
+    ["getup-fromsitting"] = true,
+    ["staggerback"] = true,
+    ["staggerback-knockeddown"] = true,
+}
+
 local function ManageActionState(hitman)
     local asn = hitman:getActionStateName()
-    
-    -- Hashmap for O(1) lookup of actions
-    local actions = {
-        ["onground"] = function()
-            if not hitman:getVehicle() then
-                if hitman:isUnderVehicle() then
-                    local bx, by = hitman:getX(), hitman:getY()
-                    hitman:setX(bx + 0.5)
-                    hitman:setY(by + 0.5)
-                end
-                Hitman.ClearTasks(hitman)
-                return false
+
+    -- PERF (ported from Bandits B42): plain branches instead of building a
+    -- table of 11 closures on every call. Behaviour per state is unchanged.
+    if asn == "onground" then
+        if not hitman:getVehicle() then
+            if hitman:isUnderVehicle() then
+                local bx, by = hitman:getX(), hitman:getY()
+                hitman:setX(bx + 0.5)
+                hitman:setY(by + 0.5)
             end
-            return true
-        end,
-
-        ["turnalerted"] = function()
-            hitman:changeState(ZombieIdleState.instance())
-            hitman:clearAggroList()
-            hitman:setTarget(nil)
-            return true
-        end,
-
-        ["pathfind"] = function() return false end,
-
-        ["lunge"] = function()
-            hitman:setUseless(true)
-            hitman:clearAggroList()
-            hitman:setTarget(nil)
-            return true
-        end,
-
-        ["getup"] = function() Hitman.ClearTasks(hitman); return false end,
-        ["getup-fromonback"] = function() Hitman.ClearTasks(hitman); return false end,
-        ["getup-fromonfront"] = function() Hitman.ClearTasks(hitman); return false end,
-        ["getup-fromsitting"] = function() Hitman.ClearTasks(hitman); return false end,
-        ["staggerback"] = function() Hitman.ClearTasks(hitman); return false end,
-        ["staggerback-knockeddown"] = function() Hitman.ClearTasks(hitman); return false end,
-    }
-
-    -- Execute the corresponding function if found in the hashmap
-    if actions[asn] then
-        return actions[asn]()
+            Hitman.ClearTasks(hitman)
+            return false
+        end
+        return true
+    elseif asn == "turnalerted" then
+        hitman:changeState(ZombieIdleState.instance())
+        hitman:clearAggroList()
+        hitman:setTarget(nil)
+        return true
+    elseif asn == "pathfind" then
+        return false
+    elseif asn == "lunge" then
+        hitman:setUseless(true)
+        hitman:clearAggroList()
+        hitman:setTarget(nil)
+        return true
+    elseif asn and ClearTaskActionStates[asn] then
+        Hitman.ClearTasks(hitman)
+        return false
     end
 
     -- Default behavior (for undefined states)
@@ -978,7 +1051,7 @@ local function ManageCombat(hitman)
                         --determine if hitman will be in combat mode
                         if weapons.melee then
                             if not maxRangeMelee then
-                                maxRangeMelee = HitmanCompatibility.InstanceItem(weapons.melee):getMaxRange()
+                                maxRangeMelee = GetMeleeRangeCached(weapons.melee)
                             end
                             local prone = potentialEnemy:isProne()
                             
@@ -1001,9 +1074,7 @@ local function ManageCombat(hitman)
                         if not isOutOfAmmo and dist > meleeDistPlayer + 1 and not combat and not shove then
                             if weapons.primary.name and weapons.primary.bulletsLeft > 0 then
                                 if not maxRangeRifle then
-                                    local item = HitmanCompatibility.InstanceItem(weapons.primary.name)
-                                    item = HitmanUtils.ModifyWeapon(item, brain)
-                                    maxRangeRifle = HitmanCompatibility.GetMaxRange(item)
+                                    maxRangeRifle = GetRangedRangeCached(weapons.primary.name, brain)
                                 end
                                 if dist < maxRangeRifle then
                                     if hitman:isPrimaryEquipped(weapons.primary.name) then
@@ -1018,9 +1089,7 @@ local function ManageCombat(hitman)
                                 end
                             elseif weapons.secondary.name and weapons.secondary.bulletsLeft > 0 then
                                 if not maxRangePistol then
-                                    local item = HitmanCompatibility.InstanceItem(weapons.secondary.name)
-                                    item = HitmanUtils.ModifyWeapon(item, brain)
-                                    maxRangePistol = HitmanCompatibility.GetMaxRange(item)
+                                    maxRangePistol = GetRangedRangeCached(weapons.secondary.name, brain)
                                 end
                                 if dist < maxRangePistol then
                                     if hitman:isPrimaryEquipped(weapons.secondary.name) then
@@ -1056,9 +1125,16 @@ local function ManageCombat(hitman)
             if HitmanUtils.AreEnemies(potentialEnemy.brain, brain) then
             -- if not potentialEnemy.brain or (brain.clan ~= potentialEnemy.brain.clan and (brain.hostile or potentialEnemy.brain.hostile)) then
      
+                -- PERF: reject by cached distance before the costly CanSee / light checks.
+                -- A candidate only matters if it can beat bestDist or counts toward
+                -- escape (escapeDist). +1 tile margin covers cache staleness (rebuilt every 4 ticks).
+                local ldx, ldy = potentialEnemy.x - zx, potentialEnemy.y - zy
+                local limit = (bestDist > escapeDist and bestDist or escapeDist) + 1
+                local inRange = (ldx * ldx) + (ldy * ldy) < limit * limit
+
                 -- load real instance here
-                local potentialEnemy = cache[id]
-                if potentialEnemy:isAlive() and hitman:CanSee(potentialEnemy) then
+                local potentialEnemy = inRange and cache[id] or nil
+                if potentialEnemy and potentialEnemy:isAlive() and hitman:CanSee(potentialEnemy) then
                     local pesq = potentialEnemy:getSquare()
                     if pesq and pesq:getLightLevel(0) > 0.31 and not hitman:getSquare():isSomethingTo(pesq) then
                         local px, py, pz = potentialEnemy:getX(), potentialEnemy:getY(), potentialEnemy:getZ()
@@ -1087,7 +1163,7 @@ local function ManageCombat(hitman)
                                     if hitman:isPrimaryEquipped(weapons.melee) then
 
                                         if not maxRangeMelee then
-                                            maxRangeMelee = HitmanCompatibility.InstanceItem(weapons.melee):getMaxRange()
+                                            maxRangeMelee = GetMeleeRangeCached(weapons.melee)
                                         end
                                         local prone = enemyCharacter:isProne()
                                         local fix = 0.1
@@ -1110,9 +1186,7 @@ local function ManageCombat(hitman)
                             if not isOutOfAmmo and dist > meleeDist + 1 and not combat and not shove then
                                 if weapons.primary.name and weapons.primary.bulletsLeft > 0 then
                                     if not maxRangeRifle then
-                                        local item = HitmanCompatibility.InstanceItem(weapons.primary.name)
-                                        item = HitmanUtils.ModifyWeapon(item, brain)
-                                        maxRangeRifle = HitmanCompatibility.GetMaxRange(item)
+                                        maxRangeRifle = GetRangedRangeCached(weapons.primary.name, brain)
                                     end
                                     if dist < maxRangeRifle then
                                         if hitman:isPrimaryEquipped(weapons.primary.name) then
@@ -1128,9 +1202,7 @@ local function ManageCombat(hitman)
                                     end
                                 elseif weapons.secondary.name and weapons.secondary.bulletsLeft > 0 then
                                     if not maxRangePistol then
-                                        local item = HitmanCompatibility.InstanceItem(weapons.secondary.name)
-                                        item = HitmanUtils.ModifyWeapon(item, brain)
-                                        maxRangePistol = HitmanCompatibility.GetMaxRange(item)
+                                        maxRangePistol = GetRangedRangeCached(weapons.secondary.name, brain)
                                     end
                                     if dist < maxRangePistol then
                                         if hitman:isPrimaryEquipped(weapons.secondary.name) then
@@ -1439,24 +1511,60 @@ local function UpdateZombies(zombie)
 
     -- Fetch zombie coordinates and closest hitman location
     local zx, zy, zz = zombie:getX(), zombie:getY(), zombie:getZ()
-    local enemy = HitmanUtils.GetClosestHitmanLocation(zombie)
+
+    -- PERF (ported from Bandits B42): inline nearest-hitman search.
+    -- GetClosestHitmanLocation allocated a result table per zombie per call
+    -- and compared real distances; this uses squared distances and no table.
+    local selfId = HitmanUtils.GetZombieID(zombie)
+    local enemyId
+    local enemyDistSq = 900 -- 30 tiles, same radius as before
+    for hid, h in pairs(HitmanZombie.CacheLightB) do
+        if hid ~= selfId then
+            local dx, dy = h.x - zx, h.y - zy
+            local dsq = (dx * dx) + (dy * dy)
+            if dsq < enemyDistSq then
+                enemyDistSq, enemyId = dsq, hid
+            end
+        end
+    end
+
+    local hitman = enemyId and HitmanZombie.Cache[enemyId]
 
     -- If hitman is in range, proceed
-    if enemy.dist < 30 then
+    if hitman then
         --local player = HitmanUtils.GetClosestPlayerLocation(zombie, true)
-        
+
         -- Skip if player is closer than the hitman
         --if player.dist < enemy.dist then return end
 
-        local hitman = HitmanZombie.Cache[enemy.id]
         local bx, by, bz = hitman:getX(), hitman:getY(), hitman:getZ()
         local dist = math.sqrt(((bx - zx) * (bx - zx)) + ((by - zy) * (by - zy)))
 
         -- Standard movement if hitman is far
         if dist > 3 then
             -- zombie:addLineChatElement(tostring(ZombRand(100)) .. " far", 0.6, 0.6, 1)
-            if zombie:CanSee(hitman) then
-                zombie:pathToCharacter(hitman)
+
+            -- PERF/MP: pathToCharacter() cancels the zombie's pending PolygonalMap2
+            -- request and queues a new one (PathFindBehavior2.setData). Issuing it
+            -- every other frame for every nearby zombie flooded the path queue and
+            -- starved the hitman's own requests (hitman has no target -> lowest queue).
+            -- 1) only the owning client paths the zombie; on other clients the
+            --    result is overwritten by the owner's sync anyway.
+            --    isRemoteZombie() is authOwner == nil, also true in SP -> isClient() guard.
+            -- 2) owner re-evaluates at most every REPATH_INTERVAL_FRAMES per zombie.
+            if isClient() and zombie:isRemoteZombie() then
+                perfStats.remoteSkipped = perfStats.remoteSkipped + 1
+            else
+                local nextFrame = repathTab[selfId]
+                if nextFrame and nextFrame > frameNo then
+                    perfStats.repathThrottled = perfStats.repathThrottled + 1
+                else
+                    repathTab[selfId] = frameNo + REPATH_INTERVAL_FRAMES
+                    if zombie:CanSee(hitman) then
+                        zombie:pathToCharacter(hitman)
+                        perfStats.repath = perfStats.repath + 1
+                    end
+                end
             end
 
         -- Approach hitman if in range
@@ -1620,7 +1728,7 @@ local function ProcessTask(hitman, task)
     end
 end
 
-local function GenerateTask(hitman, uTick)
+local function GenerateTask(hitman)
 
     local tasks = {}
     
@@ -1647,7 +1755,10 @@ local function GenerateTask(hitman, uTick)
     end
 
     -- MANAGE COLLISION TASKS
-    if #tasks == 0  and uTick % 2 then
+    -- (the old "uTick % 2" gate was always truthy in Lua, so collisions were
+    -- effectively checked every update; ManageCollisions exits early unless
+    -- isCollidedThisFrame(), so keep that behaviour and drop the dead gate)
+    if #tasks == 0 then
         local colissionTasks = ManageCollisions(hitman)
         if #colissionTasks > 0 then
             for _, t in pairs(colissionTasks) do table.insert(tasks, t) end
@@ -1683,7 +1794,6 @@ local function GenerateTask(hitman, uTick)
 end
 
 -- main function to handle hitmans
-local uTick = 0
 local function OnHitmanUpdate(zombie)
 
     local ts = getTimestampMs()
@@ -1691,8 +1801,6 @@ local function OnHitmanUpdate(zombie)
     if isServer() then return end
 
     if not Hitman.Engine then return end
-
-    if uTick == 16 then uTick = 0 end
 
     if HitmanCompatibility.IsReanimatedForGrappleOnly(zombie) then return end
 
@@ -1735,7 +1843,9 @@ local function OnHitmanUpdate(zombie)
     -- local zcnt = HitmanZombie.GetAllCnt()
     -- if zcnt > 600 then zcnt = 600 end
     -- local skip = math.floor(zcnt / 50) + 1
-    if uTick % 2 == 0 then
+    -- every 2nd frame per zombie, staggered by id so the load is spread
+    -- over both frames instead of all zombies landing on the same one
+    if (frameNo + id) % 2 == 0 then
         -- print (skip)
         UpdateZombies(zombie)
     end
@@ -1818,7 +1928,8 @@ local function OnHitmanUpdate(zombie)
     -- ManageChainsaw(hitman)
 
     -- MANAGE HITMAN BEING ON FIRE
-    if uTick == 2 then
+    -- every 16th frame per hitman (the shared uTick only ever hit one hitman)
+    if (frameNo + id) % 16 == 0 then
         ManageOnFire(hitman)
     end
 
@@ -1840,16 +1951,17 @@ local function OnHitmanUpdate(zombie)
         Hitman.Say(hitman, "DEAD")
     end
     
-    GenerateTask(hitman, uTick)
+    GenerateTask(hitman)
 
     local task = Hitman.GetTask(hitman)
     if task then
         ProcessTask(hitman, task)
     end
 
-    uTick = uTick + 1
-
     local elapsed = getTimestampMs() - ts
+    perfStats.hitmanUpd = perfStats.hitmanUpd + 1
+    perfStats.hitmanMs = perfStats.hitmanMs + elapsed
+    if elapsed > perfStats.hitmanMaxMs then perfStats.hitmanMaxMs = elapsed end
 end
 
 local function OnHitZombie(zombie, attacker, bodyPartType, handWeapon)
@@ -2028,6 +2140,43 @@ local function OnZombieDead(zombie)
 
 end
 
+-- frame counter + periodic diagnostics line (only while hitmen are loaded)
+local function OnHitmanTick()
+    frameNo = frameNo + 1
+    if frameNo % 60 ~= 0 then return end
+
+    local now = getTimestampMs()
+    if now < perfLogAt then return end
+    perfLogAt = now + PERF_LOG_INTERVAL_MS
+
+    -- drop throttle entries that already expired (dead / unloaded zombies)
+    local fresh = {}
+    for zid, f in pairs(repathTab) do
+        if f > frameNo then fresh[zid] = f end
+    end
+    repathTab = fresh
+
+    local hitmen = 0
+    for _ in pairs(HitmanZombie.CacheLightB) do hitmen = hitmen + 1 end
+    if hitmen > 0 then
+        local avg = 0
+        if perfStats.hitmanUpd > 0 then
+            avg = math.floor(perfStats.hitmanMs * 100 / perfStats.hitmanUpd) / 100
+        end
+        print("[PongDu][Hitman] perf " .. (PERF_LOG_INTERVAL_MS / 1000) .. "s:"
+            .. " zombiesInCell=" .. tostring(HitmanZombie.LastSize)
+            .. " hitmen=" .. hitmen
+            .. " repathIssued=" .. perfStats.repath
+            .. " repathThrottled=" .. perfStats.repathThrottled
+            .. " remoteSkipped=" .. perfStats.remoteSkipped
+            .. " hitmanUpdates=" .. perfStats.hitmanUpd
+            .. " hitmanAvgMs=" .. avg
+            .. " hitmanMaxMs=" .. perfStats.hitmanMaxMs)
+    end
+    ResetPerfStats()
+end
+
+Events.OnTick.Add(OnHitmanTick)
 Events.OnZombieUpdate.Add(OnHitmanUpdate)
 Events.OnHitZombie.Add(OnHitZombie)
 Events.OnZombieDead.Add(OnZombieDead)

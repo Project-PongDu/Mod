@@ -17,6 +17,22 @@ HitmanZombie.CacheLightB = HitmanZombie.CacheLightB or {}
 -- used for adaptive perofmance
 HitmanZombie.LastSize = 0
 
+-- PERF: constant lookup sets, built once instead of every rebuild
+-- zombies in these action states are not processed by OnZombieUpdate (see IsoZombie.update)
+local silenceStates = {
+    ["hitreaction"] = true,
+    ["hitreaction-hit"] = true,
+    ["hitreaction-gettingup"] = true,
+    ["hitreaction-knockeddown"] = true,
+    ["climbfence"] = true,
+    ["climbwindow"] = true,
+}
+local silenceBumps = {
+    ["ClimbWindow"] = true,
+    ["ClimbFence"] = true,
+    ["ClimbFenceEnd"] = true,
+}
+
 -- rebuids cache
 local UpdateZombieCache = function(numberTicks)
     -- if true then return end 
@@ -26,8 +42,6 @@ local UpdateZombieCache = function(numberTicks)
 
     -- ts = getTimestampMs()
     -- if not numberTicks % 4 == 1 then return end
-
-    local silenceStates = {"hitreaction", "hitreaction-hit", "hitreaction-gettingup", "hitreaction-knockeddown", "climbfence", "climbwindow"}
 
     -- adaptive pefrormance
     -- local skip = math.floor(HitmanZombie.LastSize / 200) + 1
@@ -50,6 +64,9 @@ local UpdateZombieCache = function(numberTicks)
     local py = player:getY()
 
     -- prepare local cache vars
+    -- PERF (ported from Bandits B42): light tables of the previous rebuild are
+    -- reused instead of allocating one new table per zombie every 4 ticks.
+    local prevLight = HitmanZombie.CacheLight
     local cache = {}
     local cacheLight = {}
     local cacheLightB = {}
@@ -72,7 +89,17 @@ local UpdateZombieCache = function(numberTicks)
             local zx, zy, zz, zd = zombie:getX(), zombie:getY(), zombie:getZ(), zombie:getDirectionAngle()
 
             if math.abs(px - zx) < mr and math.abs(py - zy) < mr then
-                local light = {id = id, x = zx, y = zy, z = zz, d = zd}
+                -- duplicate id within the same rebuild gets its own table,
+                -- so one entry never overwrites the other's fields
+                local light = prevLight[id]
+                if not light or cacheLight[id] then
+                    light = {}
+                end
+                light.id = id
+                light.x = zx
+                light.y = zy
+                light.z = zz
+                light.d = zd
 
                 if zombie:getVariableBoolean("Hitman")  then
                     light.isHitman = true
@@ -86,22 +113,21 @@ local UpdateZombieCache = function(numberTicks)
                     -- over zombieList
                     if math.abs(px - zx) < 12 and math.abs(py - zy) < 12 then
                         local asn = zombie:getActionStateName()
-                        for _, ss in pairs(silenceStates) do
-                            if asn == ss then
-                                Hitman.SurpressZombieSounds(zombie)
-                                break
-                            end
+                        if asn and silenceStates[asn] then
+                            Hitman.SurpressZombieSounds(zombie)
                         end
 
                         if asn == "bumped" then
                             local btype = zombie:getBumpType()
-                            if btype and (btype == "ClimbWindow" or btype == "ClimbFence" or btype == "ClimbFenceEnd") then
+                            if btype and silenceBumps[btype] then
                                 Hitman.SurpressZombieSounds(zombie)
                             end
                         end
                     end
                 else
                     light.isHitman = false
+                    -- a reused table may belong to a zombified ex-hitman
+                    light.brain = nil
                     cacheLightZ[id] = light
                 end
 

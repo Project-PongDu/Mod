@@ -1,6 +1,21 @@
 HitmanZombieActions = HitmanZombieActions or {}
 
 HitmanZombieActions.Move = {}
+
+-- DIAG: how long a hitman waits for PolygonalMap2 to hand back a path.
+-- Hitmen always have target == nil, so their requests sit in the lowest
+-- priority queue behind every aggro zombie; long waits show up here.
+local PATH_WAIT_WARN_MS = 1000
+local PATH_LOG_COOLDOWN_MS = 2000
+local lastPathLogMs = 0
+
+local function PathLog(msg)
+    local now = getTimestampMs()
+    if now - lastPathLogMs < PATH_LOG_COOLDOWN_MS then return end
+    lastPathLogMs = now
+    local zcnt = HitmanZombie and HitmanZombie.LastSize or -1
+    print("[PongDu][Hitman] " .. msg .. " zombiesInCell=" .. tostring(zcnt))
+end
 HitmanZombieActions.Move.onStart = function(zombie, task)
 
     if not zombie:getSquare():isFree(false) then
@@ -51,6 +66,8 @@ HitmanZombieActions.Move.onStart = function(zombie, task)
         zombie:getPathFindBehavior2():cancel()
         zombie:setPath2(nil)
         task.pathOwnerId = HitmanUtils.GetCharacterID(getSpecificPlayer(0))
+        task.pathReqMs = getTimestampMs()
+        task.pathGot = nil
     end
 
     return true
@@ -91,6 +108,8 @@ HitmanZombieActions.Move.onWorking = function(zombie, task)
             zombie:getPathFindBehavior2():cancel()
             zombie:setPath2(nil)
             task.pathOwnerId = myId
+            task.pathReqMs = getTimestampMs()
+            task.pathGot = nil
         end
 
         --[[if ZombRand(1000) == 1 then
@@ -100,7 +119,21 @@ HitmanZombieActions.Move.onWorking = function(zombie, task)
         end]]
 
         local result = zombie:getPathFindBehavior2():update()
+
+        -- path2 stays nil until PathFindBehavior2 receives the finished path
+        if task.pathReqMs and not task.pathGot and zombie:getPath2() then
+            task.pathGot = true
+            local waited = getTimestampMs() - task.pathReqMs
+            if waited >= PATH_WAIT_WARN_MS then
+                PathLog("slow path: waited " .. waited .. "ms (hitman=" .. tostring(HitmanUtils.GetZombieID(zombie)) .. ")")
+            end
+        end
+
         if result == BehaviorResult.Failed then
+            if task.pathReqMs then
+                PathLog("path failed after " .. (getTimestampMs() - task.pathReqMs) .. "ms, gotPath=" .. tostring(task.pathGot == true)
+                    .. " (hitman=" .. tostring(HitmanUtils.GetZombieID(zombie)) .. ")")
+            end
             return true
         end
         if result == BehaviorResult.Succeeded then

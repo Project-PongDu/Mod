@@ -158,19 +158,11 @@ function HitmanUtils.GetCharacterID (character)
         -- if false and id and id ~= "" then
         --     return tonumber(id)
         -- else
-        local id
-        local dec = character:getPersistentOutfitID()
-
-        local bits = toBits(dec)
-        local hat = bits[16]
-        if hat == "1" then
-            bits[16] = "0"
-            id = toDec(bits)
-        else
-            id = dec
-        end
+        -- PERF: same conversion as GetZombieID but memoized there. The uncached
+        -- version built a bit-string table (Long.toUnsignedString + split)
+        -- on every call, and this is called per zombie in hot paths.
+        return HitmanUtils.GetZombieID(character)
             -- character:setVariable("HitmanID", tostring(id))
-        return id
         -- end
     end
 
