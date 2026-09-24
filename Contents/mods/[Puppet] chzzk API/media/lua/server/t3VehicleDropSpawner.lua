@@ -282,7 +282,7 @@ end
 local CHUTE_RIG_SCRIPT     = "Base.PongDuChuteRig"
 local CHUTE_START_ALT      = 10.0   -- 지면 대비 시작 고도(물리 y). 2.46 = 1층 -> 약 4층
 local CHUTE_RELEASE_ALT    = 0.4    -- 이 고도까지 내려오면 고정을 풀고 물리 낙하로 착지
-local CHUTE_SPEED          = 0.8    -- 하강 속도(물리 y/초). 10.0 -> 0.4 약 12초
+local CHUTE_SPEED          = 2.4    -- 하강 속도(물리 y/초). 10.0 -> 0.4 약 4초
 local CHUTE_SETTLE_MS      = 1200   -- 고정 해제 후 착지 안정 대기(ms)
 local CHUTE_STREAM_WAIT_MS = 15000  -- 클라가 차량을 받기까지 허용하는 대기(ms)
 local CHUTE_DEADLINE_PAD_MS = 8000  -- 서버 데드라인 여유(ms)
