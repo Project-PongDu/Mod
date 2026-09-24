@@ -409,7 +409,7 @@ local function spawnType(player, args)
     if LogLevel >= 3 then print ("[HITMANS] spawnType has cid " .. cid) end
     local clan = HitmanCustom.ClanGet(cid).spawn
     local groupSize = clan.groupMin + ZombRand(clan.groupMax - clan.groupMin + 1)
-    groupSize = math.floor(groupSize * SandboxVars.Hitmans.General_SpawnMultiplier + 0.5)
+    groupSize = math.floor(groupSize * Hitman.Settings.SpawnMultiplier + 0.5)
     local spawnPoints = {}
 
     if LogLevel >= 3 then print ("[HITMANS] groupSize is " .. groupSize) end
@@ -434,7 +434,7 @@ local function spawnType(player, args)
 
     if #spawnPoints > 0 then
         local cnt = spawnGroup(spawnPoints, args)
-        if SandboxVars.Hitmans.General_ArrivalIcon and cnt > 0 then
+        if Hitman.Settings.ArrivalIcon and cnt > 0 then
             local icon, color, desc = getIconDataByProgram(args.program, clan.friendly)
             if icon and color and desc then
                 local x, y = spawnPoints[1].x, spawnPoints[1].y

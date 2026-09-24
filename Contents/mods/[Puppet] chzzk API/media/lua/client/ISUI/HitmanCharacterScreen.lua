@@ -18,7 +18,7 @@ function ISCharacterScreen:render()
     -- Call the original render function to retain existing behavior
     originalRender(self)
 
-    if SandboxVars.Hitmans.General_KillCounter then
+    if Hitman.Settings.KillCounter then
         local h = self:getHeight() - 24
         local smallFontHgt = getTextManager():getFontFromEnum(UIFont.Small):getLineHeight()
         local offset

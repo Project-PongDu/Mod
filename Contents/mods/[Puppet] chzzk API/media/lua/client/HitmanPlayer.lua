@@ -174,7 +174,7 @@ local PanicHandler = function(player)
 end
 
 local StunlockRecalc = function(player)
-    player:setVariable("StunlockHitSpeed", SandboxVars.Hitmans.General_StunlockHitSpeed)
+    player:setVariable("StunlockHitSpeed", Hitman.Settings.StunlockHitSpeed)
 end
 
 local ResetHitmanKills = function(player)

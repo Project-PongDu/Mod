@@ -432,7 +432,7 @@ end
 
 -- updates hitman torches light
 local function ManageTorch(hitman)
-    if not SandboxVars.Hitmans.General_CarryTorches then return end
+    if not Hitman.Settings.CarryTorches then return end
 
     local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
     local vehicle = hitman:getVehicle()
@@ -592,7 +592,7 @@ local function ManageHealth(hitman)
     local tasks = {}
 
     -- temporarily removed until bleeding bug in week one investigation is complete
-    if SandboxVars.Hitmans.General_BleedOut then
+    if Hitman.Settings.BleedOut then
         local healing = false
         local health = hitman:getHealth()
         if health < 0.7 then
@@ -608,7 +608,7 @@ local function ManageHealth(hitman)
         end
     end
 
-    if SandboxVars.Hitmans.General_Infection then
+    if Hitman.Settings.Infection then
         local brain = HitmanBrain.Get(hitman)
         if brain.infection and brain.infection > 0 then
             -- print ("INFECTION: " .. brain.infection)
@@ -728,7 +728,7 @@ local function ManageCollisions(hitman)
                                     end
                                 end
 
-                                if SandboxVars.Hitmans.General_RemoveBarricade and Hitman.HasExpertise(hitman, Hitman.Expertise.Breaker) then
+                                if Hitman.Settings.RemoveBarricade and Hitman.HasExpertise(hitman, Hitman.Expertise.Breaker) then
                                     if barricade:isMetal() or barricade:isMetalBar() then
                                         if not hitman:isPrimaryEquipped("Hitmans.PropaneTorch") then
                                             local stasks = HitmanPrograms.Weapon.Switch(hitman, "Hitmans.PropaneTorch")
@@ -815,7 +815,7 @@ local function ManageCollisions(hitman)
                                 end
                                 local sameSide = barricade:getSquare():getX() == hitman:getSquare():getX() and barricade:getSquare():getY() == hitman:getSquare():getY()
 
-                                if SandboxVars.Hitmans.General_RemoveBarricade and Hitman.HasExpertise(hitman, Hitman.Expertise.Breaker) and sameSide then
+                                if Hitman.Settings.RemoveBarricade and Hitman.HasExpertise(hitman, Hitman.Expertise.Breaker) and sameSide then
                                     anim = "RemoveBarricadeCrowbarMid"
                                     local planks = barricade:getNumPlanks()
                                     if planks == 2 or planks == 4 then

@@ -53,7 +53,7 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot)
 
     -- aim time calc
     local dist = HitmanUtils.DistTo(hitman:getX(), hitman:getY(), enemyCharacter:getX(), enemyCharacter:getY())
-    local aimTimeMin = SandboxVars.Hitmans.General_GunReflexMin or 18
+    local aimTimeMin = Hitman.Settings.GunReflexMin
     local aimTimeSurp = math.floor(dist * 5)
     if walkType == "WalkAim" then
         aimTimeMin = 1

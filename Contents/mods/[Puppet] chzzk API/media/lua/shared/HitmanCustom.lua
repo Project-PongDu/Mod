@@ -104,7 +104,7 @@ local loadFile = function(dataKey, fileName)
         local modid = mods:get(i):gsub("^\\", "")
 
         if modid == "Hitmans" and isIngameState() then
-            if SandboxVars.Hitmans.General_OriginalHitmans then
+            if Hitman.Settings.OriginalHitmans then
                 table.insert(modList, modid)
             end
         else

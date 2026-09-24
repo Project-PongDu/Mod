@@ -1,5 +1,24 @@
 Hitman = Hitman or {}
 
+-- Former sandbox page "Hitmans_General" (removed from sandbox-options.txt).
+-- Values are hardcoded to the old sandbox defaults used by PongDu servers.
+-- GunReflexMin was never registered as a sandbox option (always fell back to 18).
+Hitman.Settings = {
+    KillCounter = true,       -- show hitman kill count on the character screen
+    StunlockHitSpeed = 2.4,   -- player hit-reaction anim speed (higher = shorter stunlock)
+    SpawnMultiplier = 1.0,    -- hitman group size multiplier
+    OriginalHitmans = true,   -- keep clans from the "Hitmans" mod id in the clan list
+    BleedOut = true,          -- wounded hitmen can bleed out
+    Infection = true,         -- hitmen can get infected and turn
+    RemoveBarricade = true,   -- hitmen can remove planks / metal sheets
+    Speak = true,             -- hitmen play voice lines
+    Captions = true,          -- voice line captions above hitmen
+    SneakAtNight = true,      -- hitmen sneak-walk at night
+    CarryTorches = true,      -- hitmen carry flashlights at night
+    ArrivalIcon = true,       -- map icon marker at the hitman spawn point
+    GunReflexMin = 18,        -- minimum gun aim delay [ticks]
+}
+
 Hitman.SoundTab = Hitman.SoundTab or {}
 Hitman.SoundTab.SPOTTED =           {prefix = "ZSSpotted_", chance = 90, randMax = 6, length = 10}
 Hitman.SoundTab.HIT =               {prefix = "ZSHit_", chance = 100, randMax = 14, length = 0.1}
@@ -993,7 +1012,7 @@ function Hitman.Say(zombie, phrase, force)
                 local length = config.length or 2
 
                 -- text captions
-                if SandboxVars.Hitmans.General_Captions then
+                if Hitman.Settings.Captions then
                     local text = "IGUI_Hitmans_Speech_" .. sound
                     if brain.hostile or brain.hostileP then
                         zombie:addLineChatElement(getText(text), 0.8, 0.1, 0.1)
@@ -1003,7 +1022,7 @@ function Hitman.Say(zombie, phrase, force)
                 end
 
                 -- audiable speech
-                if SandboxVars.Hitmans.General_Speak then
+                if Hitman.Settings.Speak then
                     zombie:getEmitter():playVocals(sound)
                 end
 
@@ -1068,7 +1087,7 @@ function Hitman.GetCombatWalktype(hitman, enemy, dist)
     local walkType = "Walk"
 
     if dls < 0.3 then
-        if SandboxVars.Hitmans.General_SneakAtNight then
+        if Hitman.Settings.SneakAtNight then
             walkType = "SneakWalk"
         end
     end
