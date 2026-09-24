@@ -14,12 +14,16 @@ local TARGET_CONDITION_MAX = 100 -- 기증 차량 컨디션 상한 (0~100)
 -- 실제로 놓인 타일 좌표를 "x,y,z" 문자열 배열로 돌려주고, 호출부가 차량 modData에
 -- 심어둔다. 플레이어가 그 차량에 타는 순간 회수하기 위한 것.
 --
--- [중심 정렬] 세 낙하산의 산줄이 모이는 점(하네스)이 차량 중심 한 점에 오도록
--- 아이템 원점을 "차량 중심 + 하네스 거리 x 바깥 방향"에 칸 안 오프셋까지 정확히 놓는다.
+-- [중심 정렬] 세 낙하산을 차량의 "보이는 중심"(그림자 중심) 기준 등각 방사형으로 놓는다.
+-- 아이템 원점은 중심에서 PARACHUTE_HARNESS_DIST + PARACHUTE_HARNESS_GAP(= 5칸) 떨어진 곳에
+-- 칸 안 오프셋까지 정확히 놓는다. 그러면 세 산줄 끝(하네스)이 중심에서 2.05칸씩 떨어진
+-- 정삼각형을 이뤄 차량을 둘러싼다.
 -- 예전 방식은 세 가지가 겹쳐 중심이 어긋났다:
---   ① 아이템 원점을 반경 5칸에 놓았는데 원점->하네스가 2.95칸이라 하네스가 중심에서 약 2칸 떨어짐
---   ② 반경 오프셋을 정수 칸으로 반올림하고 칸 중앙(0.5,0.5)에 놓음 (최대 0.7칸 오차)
---   ③ 기준점을 스폰 칸 모서리에서 y-1 보정(x 보정값은 선언만 되고 안 쓰임)
+--   ① 반경 오프셋을 정수 칸으로 반올림하고 칸 중앙(0.5,0.5)에 놓음 (최대 0.7칸 오차)
+--   ② 기준점을 스폰 칸 모서리에서 y-1 보정(x 보정값은 선언만 되고 안 쓰임)
+--   ③ 기준점이 차량 물리 원점이라 차종별 모델/그림자 오프셋만큼 치우침
+-- 하네스를 중심 한 점에 모으는 배치(GAP 0)도 시험했지만, 배치 전체가 2칸 안쪽으로
+-- 당겨져 캐노피가 차체를 덮어서 되돌렸다.
 local PARACHUTE_TYPE = "t3chzzkDonation.t3DeployedParachute"
 local PARACHUTE_COUNT = 3 -- 등각 분할 개수 (3이면 120도 간격)
 
@@ -27,8 +31,9 @@ local PARACHUTE_COUNT = 3 -- 등각 분할 개수 (3이면 120도 간격)
 -- 노드 변환(x100) x 모델 스크립트 scale 0.005 적용 후 하네스는 로컬 (+2.95, 0.05),
 -- 캐노피 끝은 -x 쪽(-3.45). 메시를 교체하면 이 값도 다시 재야 한다.
 local PARACHUTE_HARNESS_DIST = 2.95
--- 하네스를 차량 중심에서 바깥으로 더 뺄 거리(타일). 0이면 세 산줄이 차량 중심에서 만난다.
-local PARACHUTE_HARNESS_GAP = 0
+-- 하네스를 차량 중심에서 바깥으로 뺄 거리(타일). 0이면 세 산줄이 차량 중심 한 점에서 만난다.
+-- 2.05면 아이템 원점 반경이 5칸으로, 예전 배치 간격과 같다.
+local PARACHUTE_HARNESS_GAP = 2.05
 
 -- 낙하산 메쉬의 기준 방향 보정값 (도). 로컬 +x(하네스 쪽)가 차량 중심을 향하게 한다.
 local PARACHUTE_MODEL_ANGLE_OFFSET = 180
@@ -262,10 +267,35 @@ end
 -- transmitModData는 부르지 않는다 -- IsoObject 구현이 square의 Objects 인덱스를
 -- 전제하는데 차량은 거기 등록되지 않아 신뢰할 수 없다. 이 값은 서버에서만 읽으면 되고,
 -- 차량 세이브에 함께 저장되므로 서버 재시작 후에도 남는다.
+-- 차량의 "보이는 중심" = 그림자 중심. 물리 원점(getX/getY)은 차종마다 모델이 앞뒤로
+-- 치우쳐 있어 그대로 쓰면 배치가 한쪽으로 쏠린다. 그림자는 initShadowPoly가
+-- getWorldPos(shadowOffset.x, 0, shadowOffset.y) 기준으로 그리므로(shadowOffset 미지정 차종은
+-- Loaded()가 centerOfMassOffset으로 채움) 같은 변환으로 중심을 구한다.
+-- getWorldPos는 월드심 오프셋이 섞인 절대좌표라, 원점(0,0,0) 변환과의 차이만 더해 오프셋 의존을 없앤다.
+local _centerTmp0, _centerTmp1 = nil, nil
+local function vehicleVisualCenter(vehicle)
+    local ox, oy = vehicle:getX(), vehicle:getY()
+    local ok, cx, cy = pcall(function()
+        local so = vehicle:getScript():getShadowOffset()
+        _centerTmp0 = _centerTmp0 or Vector3f.new()
+        _centerTmp1 = _centerTmp1 or Vector3f.new()
+        local p0 = vehicle:getWorldPos(0, 0, 0, _centerTmp0)
+        local p1 = vehicle:getWorldPos(so:x(), 0, so:y(), _centerTmp1)
+        return ox + (p1:x() - p0:x()), oy + (p1:y() - p0:y())
+    end)
+    if ok and cx and cy then
+        print(string.format("[t3VehicleDrop] Parachute center: origin %.2f,%.2f -> shadow center %.2f,%.2f (%s)",
+            ox, oy, cx, cy, tostring(vehicle:getScriptName())))
+        return cx, cy
+    end
+    print("[t3VehicleDrop] Parachute center: shadow center read FAILED, using physics origin err=" .. tostring(cx))
+    return ox, oy
+end
+
 local function applyLandingDecor(vehicle, z, dropX, dropY, ownerUsername)
     if not vehicle then return 0 end
-    -- 착지한 차량의 실제(소수점) 위치를 중심으로 쓴다
-    local parachuteSquares = scatterParachutes(vehicle:getX(), vehicle:getY(), z)
+    local cx, cy = vehicleVisualCenter(vehicle)
+    local parachuteSquares = scatterParachutes(cx, cy, z)
     if #parachuteSquares > 0 then
         vehicle:getModData().t3ParachuteSquares = parachuteSquares
         -- 맵마커 정리 알림용. 마커는 개봉자 본인 맵에만 찍혀 있으므로 그 사람
