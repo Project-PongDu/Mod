@@ -53,7 +53,9 @@ HitmanZombieActions.GoTo.onWorking = function(zombie, task)
     -- controller at that moment. If authority hands off to a new closest
     -- player mid-task, re-issue it here so movement doesn't silently stall
     -- while the walk animation keeps playing.
-    if HitmanUtils.IsController(zombie) then
+    local isController = HitmanUtils.IsController(zombie)
+    HitmanUtils.CheckAuthMismatch(zombie, isController, "GoTo")
+    if isController then
         local myId = HitmanUtils.GetCharacterID(getSpecificPlayer(0))
         if task.pathOwnerId ~= myId then
             zombie:pathToLocationF(task.x, task.y, task.z)

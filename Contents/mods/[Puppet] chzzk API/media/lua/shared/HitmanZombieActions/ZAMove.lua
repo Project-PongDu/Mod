@@ -92,7 +92,9 @@ HitmanZombieActions.Move.onWorking = function(zombie, task)
         zombie:setCollidable(false)
     end]]
     -- local finder = zombie:getFinder()
-    if HitmanUtils.IsController(zombie) then
+    local isController = HitmanUtils.IsController(zombie)
+    HitmanUtils.CheckAuthMismatch(zombie, isController, "Move")
+    if isController then
         local cell = getCell()
 
         -- COMPAT: controller authority (closest-player) can flip mid-task in MP.

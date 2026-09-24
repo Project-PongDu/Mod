@@ -210,6 +210,86 @@ function HitmanUtils.IsController(zombie)
     return bestPlayerId == HitmanUtils.GetCharacterID(getSpecificPlayer(0))
 end
 
+-- DIAG: IsController (closest player, switches instantly) vs engine ownership
+-- (server-assigned authOwner: needs 1.618x closer to switch, 2s min interval).
+-- When they disagree, the controller client moves the hitman but the owner's
+-- sync packets overwrite it (walking in place / rubber-banding).
+-- Logs one line per mismatch episode (>= 500ms), plus a warning if it lasts 5s+.
+local AUTH_MISMATCH_MIN_MS = 500
+local AUTH_MISMATCH_LONG_MS = 5000
+local AUTH_MISMATCH_GAP_MS = 1000
+local authMismatch = {}
+
+local function round1(v)
+    return math.floor(v * 10 + 0.5) / 10
+end
+
+local function authMismatchLog(ep, id, text)
+    local zcnt = HitmanZombie and HitmanZombie.LastSize or -1
+    print("[PongDu][Hitman] auth mismatch " .. text .. ": " .. ep.side
+        .. " (hitman=" .. tostring(id) .. ", action=" .. tostring(ep.action)
+        .. ", myDist=" .. tostring(ep.myDist) .. ", otherDist=" .. tostring(ep.otherDist)
+        .. ", zombiesInCell=" .. tostring(zcnt) .. ")")
+end
+
+function HitmanUtils.CheckAuthMismatch(zombie, isController, action)
+    if not isClient() then return end
+
+    local now = getTimestampMs()
+    local id = HitmanUtils.GetZombieID(zombie)
+    local isOwner = not zombie:isRemoteZombie()
+
+    local side
+    if isController and not isOwner then
+        side = "controller-not-owner"
+    elseif isOwner and not isController then
+        side = "owner-not-controller"
+    end
+
+    -- close the previous episode when the state changed or updates stopped
+    local ep = authMismatch[id]
+    if ep and (ep.side ~= side or now - ep.last > AUTH_MISMATCH_GAP_MS) then
+        local dur = ep.last - ep.since
+        if dur >= AUTH_MISMATCH_MIN_MS then
+            authMismatchLog(ep, id, "ended after " .. dur .. "ms")
+        end
+        authMismatch[id] = nil
+        ep = nil
+    end
+
+    if not side then return end
+
+    if ep then
+        ep.last = now
+        if not ep.warned and now - ep.since >= AUTH_MISMATCH_LONG_MS then
+            ep.warned = true
+            authMismatchLog(ep, id, "ongoing for " .. (now - ep.since) .. "ms")
+        end
+        return
+    end
+
+    -- new episode: record distances once (cheap, only on transitions)
+    local zx, zy = zombie:getX(), zombie:getY()
+    local me = getSpecificPlayer(0)
+    local myId = me and HitmanUtils.GetCharacterID(me)
+    local myDist, otherDist = -1, -1
+    if me then
+        myDist = round1(HitmanUtils.DistTo(zx, zy, me:getX(), me:getY()))
+    end
+    local best = 100000
+    local playerList = getOnlinePlayers()
+    for i = 0, playerList:size() - 1 do
+        local p = playerList:get(i)
+        if p and HitmanUtils.GetCharacterID(p) ~= myId then
+            local d = HitmanUtils.DistTo(zx, zy, p:getX(), p:getY())
+            if d < best then best = d end
+        end
+    end
+    if best < 100000 then otherDist = round1(best) end
+
+    authMismatch[id] = {side = side, since = now, last = now, action = action, myDist = myDist, otherDist = otherDist}
+end
+
 function HitmanUtils.IsFacing(sx, sy, sa, tx, ty, tolerance)
     local dx = tx - sx
     local dy = ty - sy
