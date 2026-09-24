@@ -36,6 +36,13 @@ module Base
         }
     }
 
+    /* 차량 보급 사운드 3종. 원래 vehicle_airdrop.wav 한 파일(헬기 -> 낙하산 펼침 -> 무음 -> 착지,
+       10.6초)이었던 것을 구간별로 잘랐다.
+         vehicle_airdrop.wav        0.00~5.09초  헬기 접근. 키트 개봉 50% 시점 (VehicleDropCraftSound.lua)
+         vehicle_airdrop_chute.wav  5.09~7.00초  낙하산 펼침. 차량이 상공에 나타나는 순간 (VehicleDropChute.lua)
+         vehicle_airdrop_land.wav   9.64~10.64초 착지. 차량이 바닥에 닿는 순간 (VehicleDropChute.lua)
+       헬기->펼침 경계는 로터 박동 사이 가장 조용한 지점. 펼침 앞부분 약 0.2초에 로터 박동 잔향이 섞여 있다.
+       펼침/착지는 utils/fx playAt/broadcast로 거리 감쇠 재생 + 주변 플레이어 중계. */
     sound vehicle_call_signal
     {
         category = Object,
@@ -43,6 +50,28 @@ module Base
         clip
         {
             file = media/sound/vehicle_airdrop.wav,
+        }
+    }
+
+    sound pongdu_vdrop_chute
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/vehicle_airdrop_chute.wav,
+            volume = 0.5,
+        }
+    }
+
+    sound pongdu_vdrop_land
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/vehicle_airdrop_land.wav,
+            volume = 0.5,
         }
     }
 

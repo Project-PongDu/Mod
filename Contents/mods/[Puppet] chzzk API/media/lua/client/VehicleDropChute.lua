@@ -19,7 +19,18 @@
 
 t3VehicleDropChute = t3VehicleDropChute or {}
 
+local fx = require("utils/fx")
+
 local LOG = "[t3VehicleDrop] chute: "
+
+-- 효과음 (t3_rewards_sounds.txt). 원본 합본 vehicle_airdrop.wav를 헬기/펼침/착지 3개로 나눴다.
+-- 헬기 구간은 키트 개봉 50% 시점(VehicleDropCraftSound.lua, vehicle_call_signal)에서 재생된다.
+-- 거리 감쇠와 주변 플레이어 중계는 utils/fx(playAt/broadcast)가 맡는다 -- addSound(좀비 어그로)는 쓰지 않는다.
+local SOUND_CHUTE = "pongdu_vdrop_chute"   -- 차량이 상공에 나타나는 순간
+local SOUND_LAND  = "pongdu_vdrop_land"    -- 차량이 바닥에 닿는 순간
+local FX_FEATURE  = "vehicle_drop"
+local LAND_CONTACT_HEIGHT = 0.05  -- 지면 대비 이 높이 이하로 내려오면 접지로 본다
+local LAND_STOP_EPS       = 0.001 -- 낙하 중이던 차량의 높이가 더 안 줄어들면(서스펜션 접지) 접지로 본다
 
 -- 리그 원점(산줄이 모이는 점)을 보급 차량 지붕에서 얼마나 띄울지(물리 y).
 local RIG_ROOF_GAP = 0.35
@@ -91,6 +102,22 @@ end
 
 local function closeJob(job, why)
     job.closeWhy = job.closeWhy or why
+end
+
+-- 발동 클라는 서버 왕복 없이 바로 듣고, 주변 플레이어에겐 서버가 중계한다(riseup/zombierain과 같은 경로).
+-- SP에선 중계 대상이 없으므로 broadcast를 보내지 않는다.
+local function playDropSound(job, name, x, y, why)
+    local ok, err = pcall(function()
+        fx.playAt(name, x, y)
+        if isClient() then
+            fx.broadcast({ f = FX_FEATURE, x = x, y = y, z = 0, sound = name })
+        end
+    end)
+    if ok then
+        print(string.format("%ssound %s vid=%s at %.1f,%.1f (%s)", LOG, name, tostring(job.cargoVid), x, y, tostring(why)))
+    else
+        print(LOG .. "sound " .. tostring(name) .. " FAILED vid=" .. tostring(job.cargoVid) .. " err=" .. tostring(err))
+    end
 end
 
 local function reportLanded(job)
@@ -182,6 +209,8 @@ local function tickJob(job, now)
         job.phase = "descend"
         print(string.format("%scargo acquired vid=%s after %dms groundY=%.3f roofOff=%.2f startAlt=%.1f speed=%.2f %s",
             LOG, tostring(job.cargoVid), now - job.startedAt, oy, job.roofOff, job.startAlt, job.speed, authDesc(cargo)))
+        -- 이번 틱에 바로 상공으로 텔레포트되므로 지금이 "상공 출현" 순간이다
+        playDropSound(job, SOUND_CHUTE, cargo:getX(), cargo:getY(), "appear")
     end
 
     if job.phase == "descend" then
@@ -197,6 +226,7 @@ local function tickJob(job, now)
             end
             print(string.format("%sreleased vid=%s at alt=%.2f after %dms %s",
                 LOG, tostring(job.cargoVid), alt, now - job.t0, authDesc(cargo)))
+            job.prevY = oy
             placeRig(job, ox, oy, oz, now)
             return
         end
@@ -210,7 +240,34 @@ local function tickJob(job, now)
     if job.phase == "settle" then
         -- 차량은 물리로 떨어지는 중. 리그만 차량 위를 따라간다.
         placeRig(job, ox, oy, oz, now)
+
+        -- 접지 판정: 지면 높이까지 내려왔거나, 떨어지던 차량이 더 안 내려가면(바퀴 접지) 그 순간.
+        -- 해제 직후 틱은 물리가 아직 안 돌아 높이가 같을 수 있으므로 "한 번이라도 떨어진 뒤"에만 본다.
+        if not job.landSoundPlayed then
+            local height = oy - job.groundY
+            if job.prevY and oy < job.prevY - LAND_STOP_EPS then job.fell = true end
+            local reason = nil
+            if height <= LAND_CONTACT_HEIGHT then
+                reason = string.format("contact height=%.3f", height)
+            elseif job.fell and job.prevY and oy >= job.prevY - LAND_STOP_EPS then
+                reason = string.format("stopped falling height=%.3f", height)
+            end
+            if reason then
+                job.landSoundPlayed = true
+                print(string.format("%stouchdown vid=%s %dms after release (%s)",
+                    LOG, tostring(job.cargoVid), now - job.releaseAt, reason))
+                playDropSound(job, SOUND_LAND, cargo:getX(), cargo:getY(), reason)
+            end
+        end
+        job.prevY = oy
+
         if now - job.releaseAt >= job.settleMs then
+            if not job.landSoundPlayed then
+                job.landSoundPlayed = true
+                print(string.format("%sWARN touchdown not detected within %dms (height=%.3f), playing landing sound anyway",
+                    LOG, job.settleMs, oy - job.groundY))
+                playDropSound(job, SOUND_LAND, cargo:getX(), cargo:getY(), "settle timeout fallback")
+            end
             local height = oy - job.groundY
             print(string.format("%slanded vid=%s y=%.3f ground=%.3f height=%.3f rig=%s, reporting %s",
                 LOG, tostring(job.cargoVid), oy, job.groundY, height,
