@@ -282,7 +282,8 @@ end
 local CHUTE_RIG_SCRIPT     = "Base.PongDuChuteRig"
 local CHUTE_START_ALT      = 10.0   -- 지면 대비 시작 고도(물리 y). 2.46 = 1층 -> 약 4층
 local CHUTE_RELEASE_ALT    = 0.4    -- 이 고도까지 내려오면 고정을 풀고 물리 낙하로 착지
-local CHUTE_SPEED          = 2.4    -- 하강 속도(물리 y/초). 10.0 -> 0.4 약 4초
+-- 하강 시간은 샌드박스 VehicleDrop_ChuteDuration(초)으로 조절한다(수치 튜닝용, 추후 하드코딩 예정).
+-- 속도(물리 y/초) = (CHUTE_START_ALT - CHUTE_RELEASE_ALT) / 하강 시간.
 local CHUTE_SETTLE_MS      = 1200   -- 고정 해제 후 착지 안정 대기(ms)
 local CHUTE_STREAM_WAIT_MS = 15000  -- 클라가 차량을 받기까지 허용하는 대기(ms)
 local CHUTE_DEADLINE_PAD_MS = 8000  -- 서버 데드라인 여유(ms)
@@ -300,8 +301,13 @@ local CHUTE_RIG_OFFSETS = {
 -- 로드되지만 거기선 spawnVehicle이 호출되지 않으므로 항상 비어 있다.
 t3VehicleDrop._chuteJobs = t3VehicleDrop._chuteJobs or {}
 
+-- 샌드박스 값은 사용 시점에 읽는다(파일 로드 시 캐싱하면 런타임 변경이 안 먹는다).
+local function chuteDurationSec()
+    return SandboxVars.PongDu.VehicleDrop_ChuteDuration
+end
+
 local function chuteDescentMs()
-    return math.floor((CHUTE_START_ALT - CHUTE_RELEASE_ALT) / CHUTE_SPEED * 1000)
+    return math.floor(chuteDurationSec() * 1000)
 end
 
 local function findChuteRig(vid)
@@ -467,6 +473,8 @@ local function startChuteDrop(player, vehicle, x, y, z)
     end
 
     local now = getTimestampMs()
+    local durationSec = chuteDurationSec()
+    local speed = (CHUTE_START_ALT - CHUTE_RELEASE_ALT) / durationSec
     local job = {
         cargoVid    = vehicle:getId(),
         cargoScript = vehicle:getScriptName(),
@@ -502,7 +510,7 @@ local function startChuteDrop(player, vehicle, x, y, z)
         rigScript   = CHUTE_RIG_SCRIPT,
         startAlt    = CHUTE_START_ALT,
         releaseAlt  = CHUTE_RELEASE_ALT,
-        speed       = CHUTE_SPEED,
+        speed       = speed,
         settleMs    = CHUTE_SETTLE_MS,
         timeoutMs   = job.deadline - now,
     }
@@ -512,9 +520,9 @@ local function startChuteDrop(player, vehicle, x, y, z)
         t3VehicleDropChute.start(args)
     end
 
-    print(string.format("[t3VehicleDrop] Chute descent started cargo=%s(%s) rig=%s alt=%.1f speed=%.2f deadline=%dms",
+    print(string.format("[t3VehicleDrop] Chute descent started cargo=%s(%s) rig=%s alt=%.1f duration=%.2fs speed=%.3f deadline=%dms",
         tostring(job.cargoVid), tostring(job.cargoScript), tostring(job.rigVid),
-        CHUTE_START_ALT, CHUTE_SPEED, job.deadline - now))
+        CHUTE_START_ALT, durationSec, speed, job.deadline - now))
     return true
 end
 

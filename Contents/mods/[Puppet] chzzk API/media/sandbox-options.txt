@@ -238,6 +238,11 @@ option PongDu.VehicleDrop_MaxDistance = {
     page = PongDu_Buff, translation = PongDu_VehicleDrop_MaxDistance,
 }
 
+option PongDu.VehicleDrop_ChuteDuration = {
+    type = double, min = 0.50, max = 60, default = 4.00,
+    page = PongDu_Buff, translation = PongDu_VehicleDrop_ChuteDuration,
+}
+
 option PongDu.Divider_FoodSupply = {
     type = boolean, default = false,
     page = PongDu_Buff, translation = PongDu_Divider_FoodSupply,

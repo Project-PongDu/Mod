@@ -167,6 +167,8 @@ Sandbox_KO = {
 	Sandbox_PongDu_VehicleDrop_MinDistance_tooltip = "플레이어에서 이 거리(타일) 이상 떨어진 곳에 소환. 최대보다 크면 서로 바뀜.",
 	Sandbox_PongDu_VehicleDrop_MaxDistance = "차량 드랍 최대 거리",
 	Sandbox_PongDu_VehicleDrop_MaxDistance_tooltip = "이 거리(타일) 안에서 자리를 찾음. 못 찾으면 플레이어 발밑에 소환.",
+	Sandbox_PongDu_VehicleDrop_ChuteDuration = "차량 드랍 낙하 시간(초)",
+	Sandbox_PongDu_VehicleDrop_ChuteDuration_tooltip = "낙하산을 단 차량이 시작 고도(약 4층)에서 착지 직전까지 내려오는 시간. 소수점 입력 가능. 착지 후 안정 대기(약 1.2초)는 별도.",
 
 	Sandbox_PongDu_Divider_FoodSupply = "_________________ 식량 보급 _________________",
 	Sandbox_PongDu_Divider_FoodSupply_tooltip = "구분선 (설정 없음).",
