@@ -1073,7 +1073,7 @@ end
 --                     ranking, special pool = mutants + hostile hitmen)
 --                  never players, never tier 3. Targets are sticky (see
 --                  PickSelfThreat/PickEscortThreat), a retarget turns instantly,
---                  aims for AIM_TICKS and fires per FirePlan (full auto <= 30 tiles)
+--                  aims for AIM_TICKS and fires per FirePlan (full auto <= 15 tiles)
 -- ranged mode: while any gun has ammo the hitman never uses melee weapons;
 --              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)

@@ -182,5 +182,5 @@
 	weapons: primary = Base.Shrike
 	weapons: scope = Base.Scope_ATACR7_F1
 	weapons: melee = Base.Machete
-	ammo: primary = 6
+	ammo: primary = 10
 	bag: name = Base.Bag_WeaponBag

@@ -17,7 +17,7 @@
 --      - PickSelfThreat: 대원 10타일 안의 가장 가까운 적 (생존 최우선)
 --      - FindAttacker: 그 밖에서 대원을 쏘는 적대 히트맨
 --      - PickEscortThreat: 호위 대상에게 가장 위협적인 적
---      - FirePlan / AIM_TICKS: 30타일 이내 무조건 연발, 그 밖 5발 점사, 짧은 조준
+--      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준
 --  를 맡는다.
 --
 --  키는 onlineID 가 아니라 히트맨 id(HitmanUtils.GetZombieID)다. SP 에선 모든
@@ -268,7 +268,7 @@ local SELF_SWITCH_GAIN = 1.5   -- 새 적이 지금 표적보다 이만큼(타�
 
 -- 사격 제어 (HitmanUpdate.lua ManageCombat -> HitmanPrograms.Weapon.Aim/Shoot)
 _a.AIM_TICKS            = 8    -- 조준 시간(틱, 1/60초). 기본 히트맨은 18 + 거리*2.5 (최대 60)
-local FULLAUTO_MAX      = 30   -- 이 거리(타일) 이내: 무조건 연발
+local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발 (기본 히트맨 연사 기준 거리와 같음)
 local FULLAUTO_ROUNDS   = 10   -- 연발 1회 계획 탄수. 다 쏘면 표적을 다시 확인하고 이어서 쏜다
 local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
 local AUTO_INTERVAL     = 6    -- 연발 탄 간격(틱). 기본 히트맨 점사와 같은 값
