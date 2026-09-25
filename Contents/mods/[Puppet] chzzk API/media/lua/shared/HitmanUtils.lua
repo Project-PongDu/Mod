@@ -342,7 +342,37 @@ function HitmanUtils.AreEnemies(brain1, brain2)
     return false
 end
 
+-- PONGDU: attaches scopeType if the scope's MountOn list names this weapon
+local function mountProfileScope(weapon, scopeType)
+    local scopeItem = HitmanCompatibility.InstanceItem(scopeType)
+    if not scopeItem or not instanceof(scopeItem, "WeaponPart") then return false end
+    local fullType = weapon:getFullType()
+    local mountList = scopeItem:getMountOn()
+    for i=1, mountList:size() do
+        if mountList:get(i-1) == fullType then
+            weapon:attachWeaponPart(scopeItem)
+            return true
+        end
+    end
+    return false
+end
+
+local scopeMissWarned = {}   -- [scope|weapon] = true, one warning per pair
+
 function HitmanUtils.ModifyWeapon(weapon, brain)
+    -- PONGDU: a scope named in the hitman profile ("weapons: scope = ...",
+    -- e.g. the airborne trooper's Arsenal scope) wins over the sight-based
+    -- vanilla x2/x4/x8 below, which only mount on vanilla rifles. Its
+    -- MaxRangeModifier becomes the accuracy bonus in ZAShoot hit().
+    if brain.scope then
+        if mountProfileScope(weapon, brain.scope) then return weapon end
+        local key = brain.scope .. "|" .. weapon:getFullType()
+        if not scopeMissWarned[key] then
+            scopeMissWarned[key] = true
+            print("[HITMANS] WARN profile scope " .. brain.scope .. " does not fit " .. weapon:getFullType() .. ", using sight-based scope")
+        end
+    end
+
     local sight = brain.accuracyBoost
     local scopeItem
     if sight >= 1 and sight <= 2 then

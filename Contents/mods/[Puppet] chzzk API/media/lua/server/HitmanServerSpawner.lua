@@ -257,6 +257,13 @@ local function hitmanize(zombie, hitman, clan, args)
         end
     end
 
+    -- PONGDU: optional profile scope ("weapons: scope = ..."), mounted by
+    -- HitmanUtils.ModifyWeapon when it fits the gun
+    if hitman.weapons and hitman.weapons.scope then
+        brain.scope = hitman.weapons.scope
+        print("[HITMANS] id " .. tostring(id) .. " profile scope " .. tostring(brain.scope))
+    end
+
     brain.clothing = hitman.clothing or {}
     brain.tint = hitman.tint or {}
     brain.bag = hitman.bag

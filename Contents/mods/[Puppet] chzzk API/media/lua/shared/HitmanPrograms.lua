@@ -42,7 +42,9 @@ HitmanPrograms.Weapon.Switch = function(hitman, itemName)
     return tasks
 end
 
-HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot)
+-- fixedTime (optional): aim duration in ticks instead of the distance-based one
+-- (PONGDU: airborne troopers, features/airborne.lua AIM_TICKS)
+HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot, fixedTime)
     local tasks = {}
 
     local walkType = hitman:getVariableString("HitmanWalkType")
@@ -98,6 +100,7 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot)
         local aimTimeIndividual = brain.rnd and brain.rnd[2] or 0
         local time = aimTimeMin + aimTimeSurp +aimTimeIndividual
         if time > 60 then time = 60 end
+        if fixedTime then time = fixedTime end
 
         local eid = HitmanUtils.GetCharacterID(enemyCharacter)
         local task = {action="Aim", anim=anim, sound=sound, x=enemyCharacter:getX(), y=enemyCharacter:getY(), time=time, eid=eid}
@@ -106,7 +109,11 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot)
     return tasks
 end
 
-HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot)
+-- fire (optional): {bullets=n, interval=ticks, firstTime=ticks} replaces the
+-- default burst rule (auto weapons: 2~7 rounds under 15 tiles, else 1 round).
+-- Only honoured for weapons with an Auto fire mode.
+-- (PONGDU: airborne troopers, features/airborne.lua FirePlan)
+HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot, fire)
     local tasks = {}
 
     local brain = HitmanBrain.Get(hitman)
@@ -120,16 +127,27 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot)
         firingtime = firingtime / 2
     end
 
-    local bullets = 1
+    local hasAuto = false
     local modes = weaponItem:getFireModePossibilities()
     if modes then
         for i=0, modes:size()-1 do
-            local mode = modes:get(i)
-            if dist < 15 and mode == "Auto" then
-                bullets = 2 + ZombRand(6)
+            if modes:get(i) == "Auto" then
+                hasAuto = true
                 break
             end
         end
+    end
+
+    local bullets, interval = 1, 6
+    if fire and hasAuto then
+        bullets = fire.bullets or 1
+        interval = fire.interval or interval
+        if fire.firstTime then firingtime = fire.firstTime end
+        -- never plan more rounds than are loaded (no phantom shots past an empty mag)
+        local loaded = weapon.bulletsLeft or 0
+        if bullets > loaded then bullets = math.max(1, loaded) end
+    elseif hasAuto and dist < 15 then
+        bullets = 2 + ZombRand(6)
     end
 
     local anim
@@ -157,7 +175,7 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot)
     local task = {action="Shoot", anim=anim, time=firingtime, slot=slot, x=x, y=y, z=z, eid=eid}
     table.insert(tasks, task)
     for i=2, bullets do
-        local task = {action="Shoot", anim=anim, time=6, slot=slot, x=x, y=y, z=z, eid=eid}
+        local task = {action="Shoot", anim=anim, time=interval, slot=slot, x=x, y=y, z=z, eid=eid}
         table.insert(tasks, task)
     end
 

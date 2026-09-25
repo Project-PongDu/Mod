@@ -69,7 +69,8 @@ end
 
 local function GetRangedRangeCached(weaponType, brain)
     if not weaponType then return 0 end
-    local key = weaponType .. "|" .. GetScopeTier(brain)
+    -- profile scope (brain.scope, HitmanUtils.ModifyWeapon) changes the range too
+    local key = weaponType .. "|" .. GetScopeTier(brain) .. "|" .. tostring(brain and brain.scope or "")
     local cached = WeaponRangeCache.ranged[key]
     if cached then return cached end
 
@@ -1066,10 +1067,13 @@ end
 --                  2) players
 --                  3) hitmen of other clans / Bandits NPCs
 -- airborne troopers (program "Airborne", features/airborne.lua) instead:
---                  1) aggro'd zombies + hostile hitmen attacking the trooper
+--                  1) the closest enemy within 10 tiles of the trooper (own
+--                     survival first), then hostile hitmen shooting at it
 --                  2) the worst threat to the escorted player (drone-style
 --                     ranking, special pool = mutants + hostile hitmen)
---                  never players, never tier 3
+--                  never players, never tier 3. Targets are sticky (see
+--                  PickSelfThreat/PickEscortThreat), a retarget turns instantly,
+--                  aims for AIM_TICKS and fires per FirePlan (full auto <= 30 tiles)
 -- ranged mode: while any gun has ammo the hitman never uses melee weapons;
 --              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)
@@ -1128,10 +1132,16 @@ local function ManageCombat(hitman)
     local bwdDist = 2.8
 
     -- PRIORITY 1: ZOMBIES AGGRO'D ON THIS HITMAN
-    local threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
-    if not threat and isTrooper then
-        -- a hostile hitman shooting/hitting the trooper is a threat to itself too
-        threat, threatDist = PongDuAirborne.FindAttacker(hitman, brain)
+    -- (airborne trooper: every enemy within 10 tiles, closest first, then a
+    --  hostile hitman shooting at it from further away)
+    local threat, threatDist
+    if isTrooper then
+        threat, threatDist = PongDuAirborne.PickSelfThreat(hitman, brain)
+        if not threat then
+            threat, threatDist = PongDuAirborne.FindAttacker(hitman, brain)
+        end
+    else
+        threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
     end
     if threat then
         bestDist, enemyCharacter, tier = threatDist, threat, "threat"
@@ -1367,11 +1377,16 @@ local function ManageCombat(hitman)
     elseif firing then
         -- a zombie that came for the hitman overrides a shot lined up on someone else
         local eid = HitmanUtils.GetCharacterID(enemyCharacter)
-        if tier == "threat" then
+        -- troopers drop a shot lined up on another target at once: their target
+        -- only changes when it died or a clearly closer/more urgent enemy showed up
+        -- (the rest of a burst would otherwise go into a corpse)
+        if tier == "threat" or isTrooper then
             local cur = Hitman.GetTask(hitman)
             if cur and (cur.action == "Aim" or cur.action == "Shoot") and cur.eid ~= eid then
                 Hitman.ClearTasks(hitman)
-                print("[PongDu][Hitman] id=" .. tostring(brain.id) .. " threat preempts shot, eid=" .. tostring(eid))
+                if not isTrooper then
+                    print("[PongDu][Hitman] id=" .. tostring(brain.id) .. " threat preempts shot, eid=" .. tostring(eid))
+                end
             end
         end
 
@@ -1384,7 +1399,13 @@ local function ManageCombat(hitman)
                 local veh = enemyCharacter:getVehicle()
                 if veh then Hitman.Say(hitman, "CAR") end
 
-                if hitman:isFacingObject(enemyCharacter, 0.1) then
+                local facing = hitman:isFacingObject(enemyCharacter, 0.1)
+                if not facing and isTrooper then
+                    -- faceThisObject turns instantly: no idle frame on a retarget
+                    hitman:faceThisObject(enemyCharacter)
+                    facing = true
+                end
+                if facing then
                     local weapon = weapons[fireSlot]
                     if weapon.bulletsLeft > 0 then
                         if not weapon.racked then
@@ -1392,11 +1413,13 @@ local function ManageCombat(hitman)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
                         elseif not Hitman.IsAim(hitman) then
-                            local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot)
+                            local aimTime = isTrooper and PongDuAirborne.AIM_TICKS or nil
+                            local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot, aimTime)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
                         else
-                            local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, fireSlot)
+                            local fire = isTrooper and PongDuAirborne.FirePlan(bestDist) or nil
+                            local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, fireSlot, fire)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
                         end
 

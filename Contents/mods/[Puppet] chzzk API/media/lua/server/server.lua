@@ -1186,7 +1186,8 @@ local AIRBORNE_PATH_HALF        = 25       -- D 에서 A/B 까지 거리(타일)
 local AIRBORNE_END_PAD_MS       = 1500     -- B 도달 후 차량 제거까지 여유
 local AIRBORNE_OWN_BASE         = 100000   -- 클라 _helis 키. onlineID(short)와 겹치지 않게
 local AIRBORNE_PICK_RINGS       = { 6, 12, 20 }   -- 컬럼 탐색 반경(점점 넓힘)
-local AIRBORNE_PICK_TRIES       = 24
+local AIRBORNE_PICK_TRIES       = 32
+local AIRBORNE_SAFE_R           = 4        -- 착지 칸 반경 이 안(타일)에 좀비가 없는 컬럼을 고른다
 
 local _airborneJobs = {}
 local _airborneSeq  = 0
@@ -1206,18 +1207,57 @@ local function airborneColumnOk(cell, x, y)
     return true
 end
 
+-- 플레이어 주변 좀비 좌표 스냅샷 (공중에 뜬 좀비 공습 좀비 포함, 2D 거리)
+local function collectZombiesNear(cell, px, py, r)
+    local out, n = {}, 0
+    local zl = cell:getZombieList()
+    if not zl then return out, 0 end
+    local r2 = r * r
+    for i = 0, zl:size() - 1 do
+        local z = zl:get(i)
+        if z and not z:isDead() then
+            local zx, zy = z:getX(), z:getY()
+            local dx, dy = zx - px, zy - py
+            if dx * dx + dy * dy <= r2 then
+                n = n + 1
+                out[n] = { zx, zy }
+            end
+        end
+    end
+    return out, n
+end
+
+local function countZombiesAround(list, n, x, y, r2)
+    local c = 0
+    for i = 1, n do
+        local dx, dy = list[i][1] - x, list[i][2] - y
+        if dx * dx + dy * dy <= r2 then c = c + 1 end
+    end
+    return c
+end
+
+-- 반환: x, y, 반경 AIRBORNE_SAFE_R 안 좀비 수. 좀비 0 인 컬럼을 찾는 즉시
+-- 채택하고, 끝까지 못 찾으면 가장 한산한 컬럼을 쓴다.
 local function pickAirborneColumn(cell, player)
     local px, py = player:getX(), player:getY()
+    local maxRing = AIRBORNE_PICK_RINGS[#AIRBORNE_PICK_RINGS]
+    local zs, zn = collectZombiesNear(cell, px, py, maxRing + AIRBORNE_SAFE_R + 2)
+    local safeR2 = AIRBORNE_SAFE_R * AIRBORNE_SAFE_R
+    local bx, by, bc
     for _, rr in ipairs(AIRBORNE_PICK_RINGS) do
         for _ = 1, AIRBORNE_PICK_TRIES do
             local ang  = ZombRand(628) / 100.0
             local dist = 2 + (ZombRand(10000) / 10000.0) * (rr - 2)
             local x = math.floor(px + math.cos(ang) * dist)
             local y = math.floor(py + math.sin(ang) * dist)
-            if airborneColumnOk(cell, x, y) then return x, y end
+            if airborneColumnOk(cell, x, y) then
+                local cnt = countZombiesAround(zs, zn, x + 0.5, y + 0.5, safeR2)
+                if cnt == 0 then return x, y, 0 end
+                if not bc or cnt < bc then bx, by, bc = x, y, cnt end
+            end
         end
     end
-    return nil
+    return bx, by, bc
 end
 
 -- 야외 컬럼이 없을 때(실내/도심 한복판): 강하 없이 플레이어 옆 빈 칸에 바로 내린다.
@@ -1276,9 +1316,11 @@ DOServer["PongDuFireSupport"]["Airborne"] = function(player, data)
     local cell = getCell()
     if not cell then return end
 
-    local dx, dy = pickAirborneColumn(cell, player)
+    local dx, dy, crowd = pickAirborneColumn(cell, player)
     local dz = AIRBORNE_DROP_Z
     if dx then
+        print(string.format("[PongDu][Airborne] column %d,%d zombies within %d tiles=%d",
+            dx, dy, AIRBORNE_SAFE_R, crowd or -1))
         -- 공중 스퀘어: 서버 여기서 생성 + 클라는 좀비 레인 Prep 수신부가 생성한다
         -- (클라에 스퀘어가 없으면 서버 좀비가 클라에 아예 안 만들어진다 --
         --  PongDuRainServer.lua 머리 주석 참조). 드롭까지 1.5초라 여유가 있다.
