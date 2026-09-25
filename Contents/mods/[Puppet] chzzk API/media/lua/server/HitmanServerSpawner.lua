@@ -240,7 +240,19 @@ local function hitmanize(zombie, hitman, clan, args)
             brain.weapons[slot].bulletsLeft = 0
             brain.weapons[slot].magCount = 0
             if hitman.weapons[slot] and hitman.ammo[slot] then
-                brain.weapons[slot] = HitmanWeapons.Make(hitman.weapons[slot], hitman.ammo[slot])
+                -- Make() returns nil when the item script is missing (e.g. a mod gun
+                -- whose mod is not loaded). Assigning nil here used to break every
+                -- later weapons[slot].xxx access, so keep the empty slot instead.
+                local made = HitmanWeapons.Make(hitman.weapons[slot], hitman.ammo[slot])
+                if not made and slot == "primary" and args.fallbackPrimary then
+                    print("[HITMANS] weapon " .. tostring(hitman.weapons[slot]) .. " unavailable, using fallback " .. tostring(args.fallbackPrimary))
+                    made = HitmanWeapons.Make(args.fallbackPrimary, hitman.ammo[slot])
+                end
+                if made then
+                    brain.weapons[slot] = made
+                else
+                    print("[HITMANS] WARN weapon " .. tostring(hitman.weapons[slot]) .. " unavailable, " .. slot .. " slot left empty")
+                end
             end
         end
     end
@@ -498,5 +510,50 @@ HitmanServer.Hitman_Spawner.Clan = function(player, args)
 end
 
 -- used for dedicated spawning of an individual by mods
+
+-- PONGDU: one hitman of a clan at an exact square (fire_support/airborne drop).
+-- Unlike Clan/Type this skips spawn point generation, so z may be an air square
+-- the caller prepared (createNewGridSquare). Returns the spawned zombie or nil.
+--   fallbackPrimary: used when the profile's primary gun script is missing
+HitmanServer.SpawnAt = function(player, cid, x, y, z, program, fallbackPrimary)
+    local clan = HitmanCustom.ClanGet(cid)
+    if not clan then
+        print("[HITMANS] SpawnAt: unknown clan " .. tostring(cid))
+        return nil
+    end
+
+    local keys = {}
+    local options = HitmanCustom.GetFromClan(cid)
+    for bid in pairs(options) do table.insert(keys, bid) end
+    if #keys == 0 then
+        print("[HITMANS] SpawnAt: clan " .. tostring(cid) .. " has no hitman profile")
+        return nil
+    end
+    local bid = keys[ZombRand(#keys) + 1]
+    local hitman = options[bid]
+    hitman.general.bid = bid
+
+    local femaleChance = hitman.general.female and 100 or 0
+    local outfit = "Naked" .. (1 + ZombRand(101))
+    local zombieList = HitmanCompatibility.AddZombiesInOutfit(x, y, z, outfit, femaleChance,
+                                                              false, false, false,
+                                                              false, false, false,
+                                                              1)
+    if not zombieList or zombieList:size() == 0 then
+        print("[HITMANS] SpawnAt: addZombiesInOutfit returned nothing at " .. x .. "," .. y .. "," .. z)
+        return nil
+    end
+    local zombie = zombieList:get(0)
+
+    local args = {
+        pid = HitmanUtils.GetCharacterID(player),
+        cid = cid,
+        program = program or "Hitman",
+        fallbackPrimary = fallbackPrimary,
+    }
+    hitmanize(zombie, hitman, clan, args)
+    TransmitHitmanModData()
+    return zombie
+end
 
 Events.OnClientCommand.Add(onClientCommand)

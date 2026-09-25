@@ -155,3 +155,31 @@
 	weapons: melee = Base.HuntingKnife
 	ammo: primary = 2
 	bag: name = Base.Bag_WeaponBag
+
+[89ed8cb1-d28b-4374-9258-f5b9c49d4663]
+	general: modid = t3chzzkDonation
+	general: cid = a5237dc6-546a-4e1f-a3e4-c038ce485465
+	general: name = Airborne_Trooper
+	general: female = false
+	general: skin = 1
+	general: hairType = 6
+	general: beardType = 2
+	general: hairColor = 12
+	general: health = 10
+	general: strength = 10
+	general: endurance = 10
+	general: sight = 10
+	general: exp1 = 9
+	general: exp2 = 12
+	general: exp3 = 18
+	clothing: Eyes = Base.Glasses_Eyepatch_Left
+	clothing: Hat = Base.Hat_BeretArmy
+	clothing: Hands = Base.Gloves_LeatherGlovesBlack
+	clothing: Boilersuit = Base.Boilersuit
+	clothing: TorsoExtraVest = Base.Vest_Hunting_Grey
+	clothing: Shoes = Base.Shoes_ArmyBoots
+	tint: Boilersuit = 3355443
+	weapons: primary = Base.Shrike
+	weapons: melee = Base.Machete
+	ammo: primary = 6
+	bag: name = Base.Bag_WeaponBag

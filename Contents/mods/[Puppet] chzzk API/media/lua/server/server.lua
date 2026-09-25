@@ -509,7 +509,8 @@ local function pickSniperTarget(job)
     local best, bd, bm = nil, nil, -1
     for i = 0, zl:size() - 1 do
         local z = zl:get(i)
-        if z and not z:isDead() and not job.shotZids[z:getOnlineID()] then
+        if z and not z:isDead() and not job.shotZids[z:getOnlineID()]
+           and not HitmanUtils.IsFriendlyHitman(z) then
             local dx, dy = z:getX() - cx, z:getY() - cy
             local d2 = dx * dx + dy * dy
             if d2 <= r2 then
@@ -552,7 +553,7 @@ local function collectPierced(job, mainZid, tx, ty)
             local zid = z:getOnlineID()
             -- 주 표적과 이미 사살된 놈은 제외. 맞고 살아남은 놈은 shotZids에
             -- 넣지 않으므로 다음 탄에 다시 관통당할 수 있다(아직 살아있으니까).
-            if zid ~= mainZid and not job.shotZids[zid] then
+            if zid ~= mainZid and not job.shotZids[zid] and not HitmanUtils.IsFriendlyHitman(z) then
                 local wx, wy = z:getX() - job.ox, z:getY() - job.oy
                 local t = (wx * vx + wy * vy) / len2
                 -- t 하한/상한으로 저격수 뒤쪽과 주 표적 너머를 제외한다.
@@ -1157,6 +1158,192 @@ local function processHeliJobs()
     end
 end
 addServerTick(processHeliJobs)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  공수부대 (fire_support/airborne)
+--
+--  화력지원 헬기 실차량(Base.PongDuHeli)을 재활용한 3초 고공 통과 + 경로 한가운데
+--  (1.5초)에서 공수부대원 히트맨 1명 투하.
+--   ① Airborne 수신: 플레이어 근처 야외 컬럼 D 선정 -> 공중 스퀘어 생성
+--      (서버 여기 + 클라는 좀비 레인 Prep 명령 재사용) -> D를 중점으로 하는
+--      직선 A->B 헬기 실차량 스폰 + HeliStart(passive) 브로드캐스트.
+--   ② 헬기는 파일럿(대상 플레이어) 클라가 경로 보간으로 옮긴다. passive
+--      인스턴스라 사격/타이머/재스폰 요청이 없다(firesupport.lua heliUpsert).
+--   ③ dropAt(1.5초): D 의 z=AIRBORNE_DROP_Z 에 히트맨 스폰(HitmanServer.SpawnAt)
+--      -> AirborneDrop(hid) 브로드캐스트 -> 클라 features/airborne.lua 가
+--      낙하산 강하/착지 모션을 처리하고, 착지가 끝나야 히트맨 AI 가 풀린다.
+--   ④ endAt + 여유: 헬기 제거 + HeliStop.
+--  대원은 우호 클랜(clans.txt PongDu_Airborne, friendly=true)이라 플레이어를
+--  노리지 않고, 플레이어 공격은 shared/PongDuAirborneGuard.lua 가 무효화한다.
+--  영구 체류 -- 죽을 때만 사라지고, 호위 대상이 없으면 최근접 플레이어를 호위한다.
+-- ═══════════════════════════════════════════════════════════════════════════
+local AIRBORNE_CID              = "a5237dc6-546a-4e1f-a3e4-c038ce485465"  -- clans.txt PongDu_Airborne
+local AIRBORNE_PROGRAM          = "Airborne"          -- shared/ZombiePrograms/ZPAirborne.lua
+local AIRBORNE_FALLBACK_PRIMARY = "Base.AssaultRifle" -- Arsenal(Base.Shrike) 미설치 시
+local AIRBORNE_DROP_Z           = 7        -- 좀비 레인과 같은 엔진 상한 (IsoCell.MaxHeight=8)
+local AIRBORNE_FLY_MS           = 3000     -- 헬기 A -> B 통과 시간
+local AIRBORNE_PATH_HALF        = 25       -- D 에서 A/B 까지 거리(타일). 스트리밍 거리 안쪽
+local AIRBORNE_END_PAD_MS       = 1500     -- B 도달 후 차량 제거까지 여유
+local AIRBORNE_OWN_BASE         = 100000   -- 클라 _helis 키. onlineID(short)와 겹치지 않게
+local AIRBORNE_PICK_RINGS       = { 6, 12, 20 }   -- 컬럼 탐색 반경(점점 넓힘)
+local AIRBORNE_PICK_TRIES       = 24
+
+local _airborneJobs = {}
+local _airborneSeq  = 0
+
+-- 강하 가능한 컬럼: 야외 지상(z=0), 건물/물 아님, 비어 있음, 위층(1..DROP_Z)에 바닥
+-- 없음. PongDuRainServer.lua isRainColumn 과 같은 기준 + 착지 칸 비어있음(isFree).
+local function airborneColumnOk(cell, x, y)
+    local sq = cell:getGridSquare(x, y, 0)
+    if not sq or not sq:isOutside() or sq:getBuilding() ~= nil
+        or sq:Is(IsoFlagType.water) or not sq:isFree(false) then
+        return false
+    end
+    for zz = 1, AIRBORNE_DROP_Z do
+        local up = cell:getGridSquare(x, y, zz)
+        if up and up:getFloor() ~= nil then return false end
+    end
+    return true
+end
+
+local function pickAirborneColumn(cell, player)
+    local px, py = player:getX(), player:getY()
+    for _, rr in ipairs(AIRBORNE_PICK_RINGS) do
+        for _ = 1, AIRBORNE_PICK_TRIES do
+            local ang  = ZombRand(628) / 100.0
+            local dist = 2 + (ZombRand(10000) / 10000.0) * (rr - 2)
+            local x = math.floor(px + math.cos(ang) * dist)
+            local y = math.floor(py + math.sin(ang) * dist)
+            if airborneColumnOk(cell, x, y) then return x, y end
+        end
+    end
+    return nil
+end
+
+-- 야외 컬럼이 없을 때(실내/도심 한복판): 강하 없이 플레이어 옆 빈 칸에 바로 내린다.
+local function pickGroundSquare(cell, player)
+    local px, py, pz = math.floor(player:getX()), math.floor(player:getY()), math.floor(player:getZ())
+    for dx = -1, 1 do
+        for dy = -1, 1 do
+            if dx ~= 0 or dy ~= 0 then
+                local sq = cell:getGridSquare(px + dx, py + dy, pz)
+                if sq and sq:isFree(false) then return px + dx, py + dy, pz end
+            end
+        end
+    end
+    return px, py, pz
+end
+
+-- 클라 헬기 인스턴스 생성/갱신. heliBroadcastStart 와 같은 형식에 passive=1.
+local function airborneBroadcastHeli(job)
+    local now = getTimestampMs()
+    local payload = {
+        remain = job.endAt - now,
+        ax = job.ax, ay = job.ay, bx = job.bx, by = job.by, oz = job.oz,
+        elapsed = now - job.startAt, total = job.endAt - job.startAt,
+        vid = job.vid, pilot = job.pilot, own = job.own,
+        passive = 1,
+    }
+    -- 대상 없는 브로드캐스트: MP 는 전 클라, SP 는 로컬 클라로 간다
+    -- (getOnlinePlayers() 는 SP 에서 nil 이라 루프 방식은 SP 에서 못 쓴다)
+    sendServerCommand("PongDuFireSupport", "HeliStart", payload)
+end
+
+local function airborneDrop(job)
+    if not (HitmanServer and HitmanServer.SpawnAt) then
+        print("[PongDu][Airborne] drop FAILED: HitmanServer.SpawnAt missing")
+        return
+    end
+    local ok, zed = pcall(HitmanServer.SpawnAt, job.player, AIRBORNE_CID,
+        job.dx, job.dy, job.dz, AIRBORNE_PROGRAM, AIRBORNE_FALLBACK_PRIMARY)
+    if not ok or not zed then
+        print("[PongDu][Airborne] drop FAILED at " .. job.dx .. "," .. job.dy .. "," .. job.dz
+            .. " err=" .. tostring(zed))
+        return
+    end
+    local hid = HitmanUtils.GetZombieID(zed)
+    -- 전 클라: 강하/착지 처리 대상 등록 (hid 키 -- SP 는 onlineID 가 전부 -1)
+    sendServerCommand("PongDuFireSupport", "AirborneDrop", {
+        hid = hid, x = job.dx, y = job.dy, z = job.dz, air = job.dz > 0 and 1 or 0,
+    })
+    print(string.format("[PongDu][Airborne] trooper dropped hid=%s zid=%s at %d,%d,%d escort=%s sender=%s",
+        tostring(hid), tostring(zed:getOnlineID()), job.dx, job.dy, job.dz,
+        tostring(job.pid), tostring(job.sender)))
+end
+
+DOServer["PongDuFireSupport"]["Airborne"] = function(player, data)
+    local sender = data and data["sender"] or ""
+    local cell = getCell()
+    if not cell then return end
+
+    local dx, dy = pickAirborneColumn(cell, player)
+    local dz = AIRBORNE_DROP_Z
+    if dx then
+        -- 공중 스퀘어: 서버 여기서 생성 + 클라는 좀비 레인 Prep 수신부가 생성한다
+        -- (클라에 스퀘어가 없으면 서버 좀비가 클라에 아예 안 만들어진다 --
+        --  PongDuRainServer.lua 머리 주석 참조). 드롭까지 1.5초라 여유가 있다.
+        local created = 0
+        for zz = 1, dz do
+            if not cell:getGridSquare(dx, dy, zz) then
+                cell:createNewGridSquare(dx, dy, zz, true)
+                created = created + 1
+            end
+        end
+        sendServerCommand("PongDuRain", "Prep", { ["cols"] = { { ["x"] = dx, ["y"] = dy } }, ["z"] = dz })
+        print(string.format("[PongDu][Airborne] column %d,%d squares created=%d", dx, dy, created))
+    else
+        dx, dy, dz = pickGroundSquare(cell, player)
+        print(string.format("[PongDu][Airborne] no outdoor column near player -- ground drop at %d,%d,%d",
+            dx, dy, dz))
+    end
+
+    -- 경로: D 를 중점으로 하는 무작위 방향 직선. 1.5초에 정확히 D 위를 지난다.
+    local ang = ZombRand(628) / 100.0
+    local ux, uy = math.cos(ang), math.sin(ang)
+    local cx, cy = dx + 0.5, dy + 0.5
+    local now = getTimestampMs()
+    _airborneSeq = _airborneSeq + 1
+    local job = {
+        player = player, pid = player:getOnlineID(), sender = sender,
+        own = AIRBORNE_OWN_BASE + _airborneSeq,
+        ax = cx - ux * AIRBORNE_PATH_HALF, ay = cy - uy * AIRBORNE_PATH_HALF,
+        bx = cx + ux * AIRBORNE_PATH_HALF, by = cy + uy * AIRBORNE_PATH_HALF,
+        oz = player:getZ(),
+        dx = dx, dy = dy, dz = dz,
+        startAt = now, dropAt = now + AIRBORNE_FLY_MS / 2, endAt = now + AIRBORNE_FLY_MS,
+        dropped = false,
+    }
+    heliSpawnVehicle(job)   -- 실패해도 투하는 진행 (클라는 로터음만 경로 보간으로 낸다)
+    _airborneJobs[#_airborneJobs + 1] = job
+    airborneBroadcastHeli(job)
+    print(string.format("[PongDu][Airborne] job queued own=%d vid=%s A=%d,%d B=%d,%d drop=%d,%d,%d sender=%s",
+        job.own, tostring(job.vid), math.floor(job.ax), math.floor(job.ay),
+        math.floor(job.bx), math.floor(job.by), dx, dy, dz, tostring(sender)))
+end
+
+local function processAirborneJobs()
+    if #_airborneJobs == 0 then return end
+    local now = getTimestampMs()
+    for i = #_airborneJobs, 1, -1 do
+        local job = _airborneJobs[i]
+        if not job.dropped and now >= job.dropAt then
+            job.dropped = true
+            local lost = fsOwnerLost(job)
+            if lost then
+                print("[PongDu][Airborne] drop skipped (" .. tostring(lost) .. ") own=" .. job.own)
+            else
+                airborneDrop(job)
+            end
+        end
+        if now >= job.endAt + AIRBORNE_END_PAD_MS then
+            heliRemoveVehicle(job, "airborne flyby done")
+            table.remove(_airborneJobs, i)
+            sendServerCommand("PongDuFireSupport", "HeliStop", { own = job.own })
+            print("[PongDu][Airborne] job finished own=" .. job.own)
+        end
+    end
+end
+addServerTick(processAirborneJobs)
 
 DOServer["PongDuBombard"]["Kaboom"] = function(player, data)
     local cx = player:getX()
@@ -2124,6 +2311,9 @@ local function isTrackedVehicle(vid)
     end
     for i = 1, #_droneJobs do
         if _droneJobs[i].vid == vid then return true end
+    end
+    for i = 1, #_airborneJobs do
+        if _airborneJobs[i].vid == vid then return true end
     end
     return false
 end

@@ -95,7 +95,9 @@ HitmanPlayer.CheckFriendlyFire = function(hitman, attacker)
     local cache, witnesses = HitmanZombie.Cache, HitmanZombie.CacheLightB
 
     for _, witness in pairs(witnesses) do
-        if not (witness.brain.hostile or witness.brain.hostileP) then
+        -- PONGDU: airborne troopers never turn on players (fire_support/airborne)
+        local isTrooper = witness.brain.program and witness.brain.program.name == "Airborne"
+        if not isTrooper and not (witness.brain.hostile or witness.brain.hostileP) then
             local dx, dy = witness.x - attackerX, witness.y - attackerY
             if dx * dx + dy * dy < 144 then -- squared distance check (avoids sqrt call)
                 local friendly = cache[witness.id]

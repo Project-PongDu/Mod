@@ -15,7 +15,10 @@ local timerText = require("utils/timerText")
 --    저격 (sniper)     : 즉시 1회. 반경 넓음 / 킬 수 적음.
 --    드론 (drone)      : 지속(짧음). 반경 좁음 / 짧은 간격.
 --    헬기 (helicopter) : 지속(김). 반경 넓음 / 로터음 루프 + 기관총.
---    공수 (airborne)   : 히트맨 기반. 강하한 병력이 좀비를 사격.
+--    공수 (airborne)   : 헬기가 3초간 고공 통과하며 공수부대원(우호 히트맨) 1명 투하.
+--                        대원은 영구 체류하며 호위 대상 주변을 배회, 위협을 사격한다.
+--                        (server.lua 공수부대 절, features/airborne.lua,
+--                         ZombiePrograms/ZPAirborne.lua)
 --
 --  ── 구현 시 지켜야 할 제약 (합의된 설계) ──────────────────────────────────
 --  1. 좀비 킬은 반드시 해당 좀비의 소유 클라이언트에서 실행할 것.
@@ -160,11 +163,12 @@ runners.helicopter = function(player, sender)
     })
 end
 
--- 공수: 히트맨 개체를 우호 진영으로 강하시켜 좀비를 사격.
+-- 공수: 헬기 고공 통과(3초) + 한가운데서 공수부대원 1명 투하. 컬럼 선정, 헬기
+-- 실차량, 대원 스폰 타이밍은 서버 job(server.lua 공수부대 절)이 맡는다.
+-- 강하/착지는 features/airborne.lua, 대원 AI 는 ZPAirborne + ManageCombat.
 runners.airborne = function(player, sender)
-    print("[PongDu] fire_support/airborne: not implemented yet")
-    -- TODO: 히트맨 타겟팅을 플레이어 -> 최근접 좀비로 교체,
-    --       좀비의 히트맨 인식 여부 / MP 소유권 / duration 후 소멸 처리 확인
+    print("[PongDu] fire_support/airborne request sender=" .. tostring(sender or ""))
+    sendClientCommand("PongDuFireSupport", "Airborne", { sender = sender or "" })
 end
 
 -- a(player, sender): 화력 지원 발동. 4종 중 1종을 뽑아 실행한다. [public name: .a]
@@ -894,6 +898,9 @@ end
 local HELI_FLY_ALT = 8.0   -- 물리 y 고도. iso 층수 환산 = y/2.46 (BaseVehicle.java:1456),
                            -- 8.0 ≈ 3.25층. 초기값 3.0(BH 조종 상한)은 1.2층이라 너무 낮았다.
 local HELI_YAW_OFF = 0     -- fbx 전방축 보정(도). 기수 방향이 틀어져 보이면 여기로 교정.
+-- 공수부대 수송 헬기(passive 인스턴스) 고도. 화력지원 헬기의 3배.
+-- 기본 줌에선 화면 위로 벗어나는 높이라 주로 그림자와 로터음으로 체감된다.
+local HELI_AIRBORNE_ALT = HELI_FLY_ALT * 3
 
 -- ── 실차량 미도착/유실 복구 ────────────────────────────────────────────────
 -- [증상] 로터음·예광탄·타이머는 정상인데 기체와 그림자만 안 보인다.
@@ -953,7 +960,7 @@ local function heliFieldNum(obj, name)
     return nil
 end
 
-local function heliMoveTo(v, wx, wy)
+local function heliMoveTo(v, wx, wy, alt)
     if not _wFieldNum then _wFieldNum = heliFieldNum(v, "tempTransform") end
     if not _wFieldNum then error("tempTransform field not found") end
     local tmp    = getClassFieldVal(v, getClassField(v, _wFieldNum))
@@ -962,7 +969,7 @@ local function heliMoveTo(v, wx, wy)
     -- 물리축 매핑: origin.x = iso x(월드심 오프셋 좌표계), origin.y = 고도,
     -- origin.z = iso y. 오프셋 값을 몰라도 되도록 iso 좌표 "델타"를 더한다
     -- (BH moveVehicle 방식). 고도만 절대값으로 박아 중력 드리프트를 차단.
-    origin:set(origin:x() + (wx - v:getX()), HELI_FLY_ALT, origin:z() + (wy - v:getY()))
+    origin:set(origin:x() + (wx - v:getX()), alt or HELI_FLY_ALT, origin:z() + (wy - v:getY()))
     v:setWorldTransform(tr)
 end
 
@@ -1022,7 +1029,10 @@ end
 local function heliPilotTick(h)
     local v = findHeliVehicle(h)
     if not v then
-        heliLostTick(h)
+        -- passive(공수 수송) 헬기는 3초짜리라 재스폰 요청 없이 로터음만 낸다.
+        -- HeliRespawn 은 서버가 플레이어 기준으로 화력지원 job 을 찾으므로
+        -- 보내면 엉뚱한 헬기를 재스폰시킨다.
+        if not h.passive then heliLostTick(h) end
         return
     end
     if h.lostAt then
@@ -1038,7 +1048,7 @@ local function heliPilotTick(h)
         h.yawSet = true
         heliSetYaw(h, v)
     end
-    local ok, err = pcall(function() heliMoveTo(v, wx, wy) end)
+    local ok, err = pcall(function() heliMoveTo(v, wx, wy, h.alt) end)
     if not ok and not h.moveErr then
         h.moveErr = true
         print("[PongDu] fire_support/heli: move FAILED own=" .. tostring(h.own)
@@ -1257,6 +1267,12 @@ local function heliUpsert(args)
     -- 실차량 연동: 서버가 스폰한 VehicleID와 물리 권한 대상(pilot).
     -- SP에선 양쪽 onlineID가 모두 -1이라 자동으로 파일럿이 된다.
     if args.vid then h.vid = tonumber(args.vid) end
+    -- passive: 공수부대 수송 헬기. 사격/타이머 없음(own 키가 onlineID 범위 밖이라
+    -- 사격 틱/타이머 게이트(own == me)에 자동으로 안 걸린다), 고도만 다르다.
+    if tonumber(args.passive) == 1 then
+        h.passive = true
+        h.alt = HELI_AIRBORNE_ALT
+    end
     local me = myOnlineID()
     h.amPilot = (me ~= nil) and (args.pilot ~= nil)
         and (tonumber(args.pilot) == me)
@@ -1854,10 +1870,13 @@ local function heliScan(cx, cy, r)
         if z and not z:isDead() then
             local dx, dy = z:getX() - cx, z:getY() - cy
             local d2 = dx * dx + dy * dy
-            if d2 <= re2 then near = true end
-            if d2 <= r2 then
-                n = n + 1
-                pool[n] = z
+            -- 우호 히트맨(공수부대원)은 표적도, 교전 유지 신호도 아니다 (r <= re)
+            if d2 <= re2 and not HitmanUtils.IsFriendlyHitman(z) then
+                near = true
+                if d2 <= r2 then
+                    n = n + 1
+                    pool[n] = z
+                end
             end
         end
     end
@@ -2018,7 +2037,8 @@ local function dronePickTarget(d, cx, cy, now)
         if z and not z:isDead() then
             local dx, dy = z:getX() - cx, z:getY() - cy
             local d2 = dx * dx + dy * dy
-            if d2 <= dr2 then
+            -- 우호 히트맨(공수부대원)은 쏘지 않는다
+            if d2 <= dr2 and not HitmanUtils.IsFriendlyHitman(z) then
                 local remote = z:isRemoteZombie()
                 local st = droneZombieState(z, remote)
                 local h = hold[z]   -- 객체 키: SP 는 onlineID 가 전부 -1 이라 id 키면 충돌

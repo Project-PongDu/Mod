@@ -1065,6 +1065,11 @@ end
 -- target priority: 1) zombies aggro'd on the hitman within THREAT_DIST
 --                  2) players
 --                  3) hitmen of other clans / Bandits NPCs
+-- airborne troopers (program "Airborne", features/airborne.lua) instead:
+--                  1) aggro'd zombies + hostile hitmen attacking the trooper
+--                  2) the worst threat to the escorted player (drone-style
+--                     ranking, special pool = mutants + hostile hitmen)
+--                  never players, never tier 3
 -- ranged mode: while any gun has ammo the hitman never uses melee weapons;
 --              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)
@@ -1082,6 +1087,7 @@ local function ManageCombat(hitman)
     local isNeedSecondary = HitmanBrain.NeedResupplySlot(brain, "secondary")
     local isBareHands = HitmanBrain.IsBareHands(brain)
     local isOutside = hitman:getSquare():isOutside()
+    local isTrooper = PongDuAirborne ~= nil and brain.program ~= nil and brain.program.name == "Airborne"
 
     local bestDist = 40
     local enemyCharacter, switchTo, fireSlot
@@ -1109,7 +1115,8 @@ local function ManageCombat(hitman)
         end
 
         -- RESUPPLY FLAG
-        if isBareHands or isNeedPrimary or isNeedSecondary then
+        -- airborne troopers never leave their escort to go looting
+        if (isBareHands or isNeedPrimary or isNeedSecondary) and not isTrooper then
             resupply = true
         end
     end
@@ -1122,12 +1129,26 @@ local function ManageCombat(hitman)
 
     -- PRIORITY 1: ZOMBIES AGGRO'D ON THIS HITMAN
     local threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
+    if not threat and isTrooper then
+        -- a hostile hitman shooting/hitting the trooper is a threat to itself too
+        threat, threatDist = PongDuAirborne.FindAttacker(hitman, brain)
+    end
     if threat then
         bestDist, enemyCharacter, tier = threatDist, threat, "threat"
     end
 
+    -- PRIORITY 2 (airborne trooper): WORST THREAT TO THE ESCORTED PLAYER
+    if not enemyCharacter and isTrooper then
+        local escort = HitmanUtils.GetTrackedPlayer(hitman)
+        local t = escort and PongDuAirborne.PickEscortThreat(hitman, brain, escort)
+        if t then
+            local tx, ty = t:getX(), t:getY()
+            bestDist = math.sqrt(((zx - tx) * (zx - tx)) + ((zy - ty) * (zy - ty)))
+            enemyCharacter, tier = t, "escort"
+        end
+
     -- PRIORITY 2: PLAYERS
-    if not enemyCharacter and (brain.hostile or brain.hostileP) then
+    elseif not enemyCharacter and (brain.hostile or brain.hostileP) then
         local playerList = HitmanPlayer.GetPlayers()
 
         for i=0, playerList:size()-1 do
@@ -1149,7 +1170,7 @@ local function ManageCombat(hitman)
     -- Plain zombies are never picked here: hitmen hunt players and only kill the
     -- zombies that come for them (priority 1). The loop also counts nearby
     -- enemies/friendlies for the backward swing and the B42 backpedal.
-    local scanTargets = not enemyCharacter
+    local scanTargets = not enemyCharacter and not isTrooper
     local cache, potentialEnemyList = HitmanZombie.Cache, HitmanZombie.CacheLight
     for id, light in pairs(potentialEnemyList) do
 
@@ -1226,7 +1247,11 @@ local function ManageCombat(hitman)
                     shove = true
                 else
                     local maxRangeGun = GetRangedRangeCached(gunName, brain)
-                    if bestDist < maxRangeGun and IsShotClear(hitman, enemyCharacter) then
+                    -- troopers skip IsShotClear: their rounds cannot hurt players or
+                    -- friendly hitmen (ZAShoot hit() filters both), and the escort
+                    -- stands right next to the most urgent targets, so the 5x5
+                    -- friendly check would veto exactly the shots that matter
+                    if bestDist < maxRangeGun and (isTrooper or IsShotClear(hitman, enemyCharacter)) then
                         firing = true
                         fireSlot = gunSlot
                     end
@@ -1259,6 +1284,16 @@ local function ManageCombat(hitman)
                     switchTo = weapons.melee
                 end
             end
+        end
+    end
+
+    -- airborne trooper out of ammo: tell ZPAirborne where to run (melee reach)
+    if isTrooper then
+        if enemyCharacter and not gunSlot and not (combat or shove or switch) then
+            brain.abChase = { x = enemyCharacter:getX(), y = enemyCharacter:getY(),
+                              z = enemyCharacter:getZ(), t = getTimestampMs() }
+        else
+            brain.abChase = nil
         end
     end
 
@@ -1967,6 +2002,10 @@ local function OnHitmanUpdate(zombie)
     -- ACTION STATE TWEAKS
     local continue = ManageActionState(hitman)
     if not continue then return end
+
+    -- PONGDU: airborne trooper still descending or playing the landing motion;
+    -- features/airborne.lua drives it until it is on its feet
+    if PongDuAirborne and PongDuAirborne.HoldsAI(hitman) then return end
     
     -- COMPANION SOCIAL DISTANCE HACK
     ManageSocialDistance(hitman)
@@ -1992,6 +2031,10 @@ end
 local function OnHitZombie(zombie, attacker, bodyPartType, handWeapon)
     if not zombie:getVariableBoolean("Hitman") then return end
 
+    -- PONGDU: players cannot hurt airborne troopers (damage is voided by
+    -- shared/PongDuAirborneGuard.lua) -- keep the trooper's tasks untouched too
+    if instanceof(attacker, "IsoPlayer") and HitmanUtils.IsAirborneTrooper(zombie) then return end
+
     local hitman = zombie
 
     Hitman.AddVisualDamage(hitman, handWeapon)
@@ -2013,7 +2056,10 @@ local function OnZombieDead(zombie)
     if zombie:getVariableBoolean("Hitman") then 
 
         local brain = HitmanBrain.Get(zombie)
-        if brain then ClearCombatState(brain) end
+        if brain then
+            ClearCombatState(brain)
+            if PongDuAirborne then PongDuAirborne.Forget(brain) end
+        end
         local inventory = zombie:getInventory()
         local items = ArrayList.new()
 

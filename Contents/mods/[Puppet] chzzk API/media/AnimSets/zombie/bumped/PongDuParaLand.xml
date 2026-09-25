@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 공수부대원 착지 모션 (client/features/airborne.lua startLanding).
+     Paraglider 모드(SportXAI) ParagliderLand.xml 과 같은 바닐라 클립 Bob_SprintToStop:
+     달리던 기세로 몇 걸음 나가다 멈춘다. deferredBoneAxis Y 라 소유 클라에서 루트 모션만큼
+     실제로 앞으로 이동한다(IsoGameCharacter.doDeferredMovement). 끝나면 BumpAnimFinished
+     로 bumped 상태를 빠져나가고, airborne.lua 가 그걸 보고 히트맨 AI 를 푼다. -->
+<animNode>
+	<m_Name>PongDuParaLand</m_Name>
+	<m_AnimName>Bob_SprintToStop</m_AnimName>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_SyncTrackingEnabled>false</m_SyncTrackingEnabled>
+	<m_SpeedScale>0.95</m_SpeedScale>
+	<m_BlendTime>0.082</m_BlendTime>
+	<m_Conditions>
+		<m_Name>BumpType</m_Name>
+		<m_Type>STRING</m_Type>
+		<m_StringValue>PongDuParaLand</m_StringValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>BumpAnimFinished=true</m_ParameterValue>
+	</m_Events>
+</animNode>

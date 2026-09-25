@@ -29,3 +29,19 @@
 	spawn: groupMin = 2
 	spawn: groupMax = 2
 	spawn: zone = 0
+
+[a5237dc6-546a-4e1f-a3e4-c038ce485465]
+	general: name = PongDu_Airborne
+	spawn: friendly = true
+	spawn: companion = false
+	spawn: defenders = false
+	spawn: campers = false
+	spawn: assault = false
+	spawn: wanderer = false
+	spawn: roadblock = false
+	spawn: dayStart = 0
+	spawn: dayEnd = 0
+	spawn: spawnChance = 0
+	spawn: groupMin = 1
+	spawn: groupMax = 1
+	spawn: zone = 0

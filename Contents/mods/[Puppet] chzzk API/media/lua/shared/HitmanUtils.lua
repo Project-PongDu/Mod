@@ -493,6 +493,31 @@ function HitmanUtils.GetClosestEnemyHitmanLocation(character)
     return result
 end
 
+-- hitman brain on either side. Clients keep it in the zombie's modData
+-- (Hitmanize); the server never hitmanizes, so it falls back to the spawn
+-- queue both sides share (hitmanize() in HitmanServerSpawner.lua).
+function HitmanUtils.GetBrainAny(zombie)
+    local brain = HitmanBrain.Get(zombie)
+    if brain then return brain end
+    local gmd = GetHitmanModData and GetHitmanModData()
+    local queue = gmd and gmd.Queue
+    if not queue then return nil end
+    return queue[HitmanUtils.GetZombieID(zombie)]
+end
+
+-- friendly = a hitman hostile to nobody (PongDu: airborne troopers only).
+-- Fire support skips these so it never shoots our own support NPC.
+function HitmanUtils.IsFriendlyHitman(zombie)
+    local brain = HitmanUtils.GetBrainAny(zombie)
+    return brain ~= nil and not (brain.hostile or brain.hostileP)
+end
+
+-- PONGDU: airborne trooper (fire_support/airborne, program "Airborne")
+function HitmanUtils.IsAirborneTrooper(zombie)
+    local brain = HitmanUtils.GetBrainAny(zombie)
+    return brain ~= nil and brain.program ~= nil and brain.program.name == "Airborne"
+end
+
 -- player the hitman heads for when nobody is seen or heard:
 -- the player who summoned it (donation recipient), else the closest player
 function HitmanUtils.GetTrackedPlayer(character)
