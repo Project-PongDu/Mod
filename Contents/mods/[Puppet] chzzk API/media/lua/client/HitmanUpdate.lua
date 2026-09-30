@@ -580,9 +580,20 @@ local function ManageActionState(hitman)
         end
         return true
     elseif asn == "turnalerted" then
+        -- a heard sound (IsoZombie.RespondToSound) put the hitman in the zombie
+        -- "turn toward the sound" state. The motion itself is replaced by an idle pose
+        -- (AnimSets/zombie/turnalerted/PongDuHitmanTurnIdle*.xml); leave the state now.
+        -- Leaving runs ZombieTurnAlerted.exit() -> pathToSound(): drop that path unless
+        -- a Move task owns pathing, or the hitman walks off toward the sound.
         hitman:changeState(ZombieIdleState.instance())
         hitman:clearAggroList()
         hitman:setTarget(nil)
+        if not Hitman.HasMoveTask(hitman) then
+            hitman:getPathFindBehavior2():cancel()
+            hitman:setPath2(nil)
+        end
+        local b = HitmanBrain.Get(hitman)
+        print("[PongDu][Hitman] id=" .. tostring(b and b.id) .. " turnalerted suppressed")
         return true
     elseif asn == "pathfind" then
         return false
@@ -1432,9 +1443,15 @@ local function ManageCombat(hitman)
                 if veh then Hitman.Say(hitman, "CAR") end
 
                 local facing = hitman:isFacingObject(enemyCharacter, 0.1)
-                if not facing and isTrooper then
-                    -- faceThisObject turns instantly: no idle frame on a retarget
-                    hitman:faceThisObject(enemyCharacter)
+                local reaimTicks
+                if isTrooper then
+                    -- a new target more than REAIM_ANGLE off: re-aim (the Aim task turns
+                    -- and holds) instead of snapping round and firing at once
+                    reaimTicks = PongDuAirborne.ReaimTicks(hitman, brain, enemyCharacter)
+                    if not facing and not reaimTicks then
+                        -- small turn: faceThisObject turns instantly, no idle frame
+                        hitman:faceThisObject(enemyCharacter)
+                    end
                     facing = true
                 end
                 if facing then
@@ -1444,8 +1461,8 @@ local function ManageCombat(hitman)
                             local stasks = HitmanPrograms.Weapon.Rack(hitman, fireSlot)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
-                        elseif not Hitman.IsAim(hitman) then
-                            local aimTime = isTrooper and PongDuAirborne.AIM_TICKS or nil
+                        elseif reaimTicks or not Hitman.IsAim(hitman) then
+                            local aimTime = isTrooper and (reaimTicks or PongDuAirborne.AIM_TICKS) or nil
                             local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot, aimTime)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 

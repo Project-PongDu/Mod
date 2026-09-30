@@ -18,11 +18,48 @@
 --  차량 충돌은 다른 경로(VehicleHitZombiePacket)라 막지 않는다.
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- 이번 프레임에 onHitZombie 가 무효화한 대원 (OnWeaponHitCharacter 보정과 겹치지 않게)
+local _voidedAt = {}   -- [zombie] = ms
+
 local function onHitZombie(zombie, attacker, bodyPartType, handWeapon)
     if not zombie or not attacker then return end
     if not instanceof(attacker, "IsoPlayer") then return end
     if not HitmanUtils or not HitmanUtils.IsAirborneTrooper(zombie) then return end
     zombie:setAvoidDamage(true)
+    _voidedAt[zombie] = getTimestampMs()
 end
 
 Events.OnHitZombie.Add(onHitZombie)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Improved Projectile(탄도학 모드, id ImprovedProjectile) 대응
+--
+--  이 모드는 IsoZombie.Hit 을 거치지 않는다. 투사체가 맞으면
+--  OnWeaponHitCharacter 를 발화한 직후 zombie:setHealth(getHealth() - 피해) 와
+--  Kill() 을 직접 부른다(ImprovedProjectile_01_main.lua projectileOnTick,
+--  폭발물은 _05_explosive.lua). 그래서 위의 OnHitZombie 무효화가 안 먹었다.
+--   ① 총탄: client/ModPatches/ImprovedProjectile.lua 가 표적 탐색 전역 함수
+--      IPPJcheckTarget 을 감싸 대원을 후보에서 뺀다(탄이 대원을 통과).
+--   ② 폭발물 등 나머지: 표적 탐색이 로컬 함수라 감쌀 수 없다. OnWeaponHitCharacter
+--      에서 피해만큼 체력을 먼저 올려 두면 바로 뒤의 차감과 상쇄된다(쏜 클라 기준).
+--      바닐라 Hit 경로도 OnWeaponHitCharacter 를 발화하므로, 방금 onHitZombie 가
+--      무효화한 타격은 보정하지 않는다(안 그러면 체력이 오른다).
+-- ═══════════════════════════════════════════════════════════════════════════
+local VOIDED_WINDOW_MS = 100
+
+local function onWeaponHitCharacter(attacker, target, weapon, damage)
+    if not attacker or not target then return end
+    if not instanceof(attacker, "IsoPlayer") or not instanceof(target, "IsoZombie") then return end
+    if not HitmanUtils or not HitmanUtils.IsAirborneTrooper(target) then return end
+    local t = _voidedAt[target]
+    if t then
+        _voidedAt[target] = nil
+        if getTimestampMs() - t <= VOIDED_WINDOW_MS then return end
+    end
+    local dmg = tonumber(damage) or 0
+    if dmg <= 0 then return end
+    target:setHealth(target:getHealth() + dmg)
+    print(string.format("[PongDu][Airborne] player hit on trooper offset (%.2f) -- non-vanilla damage path", dmg))
+end
+
+Events.OnWeaponHitCharacter.Add(onWeaponHitCharacter)

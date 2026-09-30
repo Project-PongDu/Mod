@@ -466,6 +466,30 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
 end
 
 
+-- ── PONGDU: gunshot sound ────────────────────────────────────────────────
+-- Arsenal(26) GunFighter does not play the script SwingSound for players: its
+-- attack hook picks the sound per ammo at shot time with the global
+-- getShotSound(weapon, 1) (GunFighter_02Function.lua). Some Arsenal scripts carry
+-- a SwingSound that no sound script defines (XM214 "MinigunShot"), so a hitman
+-- playing weaponItem:getSwingSound() was silent. Use Arsenal's pick when it is
+-- loaded, else the script sound. Cached per weapon type.
+local shotSoundCache = {}
+local function shotSoundOf(weaponItem)
+    local ft = weaponItem:getFullType()
+    local snd = shotSoundCache[ft]
+    if snd == nil then
+        local script = weaponItem:getSwingSound()
+        snd = script
+        if getShotSound then
+            local ok, v = pcall(getShotSound, weaponItem, 1)
+            if ok and v then snd = v end
+        end
+        shotSoundCache[ft] = snd or false
+        print("[HITMANS] shot sound " .. tostring(ft) .. " = " .. tostring(snd) .. " (script " .. tostring(script) .. ")")
+    end
+    return snd or nil
+end
+
 -- ── PONGDU: rate fire (HitmanPrograms.Weapon.Shoot rate task) ──────────────
 -- One Shoot task = one burst: {rate = rounds/s, left = rounds, window = ticks of
 -- firing at the end of task.time}. Rounds are fired frame by frame in onWorking
@@ -529,7 +553,8 @@ local function rateFire(zombie, task, enemy)
 
     -- effects once per frame, not per round
     HitmanCompatibility.StartMuzzleFlash(zombie)
-    zombie:getEmitter():playSound(weaponItem:getSwingSound())
+    local snd = shotSoundOf(weaponItem)
+    if snd then zombie:getEmitter():playSound(snd) end
     if not brainShooter.sound or brainShooter.sound == 0 then
         addSound(getSpecificPlayer(0), sx, sy, sz, 40, 100)
         brainShooter.sound = 1
@@ -619,9 +644,9 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
     -- handle real and "world" sound 
     -- local emitter = getWorld():getFreeEmitter(sx, sy, sz)
     local emitter = zombie:getEmitter()
-    local swingSound = weaponItem:getSwingSound()
+    local swingSound = shotSoundOf(weaponItem)
     -- emitter:stopAll()
-    local long = emitter:playSound(swingSound)
+    if swingSound then emitter:playSound(swingSound) end
     -- emitter:setParameterValueByName(long, "CameraZoom", 1.0)
 
     if not brainShooter.sound or brainShooter.sound == 0 then

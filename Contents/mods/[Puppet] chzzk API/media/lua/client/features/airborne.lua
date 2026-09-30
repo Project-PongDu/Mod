@@ -320,6 +320,8 @@ local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발
 local FULLAUTO_ROUNDS   = 18   -- 연발 1회 계획 탄수(약 1초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
 local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
 local AUTO_INTERVAL     = 6    -- 연사 속도를 모르는 총일 때의 탄 간격(틱)
+_a.REAIM_ANGLE          = 30   -- 표적 전환 시 이보다 크게 돌아야 하면 재조준
+_a.REAIM_TICKS          = 30   -- 재조준 시간(틱, 0.5초). 그동안 돌아서 겨누기만 하고 쏘지 않는다
 
 local ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
 local LUNGE_STATES  = { ["lunge"] = true, ["lunge-network"] = true }
@@ -715,6 +717,23 @@ function _a.FirePlan(dist, fresh)
         return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = 0 }
     end
     return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and 0 or nil }
+end
+
+-- 표적 전환 재조준: 새 표적(마지막으로 조준한 표적과 다름)이 REAIM_ANGLE 보다 크게
+-- 돌아야 하는 방향이면 REAIM_TICKS 를 돌려준다 -> ManageCombat 이 Aim 태스크(돌아서
+-- 겨누기)를 그만큼 건 뒤에 쏜다. 에임핵처럼 휙 돌자마자 쏘지 않게 하는 연출이다.
+-- 같은 표적을 쏘는 동안은 nil (연사 중 표적을 따라 도는 건 그대로).
+function _a.ReaimTicks(hitman, brain, enemy)
+    local eid = HitmanUtils.GetCharacterID(enemy)
+    if brain.abAimEid == eid then return nil end
+    brain.abAimEid = eid
+    local d = HitmanUtils.CalcAngle(hitman:getX(), hitman:getY(), enemy:getX(), enemy:getY()) - hitman:getDirectionAngle()
+    while d > 180 do d = d - 360 end
+    while d < -180 do d = d + 360 end
+    if math.abs(d) <= _a.REAIM_ANGLE then return nil end
+    print(string.format("[PongDu][Airborne] reaim id=%s target=%s turn=%d deg -- %d ticks",
+        tostring(brain.id), tostring(eid), math.floor(math.abs(d) + 0.5), _a.REAIM_TICKS))
+    return _a.REAIM_TICKS
 end
 
 -- 지금 표적이 새로 잡은 뒤 아직 한 번도 사격 계획을 안 세운 표적이면 true (한 번만).

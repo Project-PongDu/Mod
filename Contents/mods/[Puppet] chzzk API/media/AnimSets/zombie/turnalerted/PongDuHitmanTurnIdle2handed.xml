@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- PongDu: hitmen never show the zombie "turn toward a sound" motion.
+     turnalerted is entered by IsoZombie.RespondToSound (alerted=true) and B41 actiongroups
+     cannot be overridden by mods, so this node replaces the vanilla Zombie_Turn*_Alerted clips
+     for Hitman=true with the same pose as AnimSets/zombie/idle/ZSIdle2handed.xml;
+     HitmanUpdate.lua ManageActionState then switches the state back to idle.
+     Hitman is repeated so this node outranks the 1-condition TurnAlertedValue nodes;
+     it stays below PongDuParaLanding (8 conditions). -->
+<animNode>
+	<m_Name>PongDuHitmanTurnIdle2handed</m_Name>
+	<m_AnimName>Bob_IdleBat</m_AnimName>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_SpeedScale>0.80</m_SpeedScale>
+	<m_BlendTime>0.35</m_BlendTime>
+	<m_randomAdvanceFraction>0.50</m_randomAdvanceFraction>
+	<m_Conditions>
+		<m_Name>Hitman</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>Hitman</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>HitmanPrimaryType</m_Name>
+		<m_Type>STRING</m_Type>
+		<m_StringValue>twohanded</m_StringValue>
+	</m_Conditions>
+</animNode>

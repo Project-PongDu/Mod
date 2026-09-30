@@ -294,7 +294,12 @@ function HitmanUtils.IsFacing(sx, sy, sa, tx, ty, tolerance)
     local dx = tx - sx
     local dy = ty - sy
     local angleToTarget = math.deg(math.atan2(dy, dx))
-    local angleDiff = (angleToTarget - sa + 180) % 360 - 180
+    -- PONGDU: Kahlua's % truncates toward zero (KahluaThread OP_MOD), so the old
+    -- (d + 180) % 360 - 180 left negative d unwrapped: a target just across the
+    -- -180/180 line (due west) read as ~360 deg off and the shot was refused.
+    local angleDiff = angleToTarget - sa
+    while angleDiff > 180 do angleDiff = angleDiff - 360 end
+    while angleDiff < -180 do angleDiff = angleDiff + 360 end
     -- print ("angle: " .. angleDiff)
     return math.abs(angleDiff) < tolerance
 end
