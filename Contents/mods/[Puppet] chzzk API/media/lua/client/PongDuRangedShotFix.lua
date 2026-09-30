@@ -17,24 +17,36 @@
 --   탄도학 모드는 대규모 좀비에서 FPS 를 떨어뜨려 이 문턱을 넘기게 만드는 쪽이고,
 --   투사체를 막는 주체는 아니다 (손실은 탄도학 코드가 도는 ③ 이전 단계에서 난다).
 --
---  수정:
---   바닐라 바닥조준 사격 노드(FirearmOnFloor 등)처럼 AttackCollisionCheck 를 Start 시점에도
---   건다. Start 이벤트는 클립이 처음 진행되는 그 갱신 안에서 트랙이 직접 보내므로, 아직
---   SwipeStatePlayer 안일 때 도착한다. 원래 진행률 이벤트는 남겨두지만 SwipeStatePlayer 가
---   한 번 연결된 뒤(PARAM_ATTACKED)의 중복 호출은 무시하므로 두 번 쏘지 않는다.
+--  수정 (손실되는 발에만 끼어드는 End 폴백):
+--   AttackCollisionCheck 를 End 시점에도 하나 더 건다. End 이벤트는 클립이 끝나는(조기 전환
+--   노드는 페이드아웃이 시작되는) 그 트랙 갱신 안에서 트랙이 직접 보낸다. 손실되는 경우는
+--   "클립이 첫 갱신 한 번에 끝나는" 경우뿐이므로, 이때 End 는 ActiveAnimFinishing 과 같은
+--   갱신에서 오고 ranged 상태 이탈(다음 프레임)보다 앞선다 -> 이 한 발이 연결된다.
+--   정상 프레임에서는 원래 진행률 판정이 다음 프레임 AnimLayer 갱신에서 먼저 연결되고
+--   (PARAM_ATTACKED), 그 뒤에 오는 End 판정은 SwipeStatePlayer 가 무시한다.
+--   즉 정상 발은 판정 시점·횟수가 바닐라와 완전히 같고, 손실될 발만 End 에서 연결된다.
+--   도중에 상태가 끊긴 발(피격 반응·밀치기 전환 등)은 노드가 TransitioningOut 이라 클립 끝 End 가
+--   안 나가므로 바닐라처럼 연결되지 않는다. (조기 전환 노드의 페이드아웃 End 는 이 검사가 없지만,
+--   그 시점엔 ranged 하위 상태가 이미 빠져 있어 받을 SwipeStatePlayer 가 없다. 예외적으로
+--   길이가 다른 클립을 섞은 조기 전환 노드에서 다음 발이 이미 ranged 에 들어와 있으면 그 발이
+--   최대 1프레임 먼저 연결될 수 있다. 바닐라 AttackAnim End 도 같은 경로로 새며, 한 스윙 1발은 유지된다.)
+--   (이전 방식은 Start 시점에 걸어서 모든 발의 판정을 한 프레임 당겼다. 손실과 무관한 발의
+--    타이밍까지 바꾸는 것이라 End 폴백으로 좁혔다.)
 --   XML 파일을 덮어쓰지 않고 로드된 노드에 이벤트만 더하므로 Arsenal / Real Life Fire Rate /
 --   다른 총기 모드가 정한 연사속도는 그대로 유지되고 모드 로드 순서와도 무관하다.
---   Start 이벤트 객체는 PongDuShotEventDonor.xml(선택되지 않는 추상 노드)에서 가져온다.
+--   End 이벤트 객체는 PongDuShotEventDonor.xml(선택되지 않는 추상 노드)에서 가져온다.
 --   AnimEvent 는 Lua 에서 만들 수 없어서 로드된 객체를 재사용한다.
 --
 --  대상: ranged 상태의 노드 중 AttackCollisionCheck 가 진행률 1% 이하에 있는 것
 --   (투척 Throw 처럼 중간 시점에 판정하는 노드는 건드리지 않는다).
+--   Start/End 판정을 이미 가진 노드(바닐라 바닥조준 FirearmOnFloor 등)는 원래 손실이 없어서 건너뛴다.
 --  애니셋은 캐릭터마다가 아니라 이름별 공유 객체라 한 번만 고치면 된다.
 --  차량 탑승 시 쓰는 player-vehicle 애니셋도 바뀌는 순간 같이 고친다.
 --  Kahlua 는 AnimNode 등을 노출하지 않으므로 공개 필드를 getClassField 리플렉션으로 읽는다.
 -- ═══════════════════════════════════════════════════════════════════════════
 local LOG = "[PongDu][ShotFix] "
 local DONOR_NAME = "PongDuShotEventDonor"
+local DONOR_TIME = "End"
 local EARLY_PC = 0.01
 local CHECK_MS = 1000
 
@@ -71,7 +83,7 @@ local function eventInfo(ev)
 end
 
 local donorMissLogged = false
-local donor = nil -- { hit = AttackCollisionCheck(Start), set = SetVariable ZombieHitReaction=Shot(Start) }
+local donor = nil -- { hit = AttackCollisionCheck(End), set = SetVariable ZombieHitReaction=Shot(End) }
 
 local function findDonor(nodes)
     for i = 0, nodes:size() - 1 do
@@ -82,7 +94,7 @@ local function findDonor(nodes)
             for j = 0, evs:size() - 1 do
                 local ev = evs:get(j)
                 local name, time, _, param = eventInfo(ev)
-                if time == "Start" then
+                if time == DONOR_TIME then
                     if name == "attackcollisioncheck" then
                         d.hit = ev
                     elseif name == "setvariable" and param == "ZombieHitReaction=Shot" then
@@ -130,12 +142,12 @@ local function patchSet(animSet)
         local nodeName = fieldVal(node, "node", "m_Name")
         local evs = fieldVal(node, "node", "m_Events")
         if evs and nodeName ~= DONOR_NAME then
-            local earlyHit, startHit, shotVar = false, false, false
+            local earlyHit, timedHit, shotVar = false, false, false
             for j = 0, evs:size() - 1 do
                 local name, time, pc, param = eventInfo(evs:get(j))
                 if name == "attackcollisioncheck" then
-                    if time == "Start" then
-                        startHit = true
+                    if time == "Start" or time == "End" then
+                        timedHit = true
                     elseif time == "Percentage" and pc and pc <= EARLY_PC then
                         earlyHit = true
                     end
@@ -144,10 +156,10 @@ local function patchSet(animSet)
                     shotVar = true
                 end
             end
-            if startHit then
+            if timedHit then
                 already = already + 1
             elseif earlyHit then
-                -- SetVariable 을 먼저 넣어야 Start 순회에서 판정보다 먼저 적용된다
+                -- End 이벤트는 리스트 순서대로 돈다. SetVariable 을 먼저 넣어야 판정보다 먼저 적용된다
                 if shotVar and donor.set then evs:add(donor.set) end
                 evs:add(donor.hit)
                 patched = patched + 1
@@ -155,7 +167,7 @@ local function patchSet(animSet)
             end
         end
     end
-    print(string.format(LOG .. "animset=%s ranged nodes=%d patched=%d alreadyStart=%d [%s]",
+    print(string.format(LOG .. "animset=%s ranged nodes=%d patched=%d (End fallback) alreadyTimed=%d [%s]",
         setName, nodes:size(), patched, already, table.concat(names, ",")))
     return true
 end
