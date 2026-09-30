@@ -1179,7 +1179,7 @@ addServerTick(processHeliJobs)
 -- ═══════════════════════════════════════════════════════════════════════════
 local AIRBORNE_CID              = "a5237dc6-546a-4e1f-a3e4-c038ce485465"  -- clans.txt PongDu_Airborne
 local AIRBORNE_PROGRAM          = "Airborne"          -- shared/ZombiePrograms/ZPAirborne.lua
-local AIRBORNE_FALLBACK_PRIMARY = "Base.AssaultRifle" -- Arsenal(Base.Shrike) 미설치 시
+local AIRBORNE_FALLBACK_PRIMARY = "Base.AssaultRifle" -- Arsenal(Base.XM214) 미설치 시
 local AIRBORNE_DROP_Z           = 7        -- 좀비 레인과 같은 엔진 상한 (IsoCell.MaxHeight=8)
 local AIRBORNE_FLY_MS           = 3000     -- 헬기 A -> B 통과 시간
 local AIRBORNE_PATH_HALF        = 25       -- D 에서 A/B 까지 거리(타일). 스트리밍 거리 안쪽

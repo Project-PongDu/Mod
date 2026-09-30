@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 공수부대원 착지 모션 (client/features/airborne.lua startLanding).
+     Paraglider 모드(SportXAI) ParagliderLand.xml 과 같은 바닐라 클립 Bob_SprintToStop:
+     달리던 기세로 몇 걸음 나가다 멈춘다. deferredBoneAxis Y 라 소유 클라에서 루트 모션만큼
+     실제로 앞으로 이동한다(IsoGameCharacter.doDeferredMovement).
+     강하 자세(PongDuParaDescent.xml)와 같은 변수 노드 방식이다. 착지 순간 좀비가
+     falling / turnalerted 처럼 bumped 로 못 넘어가는 상태에 있어도 바로 재생된다.
+     End 이벤트:
+       PongDuParaLandDone=true - airborne.lua 가 이걸 보고 변수를 내리고 AI 를 푼다
+       bLandAnimFinished=true  - falling 상태의 idle 전이 조건. 바닐라 착지 클립 대신
+                                 이 클립이 재생됐으므로 여기서 대신 세운다
+     같은 조건 8번 반복 = 다른 노드보다 우선. 같은 파일이 zombie/{idle,turnalerted,
+     walktoward(-network),pathfind,lunge(-network),face-target,falling} 에 들어 있다 -
+     수정 시 전부 같이 바꿀 것. -->
+<animNode>
+	<m_Name>PongDuParaLanding</m_Name>
+	<m_AnimName>Bob_SprintToStop</m_AnimName>
+	<m_deferredBoneAxis>Y</m_deferredBoneAxis>
+	<m_Looped>false</m_Looped>
+	<m_UpperOnly>false</m_UpperOnly>
+	<m_EarlyBlendOut>false</m_EarlyBlendOut>
+	<m_SyncTrackingEnabled>false</m_SyncTrackingEnabled>
+	<m_SpeedScale>0.95</m_SpeedScale>
+	<m_BlendTime>0.15</m_BlendTime>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Conditions>
+		<m_Name>PongDuParaLanding</m_Name>
+		<m_Type>BOOL</m_Type>
+		<m_BoolValue>true</m_BoolValue>
+	</m_Conditions>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>PongDuParaLandDone=true</m_ParameterValue>
+	</m_Events>
+	<m_Events>
+		<m_EventName>SetVariable</m_EventName>
+		<m_Time>End</m_Time>
+		<m_ParameterValue>bLandAnimFinished=true</m_ParameterValue>
+	</m_Events>
+</animNode>

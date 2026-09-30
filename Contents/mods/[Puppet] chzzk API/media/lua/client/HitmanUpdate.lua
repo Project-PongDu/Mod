@@ -1071,9 +1071,10 @@ end
 --                     survival first), then hostile hitmen shooting at it
 --                  2) the worst threat to the escorted player (drone-style
 --                     ranking, special pool = mutants + hostile hitmen)
---                  never players, never tier 3. Targets are sticky (see
---                  PickSelfThreat/PickEscortThreat), a retarget turns instantly,
---                  aims for AIM_TICKS and fires per FirePlan (full auto <= 15 tiles)
+--                  never players, never tier 3. A target is kept until it is
+--                  dead (PickTarget), 5+ enemies within 3 tiles trigger a 10-tile
+--                  retreat first (RetreatTick), a retarget turns instantly, aims
+--                  for AIM_TICKS and fires per FirePlan (full auto <= 15 tiles)
 -- ranged mode: while any gun has ammo the hitman never uses melee weapons;
 --              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)
@@ -1092,6 +1093,13 @@ local function ManageCombat(hitman)
     local isBareHands = HitmanBrain.IsBareHands(brain)
     local isOutside = hitman:getSquare():isOutside()
     local isTrooper = PongDuAirborne ~= nil and brain.program ~= nil and brain.program.name == "Airborne"
+
+    -- airborne trooper: a tactical retreat (5+ enemies within 3 tiles) beats
+    -- everything else; while it runs no shot is planned
+    if isTrooper then
+        local rtasks = PongDuAirborne.RetreatTick(hitman, brain)
+        if rtasks then return rtasks end
+    end
 
     local bestDist = 40
     local enemyCharacter, switchTo, fireSlot
@@ -1132,33 +1140,24 @@ local function ManageCombat(hitman)
     local bwdDist = 2.8
 
     -- PRIORITY 1: ZOMBIES AGGRO'D ON THIS HITMAN
-    -- (airborne trooper: every enemy within 10 tiles, closest first, then a
-    --  hostile hitman shooting at it from further away)
-    local threat, threatDist
+    -- (airborne trooper: PickTarget keeps one target until it is dead; a new one
+    --  is picked as closest enemy within 10 tiles > hostile hitman shooting at
+    --  the trooper > worst threat to the escorted player)
     if isTrooper then
-        threat, threatDist = PongDuAirborne.PickSelfThreat(hitman, brain)
-        if not threat then
-            threat, threatDist = PongDuAirborne.FindAttacker(hitman, brain)
+        local t, tDist, tTier = PongDuAirborne.PickTarget(hitman, brain)
+        if t then
+            bestDist, enemyCharacter = tDist, t
+            tier = (tTier == "escort") and "escort" or "threat"
         end
     else
-        threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
-    end
-    if threat then
-        bestDist, enemyCharacter, tier = threatDist, threat, "threat"
-    end
-
-    -- PRIORITY 2 (airborne trooper): WORST THREAT TO THE ESCORTED PLAYER
-    if not enemyCharacter and isTrooper then
-        local escort = HitmanUtils.GetTrackedPlayer(hitman)
-        local t = escort and PongDuAirborne.PickEscortThreat(hitman, brain, escort)
-        if t then
-            local tx, ty = t:getX(), t:getY()
-            bestDist = math.sqrt(((zx - tx) * (zx - tx)) + ((zy - ty) * (zy - ty)))
-            enemyCharacter, tier = t, "escort"
+        local threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
+        if threat then
+            bestDist, enemyCharacter, tier = threatDist, threat, "threat"
         end
+    end
 
-    -- PRIORITY 2: PLAYERS
-    elseif not enemyCharacter and (brain.hostile or brain.hostileP) then
+    -- PRIORITY 2: PLAYERS (never for airborne troopers)
+    if not enemyCharacter and not isTrooper and (brain.hostile or brain.hostileP) then
         local playerList = HitmanPlayer.GetPlayers()
 
         for i=0, playerList:size()-1 do

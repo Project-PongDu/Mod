@@ -9,14 +9,19 @@
 --      - 소유 클라: fallTime=0(낙하 데미지/넘어짐 방지) + 일정 속도 하강
 --      (좀비 공습 낙하산과 같은 방식 -- features/zombierain.lua Rain_Parachute 절)
 --   ② 착지: 지면에 닿으면 낙하산을 벗기고 Paraglider 모드처럼 달리다 멈추는
---      모션(Bob_SprintToStop, AnimSets/zombie/bumped/PongDuParaLand.xml)을 1회
---      재생한다. 모션이 끝나야 히트맨 AI 가 풀린다 -- HitmanUpdate.lua
+--      모션(Bob_SprintToStop)을 1회 재생한다. 강하 자세와 같은 변수 노드 방식
+--      (AnimSets/zombie/<상태>/PongDuParaLanding.xml, 변수 PongDuParaLanding)이라
+--      착지 순간 좀비가 어느 상태(falling/turnalerted/idle...)에 있든 바로 재생된다.
+--      모션 끝(End 이벤트 PongDuParaLandDone)에 히트맨 AI 가 풀린다 -- HitmanUpdate.lua
 --      OnHitmanUpdate 가 HoldsAI() 로 확인한다. 착지 순간 2타일 안에 적이 있으면
 --      모션을 건너뛰고 바로 AI 를 푼다 (모션 중엔 반격을 못 한다).
+--      (예전 BumpType 방식은 turnalerted/falling 상태에 bumped 전이가 없어서
+--       두리번 모션이 먼저 나오거나 아예 안 나왔다.)
 --   ③ 표적 선정/사격 제어: 대원 전투 AI(HitmanUpdate.lua ManageCombat)가 부르는
---      - PickSelfThreat: 대원 10타일 안의 가장 가까운 적 (생존 최우선)
---      - FindAttacker: 그 밖에서 대원을 쏘는 적대 히트맨
---      - PickEscortThreat: 호위 대상에게 가장 위협적인 적
+--      - RetreatTick: 3타일 안 적 5마리 이상이면 반대쪽으로 10타일 후퇴 (최우선)
+--      - PickTarget: 표적 고정. 잡은 표적은 죽을 때까지 유지하고, 새로 고를 때만
+--        PickSelfThreat(대원 10타일 안 최근접) > FindAttacker(대원을 쏘는 적대
+--        히트맨) > PickEscortThreat(호위 대상에게 가장 위협적인 적) 순으로 고른다
 --      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준
 --  를 맡는다.
 --
@@ -36,7 +41,8 @@ local _a = PongDuAirborne
 local deltaTime = require("utils/deltaTime")
 
 local DESCENT_VAR   = "PongDuParaDescent"  -- AnimSets/zombie/<상태>/PongDuParaDescent.xml
-local LAND_BUMP     = "PongDuParaLand"     -- AnimSets/zombie/bumped/PongDuParaLand.xml
+local LAND_VAR      = "PongDuParaLanding"  -- AnimSets/zombie/<상태>/PongDuParaLanding.xml
+local LAND_DONE_VAR = "PongDuParaLandDone" -- 착지 클립 End 이벤트가 세운다
 local DESCENT_SPEED = 1.2      -- 층/초. 7층에서 약 5.8초 -- 강하 클립 SpeedScale 과 맞춘 값
 local AIR_Z         = 0.05     -- 이 높이(층) 위면 공중
 local LAND_MAX_MS   = 2500     -- 착지 모션 상한. 넘기면 AI 를 그냥 푼다
@@ -182,9 +188,10 @@ local function startLanding(z, p, hid, now)
     if p.seenAir and not z:isDead() then
         p.phase  = "land"
         p.landAt = now
-        z:setBumpType(LAND_BUMP)
-        print(string.format("[PongDu][Airborne] landed hid=%s remote=%s -- landing motion",
-            tostring(hid), tostring(z:isRemoteZombie())))
+        z:clearVariable(LAND_DONE_VAR)
+        z:setVariable(LAND_VAR, true)
+        print(string.format("[PongDu][Airborne] landed hid=%s remote=%s state=%s -- landing motion",
+            tostring(hid), tostring(z:isRemoteZombie()), tostring(z:getActionStateName())))
         return false
     end
     print("[PongDu][Airborne] landed hid=" .. tostring(hid) .. " (not seen in air) -- AI released")
@@ -205,6 +212,7 @@ Events.OnTick.Add(function()
         if now > p.e then
             if z then
                 z:clearVariable(DESCENT_VAR)
+                z:clearVariable(LAND_VAR)
                 if p.chute then chuteDetach(z) end
             end
             print("[PongDu][Airborne] WARN pending expired hid=" .. tostring(hid) .. " phase=" .. p.phase)
@@ -219,11 +227,16 @@ Events.OnTick.Add(function()
                     finished = startLanding(z, p, hid, now)
                 end
             elseif p.phase == "land" then
-                -- 모션이 끝나면 엔진이 BumpType 을 비운다. 상한을 넘기면 그냥 푼다.
-                if z:getBumpType() ~= LAND_BUMP or now - p.landAt > LAND_MAX_MS then
-                    print(string.format("[PongDu][Airborne] landing done hid=%s after %dms -- AI released",
-                        tostring(hid), now - p.landAt))
+                -- 클립 End 이벤트가 LAND_DONE_VAR 를 세운다. 상한을 넘기면 그냥 푼다.
+                local animEnd = z:getVariableBoolean(LAND_DONE_VAR)
+                if animEnd or now - p.landAt > LAND_MAX_MS then
+                    z:clearVariable(LAND_VAR)
+                    z:clearVariable(LAND_DONE_VAR)
+                    print(string.format("[PongDu][Airborne] landing done hid=%s after %dms (%s) -- AI released",
+                        tostring(hid), now - p.landAt, animEnd and "anim end" or "timeout"))
                     finished = true
+                else
+                    z:setVariable(LAND_VAR, true)   -- 엔진이 지워도 매 틱 복구
                 end
             end
         end
@@ -499,11 +512,171 @@ function _a.FirePlan(dist)
     return { bullets = LONG_BURST, interval = AUTO_INTERVAL }
 end
 
--- 대원 사망 시 표적 캐시 정리 (HitmanUpdate.lua OnZombieDead 에서 호출)
+-- ═══════════════════════════════════════════════════════════════════════════
+--  표적 고정 (HitmanUpdate.lua ManageCombat 이 대원일 때 부르는 진입점)
+--
+--  한 번 잡은 표적은 죽을 때까지 바꾸지 않는다. 우선순위(자기 10타일 안 최근접 >
+--  대원을 쏘는 적대 히트맨 > 호위 위협)는 "새로 고를 때"에만 쓴다.
+--  예외: 표적이 LOCK_LOST_MS 동안 계속 안 보이거나(벽 뒤/다른 층/LOCK_MAX_R 밖)
+--  하면 놓아준다 -- 못 쏘는 표적에 묶여 있으면 대원이 아무것도 못 한다.
+--  안 보이는 동안에는 nil 을 돌려줘 사격을 멈춘다(벽에 탄을 쏟지 않게).
+-- ═══════════════════════════════════════════════════════════════════════════
+local LOCK_MAX_R   = 45      -- 이보다 멀어지면 "안 보임"으로 친다 (XM214 판정 사거리 45)
+local LOCK_LOST_MS = 2000
+
+local _lock = {}   -- [brain.id] = { z = 표적, tier = "self"|"attacker"|"escort", lostAt = ms|nil }
+
+-- 반환: 표적, 대원과의 거리, 등급
+function _a.PickTarget(hitman, brain)
+    local now = getTimestampMs()
+    local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
+    local L = _lock[brain.id]
+    if L then
+        local t = L.z
+        if not t or t:isDead() or not t:isAlive() then
+            print("[PongDu][Airborne] lock released id=" .. tostring(brain.id) .. " (target down)")
+            _lock[brain.id] = nil
+        else
+            local dx, dy = t:getX() - zx, t:getY() - zy
+            local d = math.sqrt(dx * dx + dy * dy)
+            local ok = math.abs(t:getZ() - zz) < 0.5 and d <= LOCK_MAX_R
+                and hitman:CanSee(t) and HitmanUtils.LineClear(hitman, t)
+            if ok then
+                L.lostAt = nil
+                return t, d, L.tier
+            end
+            if not L.lostAt then L.lostAt = now end
+            if now - L.lostAt > LOCK_LOST_MS then
+                print(string.format("[PongDu][Airborne] lock released id=%s (lost %dms, dist=%.1f)",
+                    tostring(brain.id), now - L.lostAt, d))
+                _lock[brain.id] = nil
+            else
+                return nil   -- 잠깐 가려짐: 표적은 유지하고 사격만 멈춘다
+            end
+        end
+    end
+
+    local t, d, tier = _a.PickSelfThreat(hitman, brain)
+    tier = "self"
+    if not t then
+        t, d = _a.FindAttacker(hitman, brain)
+        tier = "attacker"
+    end
+    if not t then
+        local escort = HitmanUtils.GetTrackedPlayer(hitman)
+        t = escort and _a.PickEscortThreat(hitman, brain, escort)
+        if t then
+            local dx, dy = t:getX() - zx, t:getY() - zy
+            d = math.sqrt(dx * dx + dy * dy)
+        end
+        tier = "escort"
+    end
+    if not t then return nil end
+
+    _lock[brain.id] = { z = t, tier = tier }
+    print(string.format("[PongDu][Airborne] lock id=%s -> %s tier=%s dist=%.1f", tostring(brain.id),
+        tostring(HitmanUtils.GetCharacterID(t)), tier, d or -1))
+    return t, d, tier
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  전략적 후퇴 (HitmanUpdate.lua ManageCombat 이 표적 선정보다 먼저 부른다)
+--
+--  대원 RETREAT_R 타일 안에 적이 RETREAT_N 마리 이상이면, 그 무리의 중심 반대쪽으로
+--  RETREAT_DIST 타일 달려 빠진 뒤 다시 쏜다. 후퇴 중에는 사격하지 않는다.
+--  정반대가 막혀 있으면 좌우 30/60/90도로 틀어 본다. 다 막히면 그 자리에서 싸운다.
+--  반환: nil = 후퇴 아님(평소대로 교전) / 태스크 목록 = 후퇴 중(비어 있으면 이동 중)
+-- ═══════════════════════════════════════════════════════════════════════════
+local RETREAT_R        = 3
+local RETREAT_N        = 5
+local RETREAT_DIST     = 10
+local RETREAT_REACH    = 1.3
+local RETREAT_MAX_MS   = 7000    -- 막혀서 못 가면 이 시간 뒤 포기하고 교전 재개
+local RETREAT_CD_MS    = 1500    -- 후퇴 직후 재발동 대기 (도착하자마자 또 뛰는 것 방지)
+local RETREAT_ANGLES   = { 0, 30, -30, 60, -60, 90, -90 }
+
+local function retreatSquareOk(cell, x, y, z)
+    local sq = cell:getGridSquare(math.floor(x), math.floor(y), z)
+    if not sq or not sq:isFree(false) then return false end
+    if sq:Is(IsoFlagType.water) then return false end
+    return true
+end
+
+function _a.RetreatTick(hitman, brain)
+    local now = getTimestampMs()
+    local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
+    local r = brain.abRetreat
+    if r then
+        local dx, dy = r.x - zx, r.y - zy
+        local d = math.sqrt(dx * dx + dy * dy)
+        if d <= RETREAT_REACH or now > r.untilMs then
+            brain.abRetreat = nil
+            brain.abRetreatCd = now + RETREAT_CD_MS
+            print(string.format("[PongDu][Airborne] retreat done id=%s %s (left %.1f tiles)",
+                tostring(brain.id), d <= RETREAT_REACH and "reached" or "timeout", d))
+            return nil
+        end
+        -- 물리면 태스크가 비워지므로(UpdateZombies bite -> ClearTasks) 이동을 다시 건다
+        if not Hitman.HasMoveTask(hitman) then
+            return { HitmanUtils.GetMoveTask(0, r.x, r.y, r.z, "Run", d, false) }
+        end
+        return {}
+    end
+    if brain.abRetreatCd and now < brain.abRetreatCd then return nil end
+
+    local cache = HitmanZombie.Cache
+    local r2 = RETREAT_R * RETREAT_R
+    local n, sx, sy = 0, 0, 0
+    for id, light in pairs(HitmanZombie.CacheLight) do
+        local dx, dy = light.x - zx, light.y - zy
+        if dx <= RETREAT_R and dx >= -RETREAT_R and dy <= RETREAT_R and dy >= -RETREAT_R
+           and dx * dx + dy * dy <= r2 and math.abs(light.z - zz) < 1
+           and HitmanUtils.AreEnemies(light.brain, brain) then
+            local o = cache[id]
+            if o and o ~= hitman and o:isAlive() and not o:getVariableBoolean("Bandit") then
+                n = n + 1
+                sx, sy = sx + light.x, sy + light.y
+            end
+        end
+    end
+    if n < RETREAT_N then return nil end
+
+    local vx, vy = zx - sx / n, zy - sy / n
+    local base
+    if vx * vx + vy * vy < 0.01 then
+        base = ZombRand(360)   -- 한가운데 포위: 아무 방향
+    else
+        base = math.deg(math.atan2(vy, vx))
+    end
+    local cell = getCell()
+    local tx, ty
+    for i = 1, #RETREAT_ANGLES do
+        local a = math.rad(base + RETREAT_ANGLES[i])
+        local x, y = zx + math.cos(a) * RETREAT_DIST, zy + math.sin(a) * RETREAT_DIST
+        if retreatSquareOk(cell, x, y, zz) then
+            tx, ty = x, y
+            break
+        end
+    end
+    if not tx then
+        print("[PongDu][Airborne] retreat blocked id=" .. tostring(brain.id) .. " enemies=" .. n .. " -- fighting in place")
+        brain.abRetreatCd = now + RETREAT_CD_MS
+        return nil
+    end
+
+    brain.abRetreat = { x = tx, y = ty, z = zz, untilMs = now + RETREAT_MAX_MS }
+    Hitman.ClearTasks(hitman)
+    print(string.format("[PongDu][Airborne] retreat start id=%s enemies=%d within %d -> %d,%d",
+        tostring(brain.id), n, RETREAT_R, math.floor(tx), math.floor(ty)))
+    return { HitmanUtils.GetMoveTask(0, tx, ty, zz, "Run", RETREAT_DIST, false) }
+end
+
+-- 대원 사망 시 표적/후퇴 상태 정리 (HitmanUpdate.lua OnZombieDead 에서 호출)
 function _a.Forget(brain)
     if brain and brain.id then
         _pick[brain.id] = nil
         _self[brain.id] = nil
+        _lock[brain.id] = nil
     end
 end
 

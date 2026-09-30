@@ -179,8 +179,7 @@
 	clothing: TorsoExtraVest = Base.Vest_Hunting_Grey
 	clothing: Shoes = Base.Shoes_ArmyBoots
 	tint: Boilersuit = 3355443
-	weapons: primary = Base.Shrike
-	weapons: scope = Base.Scope_ATACR7_F1
+	weapons: primary = Base.XM214
 	weapons: melee = Base.Machete
-	ammo: primary = 10
+	ammo: primary = 52
 	bag: name = Base.Bag_WeaponBag

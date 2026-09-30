@@ -138,6 +138,14 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot, fire)
         end
     end
 
+    -- rotary guns (Arsenal miniguns: FireMode "[6]Rotary", no FireModePossibilities)
+    -- count as automatic, but only for caller-defined fire plans so the default
+    -- hitman burst rule stays exactly as it was
+    if fire and not hasAuto then
+        local fm = weaponItem:getFireMode()
+        if fm and (fm:find("Rotary") or fm:find("Auto")) then hasAuto = true end
+    end
+
     local bullets, interval = 1, 6
     if fire and hasAuto then
         bullets = fire.bullets or 1
