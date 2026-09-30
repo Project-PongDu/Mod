@@ -266,6 +266,33 @@ local function hitmanize(zombie, hitman, clan, args)
 
     brain.clothing = hitman.clothing or {}
     brain.tint = hitman.tint or {}
+
+    -- PONGDU: optional alternate outfit ("clothingAlt:" / "tintAlt:" / "textureAlt:"
+    -- in hitmans.txt). Used only when every alt item script exists, i.e. the
+    -- clothing mod is loaded; otherwise the regular "clothing:" set is the
+    -- fallback. All-or-nothing so a hitman is never half dressed.
+    -- textureAlt picks a fixed ClothingItem textureChoices index per body location
+    -- (HitmanUpdate.lua ApplyVisuals); without it the engine picks one at random.
+    if hitman.clothingAlt then
+        local missing
+        local count = 0
+        for _, itemType in pairs(hitman.clothingAlt) do
+            count = count + 1
+            if not getScriptManager():FindItem(itemType) then
+                missing = itemType
+                break
+            end
+        end
+        if missing then
+            print("[HITMANS] id " .. tostring(id) .. " alt outfit skipped, missing item " .. tostring(missing) .. " -- default clothing")
+        else
+            brain.clothing = hitman.clothingAlt
+            brain.tint = hitman.tintAlt or {}
+            brain.texture = hitman.textureAlt
+            print("[HITMANS] id " .. tostring(id) .. " alt outfit applied, items=" .. count)
+        end
+    end
+
     brain.bag = hitman.bag
 
     brain.loot = {}

@@ -292,30 +292,47 @@ local function ApplyVisuals(hitman, brain)
             hitmanVisuals:setBeardColor(icolor) 
         end
 
+        local function addClothing(bodyLocation, itemType)
+            local item = HitmanCompatibility.InstanceItem(itemType)
+            if not item then return end
+            --[[
+            local clothingItem = item:getClothingItem()
+            if clothingItem then
+                local itemVisual = hitmanVisuals:addClothingItem(itemVisuals, clothingItem)
+            end]]
+            local itemVisual = ItemVisual.new()
+            itemVisual:setItemType(itemType)
+            itemVisual:setClothingItemName(itemType)
+
+            if brain.tint[bodyLocation] then
+                local color = HitmanUtils.dec2rgb(brain.tint[bodyLocation])
+                local immutableColor = ImmutableColor.new(color.r, color.g, color.b, 1)
+                itemVisual:setTint(immutableColor)
+            end
+
+            -- 프로필이 텍스처를 고정한 부위(textureAlt): 기본값 -1(무작위) 대신 지정 인덱스
+            if brain.texture and brain.texture[bodyLocation] then
+                itemVisual:setTextureChoice(brain.texture[bodyLocation])
+            end
+
+            itemVisuals:add(itemVisual)
+        end
+
         -- items must be applied in a good order, hence the double loop
+        local applied = {}
         for _, bodyLocationDef in pairs(HitmanCompatibility.GetBodyLocationsOrdered()) do
             for bodyLocation, itemType in pairs(brain.clothing) do
                 if bodyLocation == bodyLocationDef then
-                    local item = HitmanCompatibility.InstanceItem(itemType)
-                    if item then
-                        --[[
-                        local clothingItem = item:getClothingItem()
-                        if clothingItem then
-                            local itemVisual = hitmanVisuals:addClothingItem(itemVisuals, clothingItem)
-                        end]]
-                        local itemVisual = ItemVisual.new()
-                        itemVisual:setItemType(itemType)
-                        itemVisual:setClothingItemName(itemType)
-
-                        if brain.tint[bodyLocation] then
-                            local color = HitmanUtils.dec2rgb(brain.tint[bodyLocation])
-                            local immutableColor = ImmutableColor.new(color.r, color.g, color.b, 1)
-                            itemVisual:setTint(immutableColor)
-                        end
-
-                        itemVisuals:add(itemVisual)
-                    end
+                    addClothing(bodyLocation, itemType)
+                    applied[bodyLocation] = true
                 end
+            end
+        end
+
+        -- 순서 목록에 없는 모드 전용 부위(KATTAJ1LowerLegs 등)는 맨 뒤에 입힌다
+        for bodyLocation, itemType in pairs(brain.clothing) do
+            if not applied[bodyLocation] then
+                addClothing(bodyLocation, itemType)
             end
         end
 
