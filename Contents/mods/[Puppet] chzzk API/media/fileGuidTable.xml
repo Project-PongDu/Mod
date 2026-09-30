@@ -3424,4 +3424,8 @@
 		<path>media/clothing/clothingItems/PongDu_ZombieParachute.xml</path>
 		<guid>46d258d8-67d9-440f-b82b-75db11c0b252</guid>
 	</files>
+	<files>
+		<path>media/clothing/clothingItems/PongDu_AirborneParachutePack.xml</path>
+		<guid>b4fdc0dd-1fd9-454f-b31d-b03b576669e9</guid>
+	</files>
 </fileGuidTable>

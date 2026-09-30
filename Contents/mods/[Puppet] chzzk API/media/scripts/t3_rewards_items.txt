@@ -1032,4 +1032,41 @@ item PongDuZombieParachute
     ReplaceInPrimaryHand  = Bag_HikingBag_RHand holdingbagright,
 }
 
+/* fire_support/airborne(공수부대원) 배낭: hitmans.txt Airborne_Trooper 의 bag.
+   Parachuting Start 모드(Panopticon, Glytch3r, Sapph, Dante271)의 ParachuteContainer
+   메쉬를 자체 네임스페이스로 복사해 쓴다. 이 메쉬는 강하/좀비 공습 낙하산
+   (PongDu_OpenParachute)의 배낭 부분과 정점이 완전히 같다 -- 캐노피만 뺀 것.
+   텍스처/아이콘은 PongDuZombieParachute 와 공용(PongDu_parachute / PongDuParachute).
+   능력치는 원본 ParachuteContainer 그대로. 대원이 죽으면 시체 옆에 실제 가방으로
+   떨어진다(Hitman.lua addItemToSpawnAtDeath). */
+model PongDuParachutePackGround
+{
+    mesh    = WorldItems/PongDu_ParachutePack_Ground,
+    texture = PongDu_parachute,
+    scale   = 1.0,
+}
+
+item PongDuAirborneParachutePack
+{
+    DisplayCategory       = Bag,
+    WeightReduction       = 70,
+    Weight                = 0.8,
+    Type                  = Container,
+    Capacity              = 20,
+    DisplayName           = Airborne Parachute Pack,
+    Icon                  = PongDuParachute,
+    CanBeEquipped         = Back,
+    OpenSound             = OpenBag,
+    CloseSound            = CloseBag,
+    PutInSound            = PutItemInBag,
+    ClothingItem          = PongDu_AirborneParachutePack,
+    BloodLocation         = Bag,
+    RunSpeedModifier      = 0.96,
+    CanHaveHoles          = false,
+    AttachmentReplacement = Bag,
+    ReplaceInSecondHand   = Bag_HikingBag_LHand holdingbagleft,
+    ReplaceInPrimaryHand  = Bag_HikingBag_RHand holdingbagright,
+    WorldStaticModel      = PongDuParachutePackGround,
+}
+
 }

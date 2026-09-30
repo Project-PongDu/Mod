@@ -57,5 +57,7 @@ ItemName_KO = {
     ItemName_t3chzzkDonation.medical_box = "의약품 보급상자",
 
     ItemName_t3chzzkDonation.Zomboxivir = "좀복시비르 앰퓰",
+
+    ItemName_t3chzzkDonation.PongDuAirborneParachutePack = "공수부대원 낙하산배낭",
 	
 }

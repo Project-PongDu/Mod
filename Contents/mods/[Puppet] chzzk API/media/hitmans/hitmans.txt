@@ -197,4 +197,4 @@
 	weapons: primary = Base.XM214
 	weapons: melee = Base.Machete
 	ammo: primary = 52
-	bag: name = Base.Bag_WeaponBag
+	bag: name = t3chzzkDonation.PongDuAirborneParachutePack
