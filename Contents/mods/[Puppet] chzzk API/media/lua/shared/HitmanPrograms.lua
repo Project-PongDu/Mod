@@ -44,7 +44,8 @@ end
 
 -- fixedTime (optional): aim duration in ticks instead of the distance-based one
 -- (PONGDU: airborne troopers, features/airborne.lua AIM_TICKS)
-HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot, fixedTime)
+-- PONGDU: turnRate (optional, deg/s) makes the Aim task turn gradually (ZAAim) instead of snapping
+HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot, fixedTime, turnRate)
     local tasks = {}
 
     local walkType = hitman:getVariableString("HitmanWalkType")
@@ -103,7 +104,7 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot, fixedTime)
         if fixedTime then time = fixedTime end
 
         local eid = HitmanUtils.GetCharacterID(enemyCharacter)
-        local task = {action="Aim", anim=anim, sound=sound, x=enemyCharacter:getX(), y=enemyCharacter:getY(), time=time, eid=eid}
+        local task = {action="Aim", anim=anim, sound=sound, x=enemyCharacter:getX(), y=enemyCharacter:getY(), time=time, eid=eid, turnRate=turnRate}
         table.insert(tasks, task)
     end
     return tasks
@@ -209,7 +210,7 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot, fire)
         local delay = math.max(0, firingtime)
         local window = math.ceil(bullets / rate * 60) + 6
         table.insert(tasks, {action="Shoot", anim=anim, time=delay + window, window=window, rate=rate, left=bullets,
-                             slot=slot, x=x, y=y, z=z, eid=eid})
+                             turnRate=fire.turnRate, slot=slot, x=x, y=y, z=z, eid=eid})
         return tasks
     end
 

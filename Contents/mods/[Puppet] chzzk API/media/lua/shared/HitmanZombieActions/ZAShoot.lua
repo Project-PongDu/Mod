@@ -498,6 +498,15 @@ end
 -- exact rate; after a pause longer than RATE_RESET_MS the first round goes at once.
 local RATE_RESET_MS      = 250
 local RATE_MAX_PER_FRAME = 4      -- cap after a hitch
+local AIMED_TOL          = 5      -- deg: within this the round goes at the target
+local BLIND_MIN_R        = 10     -- blind rounds fly at least this far (tiles)
+local BLIND_MAX_R        = 30
+
+-- aim point for a blind round (manageLineOfFire only calls getX/getY/getZ on it)
+local blindPoint = { x = 0, y = 0, z = 0 }
+function blindPoint:getX() return self.x end
+function blindPoint:getY() return self.y end
+function blindPoint:getZ() return self.z end
 local rateState = {}              -- [shooter brain id] = { last = ms, carry = rounds }
 local rateWeapon = {}             -- [shooter brain id] = { task = task, item = HandWeapon }
 
@@ -517,7 +526,10 @@ local function rateFire(zombie, task, enemy)
     if not weapon or (weapon.bulletsLeft or 0) <= 0 then task.left = 0; return end
 
     local sx, sy, sz, sd = zombie:getX(), zombie:getY(), zombie:getZ(), zombie:getDirectionAngle()
-    if not HitmanUtils.IsFacing(sx, sy, sd, enemy:getX(), enemy:getY(), 5) then return end
+    local aimed = HitmanUtils.IsFacing(sx, sy, sd, enemy:getX(), enemy:getY(), AIMED_TOL)
+    -- turning task (task.turnRate): keep firing while the gun sweeps toward the
+    -- target; rounds go where the barrel points (blind) until it is on target
+    if not aimed and not task.turnRate then return end
 
     local now = getTimestampMs()
     local sid = brainShooter.id
@@ -540,12 +552,26 @@ local function rateFire(zombie, task, enemy)
     if not weaponItem then task.left = 0; return end
 
     local projectiles = getProjectileCount(weaponItem:getWeaponReloadType())
-    local clear = HitmanUtils.LineClear(zombie, enemy)
+    local aimAt, clear = enemy, false
+    if aimed then
+        clear = HitmanUtils.LineClear(zombie, enemy)
+    else
+        -- blind: a point straight down the barrel at about the target's range.
+        -- manageLineOfFire stops at walls and rolls a hit on anyone in the line
+        -- (and around the end point), so zombies swept by the barrel can die.
+        local ex, ey = enemy:getX() - sx, enemy:getY() - sy
+        local r = math.sqrt(ex * ex + ey * ey)
+        if r < BLIND_MIN_R then r = BLIND_MIN_R elseif r > BLIND_MAX_R then r = BLIND_MAX_R end
+        local rad = math.rad(sd)
+        blindPoint.x, blindPoint.y, blindPoint.z = sx + math.cos(rad) * r, sy + math.sin(rad) * r, sz
+        aimAt, clear = blindPoint, true
+        task.blind = (task.blind or 0) + n
+    end
     for _ = 1, n do
         weapon.bulletsLeft = weapon.bulletsLeft - 1
         task.left = task.left - 1
         HitmanProjectile.Add(sid, sx, sy, sz, sd, projectiles)
-        if clear then manageLineOfFire(zombie, enemy, weaponItem) end
+        if clear then manageLineOfFire(zombie, aimAt, weaponItem) end
     end
     st.carry = owed - n
     if st.carry > 1 then st.carry = 1 end
@@ -577,7 +603,12 @@ end
 HitmanZombieActions.Shoot.onWorking = function(zombie, task)
     local enemy = HitmanZombie.Cache[task.eid] or HitmanPlayer.GetPlayerById(task.eid)
     if not enemy then return true end
-    zombie:faceLocationF(enemy:getX(), enemy:getY())
+    if task.turnRate then
+        -- PONGDU: sweep toward the target at turnRate deg/s instead of snapping
+        HitmanUtils.TurnToward(zombie, enemy:getX(), enemy:getY(), task.turnRate, task)
+    else
+        zombie:faceLocationF(enemy:getX(), enemy:getY())
+    end
 
     if task.time <= 0 then
         return true
@@ -605,6 +636,10 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
     if task.rate then
         local brainShooter = HitmanBrain.Get(zombie)
         if brainShooter then rateWeapon[brainShooter.id] = nil end
+        if task.blind and task.blind > 0 then
+            print(string.format("[HITMANS] id %s burst done, %d blind rounds while turning (eid=%s)",
+                tostring(brainShooter and brainShooter.id), task.blind, tostring(task.eid)))
+        end
         Hitman.UpdateItemsToSpawnAtDeath(zombie)
         return true
     end

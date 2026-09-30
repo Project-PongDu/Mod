@@ -563,6 +563,8 @@ local ClearTaskActionStates = {
     ["staggerback-knockeddown"] = true,
 }
 
+local turnAlertLogAt = {}   -- [brain.id] = ms of the last frame seen in turnalerted
+
 local function ManageActionState(hitman)
     local asn = hitman:getActionStateName()
 
@@ -592,8 +594,14 @@ local function ManageActionState(hitman)
             hitman:getPathFindBehavior2():cancel()
             hitman:setPath2(nil)
         end
+        -- log once per entry, not every frame (the anim state lingers ~0.4 s)
         local b = HitmanBrain.Get(hitman)
-        print("[PongDu][Hitman] id=" .. tostring(b and b.id) .. " turnalerted suppressed")
+        local id = b and b.id
+        local now = getTimestampMs()
+        if id and (not turnAlertLogAt[id] or now - turnAlertLogAt[id] > 2000) then
+            print("[PongDu][Hitman] id=" .. tostring(id) .. " turnalerted suppressed")
+        end
+        if id then turnAlertLogAt[id] = now end
         return true
     elseif asn == "pathfind" then
         return false
@@ -1443,15 +1451,9 @@ local function ManageCombat(hitman)
                 if veh then Hitman.Say(hitman, "CAR") end
 
                 local facing = hitman:isFacingObject(enemyCharacter, 0.1)
-                local reaimTicks
                 if isTrooper then
-                    -- a new target more than REAIM_ANGLE off: re-aim (the Aim task turns
-                    -- and holds) instead of snapping round and firing at once
-                    reaimTicks = PongDuAirborne.ReaimTicks(hitman, brain, enemyCharacter)
-                    if not facing and not reaimTicks then
-                        -- small turn: faceThisObject turns instantly, no idle frame
-                        hitman:faceThisObject(enemyCharacter)
-                    end
+                    -- troopers never snap round: the Aim/Shoot task turns them toward the
+                    -- target at PongDuAirborne.TURN_DEG_PER_S and keeps firing meanwhile
                     facing = true
                 end
                 if facing then
@@ -1461,9 +1463,10 @@ local function ManageCombat(hitman)
                             local stasks = HitmanPrograms.Weapon.Rack(hitman, fireSlot)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
-                        elseif reaimTicks or not Hitman.IsAim(hitman) then
-                            local aimTime = isTrooper and (reaimTicks or PongDuAirborne.AIM_TICKS) or nil
-                            local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot, aimTime)
+                        elseif not Hitman.IsAim(hitman) then
+                            local aimTime = isTrooper and PongDuAirborne.AIM_TICKS or nil
+                            local turnRate = isTrooper and PongDuAirborne.TURN_DEG_PER_S or nil
+                            local stasks = HitmanPrograms.Weapon.Aim(hitman, enemyCharacter, fireSlot, aimTime, turnRate)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
                         else

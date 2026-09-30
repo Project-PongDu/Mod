@@ -304,6 +304,31 @@ function HitmanUtils.IsFacing(sx, sy, sa, tx, ty, tolerance)
     return math.abs(angleDiff) < tolerance
 end
 
+-- PONGDU: turn a character toward (tx, ty) at most rate deg/s instead of snapping.
+-- state: a table that keeps the last call time (e.g. the running task). First call
+-- only stamps the time. Returns the angle (deg) still left to turn.
+function HitmanUtils.TurnToward(chr, tx, ty, rate, state)
+    local now = getTimestampMs()
+    local last = state.turnAt or now
+    state.turnAt = now
+    local dt = (now - last) / 1000
+    if dt > 0.1 then dt = 0.1 end   -- hitch cap: no big jump after a freeze
+    local cur = chr:getDirectionAngle()
+    local d = HitmanUtils.CalcAngle(chr:getX(), chr:getY(), tx, ty) - cur
+    while d > 180 do d = d - 360 end
+    while d < -180 do d = d + 360 end
+    local step = rate * dt
+    local left = math.abs(d)
+    if left <= step then
+        chr:setDirectionAngle(cur + d)
+        return 0
+    end
+    local a = cur + ((d > 0) and step or -step)
+    if a > 180 then a = a - 360 elseif a < -180 then a = a + 360 end
+    chr:setDirectionAngle(a)
+    return left - step
+end
+
 function HitmanUtils.IsInAngle(observer, targetX, targetY)
     local omega = observer:getDirectionAngle()
     local targer_delta_x = targetX - observer:getX()

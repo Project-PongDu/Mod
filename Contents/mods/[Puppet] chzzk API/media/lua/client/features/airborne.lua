@@ -21,7 +21,8 @@
 --      - PATROL(50타일 안 보이는 적 없음) / FLEE(위험 + 3타일 안 5마리) / FIRE
 --      - FIRE phase1 위험(자신을 무는 좀비/쏘는 적대 히트맨) > phase2 대원 10타일
 --        > phase3 플레이어 호위. phase2/3 은 드론 호위 로직(A>L>N>D)
---      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준
+--      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준,
+--        표적 전환 시 순간 회전 없이 TURN_DEG_PER_S 로 돌며 계속 사격(눈먼 탄)
 --  를 맡는다. 자세한 규칙은 "착지 후 행동 상태" 절.
 --
 --  키는 onlineID 가 아니라 히트맨 id(HitmanUtils.GetZombieID)다. SP 에선 모든
@@ -320,8 +321,7 @@ local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발
 local FULLAUTO_ROUNDS   = 18   -- 연발 1회 계획 탄수(약 1초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
 local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
 local AUTO_INTERVAL     = 6    -- 연사 속도를 모르는 총일 때의 탄 간격(틱)
-_a.REAIM_ANGLE          = 30   -- 표적 전환 시 이보다 크게 돌아야 하면 재조준
-_a.REAIM_TICKS          = 30   -- 재조준 시간(틱, 0.5초). 그동안 돌아서 겨누기만 하고 쏘지 않는다
+_a.TURN_DEG_PER_S       = 180  -- 표적 쪽으로 도는 속도(도/초). 순간 회전 대신 이 속도로 돌며 계속 쏜다
 
 local ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
 local LUNGE_STATES  = { ["lunge"] = true, ["lunge-network"] = true }
@@ -712,28 +712,13 @@ end
 -- 사격 계획: FULLAUTO_MAX 이내는 연발(바로 이어서), 그 밖은 5발 점사(첫 발은
 -- 기본 발사 지연 = 점사 사이 간격). fresh = 막 새로 잡은 표적(_a.TakeFreshLock):
 -- 멀어도 첫 점사는 지연 없이 쏜다. 연사 속도는 Weapon.Shoot 가 총 FireMode 로 정한다.
+-- turnRate: 사격 태스크가 표적 쪽으로 TURN_DEG_PER_S 로 돌면서 쏜다. 총구가 아직 표적을
+-- 향하지 않은 동안 나가는 탄은 총구 방향으로 날아가(눈먼 탄) 그 선 위의 좀비를 맞힐 수 있다.
 function _a.FirePlan(dist, fresh)
     if dist <= FULLAUTO_MAX then
-        return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = 0 }
+        return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = 0, turnRate = _a.TURN_DEG_PER_S }
     end
-    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and 0 or nil }
-end
-
--- 표적 전환 재조준: 새 표적(마지막으로 조준한 표적과 다름)이 REAIM_ANGLE 보다 크게
--- 돌아야 하는 방향이면 REAIM_TICKS 를 돌려준다 -> ManageCombat 이 Aim 태스크(돌아서
--- 겨누기)를 그만큼 건 뒤에 쏜다. 에임핵처럼 휙 돌자마자 쏘지 않게 하는 연출이다.
--- 같은 표적을 쏘는 동안은 nil (연사 중 표적을 따라 도는 건 그대로).
-function _a.ReaimTicks(hitman, brain, enemy)
-    local eid = HitmanUtils.GetCharacterID(enemy)
-    if brain.abAimEid == eid then return nil end
-    brain.abAimEid = eid
-    local d = HitmanUtils.CalcAngle(hitman:getX(), hitman:getY(), enemy:getX(), enemy:getY()) - hitman:getDirectionAngle()
-    while d > 180 do d = d - 360 end
-    while d < -180 do d = d + 360 end
-    if math.abs(d) <= _a.REAIM_ANGLE then return nil end
-    print(string.format("[PongDu][Airborne] reaim id=%s target=%s turn=%d deg -- %d ticks",
-        tostring(brain.id), tostring(eid), math.floor(math.abs(d) + 0.5), _a.REAIM_TICKS))
-    return _a.REAIM_TICKS
+    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and 0 or nil, turnRate = _a.TURN_DEG_PER_S }
 end
 
 -- 지금 표적이 새로 잡은 뒤 아직 한 번도 사격 계획을 안 세운 표적이면 true (한 번만).
