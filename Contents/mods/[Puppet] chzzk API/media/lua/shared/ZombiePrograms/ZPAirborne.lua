@@ -18,6 +18,11 @@ HitmanZombiePrograms = HitmanZombiePrograms or {}
 --  교전(표적 고정/후퇴)은 HitmanUpdate.lua ManageCombat + features/airborne.lua 가
 --  맡고 여기선 이동만 만든다. 탄이 바닥난 근접 모드에서는 ManageCombat 이 남긴
 --  추격 지점(brain.abChase)으로 붙는다.
+--  상태(brain.abState, features/airborne.lua Think):
+--    PATROL -> 위 순찰
+--    FIRE 인데 쏠 표적이 없을 때(감지는 됐지만 phase2/3 범위 밖, 또는 표적이 잠깐
+--    가려짐) -> 순찰을 멈추고 호위 경계: 대상 곁(LEASH_R 안)에 서서 마지막으로
+--    감지된 적(brain.abFace) 쪽을 겨눈다.
 --  강하/착지 중에는 features/airborne.lua 가 AI 를 잡고 있어 호출되지 않는다.
 -- ═══════════════════════════════════════════════════════════════════════════
 HitmanZombiePrograms.Airborne = {}
@@ -32,6 +37,12 @@ local LEASH_R       = 12     -- 호위 대상과 이보다 멀면 달려서 복�
 local CHASE_TTL_MS  = 1000   -- ManageCombat 추격 지점 유효시간
 
 local TWO_PI = math.pi * 2
+
+-- Kahlua 의 % 는 0 쪽으로 버린다(KahluaThread OP_MOD: a - (int)(a/b)*b).
+-- -1 % 8 이 7 이 아니라 -1 이 되므로 음수 번호를 0..n-1 로 되돌린다.
+local function wrap(i)
+    return ((i % PATROL_POINTS) + PATROL_POINTS) % PATROL_POINTS
+end
 
 local function ringPoint(ex, ey, i)
     local a = (i % PATROL_POINTS) * TWO_PI / PATROL_POINTS
@@ -97,10 +108,19 @@ HitmanZombiePrograms.Airborne.Main = function(hitman)
     local p = brain.abPatrol
     if not p then
         local id = tonumber(brain.id) or 0
-        p = { i = id % PATROL_POINTS, dir = (math.floor(id / PATROL_POINTS) % 2 == 0) and 1 or -1 }
+        p = { i = wrap(id), dir = (math.floor(id / PATROL_POINTS) % 2 == 0) and 1 or -1 }
         brain.abPatrol = p
         print(string.format("[PongDu][Airborne] patrol start id=%s point=%d dir=%d r=%d",
             tostring(brain.id), p.i, p.dir, PATROL_R))
+    end
+
+    -- 교전 중인데 쏠 표적이 없음: 순찰을 멈추고 대상 곁에서 감지된 적 쪽을 겨눈다
+    if brain.abState == "FIRE" and dist <= LEASH_R then
+        p.legUntil = nil
+        local f = brain.abFace
+        if f then hitman:faceLocationF(f.x, f.y) end
+        table.insert(tasks, {action="Time", anim="AimRifle", time=30})
+        return {status=true, next="Main", tasks=tasks}
     end
 
     -- 호위 대상과 멀어졌으면 원 위 가장 가까운 지점으로 달려 복귀
@@ -120,7 +140,7 @@ HitmanZombiePrograms.Airborne.Main = function(hitman)
     for _ = 1, PATROL_POINTS do
         tx, ty = ringPoint(ex, ey, p.i)
         if pointOk(cell, tx, ty, ez, outside) then break end
-        p.i = (p.i + p.dir) % PATROL_POINTS
+        p.i = wrap(p.i + p.dir)
         p.legUntil = nil
         tx = nil
     end
@@ -134,7 +154,7 @@ HitmanZombiePrograms.Airborne.Main = function(hitman)
     if d <= PATROL_REACH then
         -- 도착: 바깥쪽을 보며 경계 후 다음 지점으로
         hitman:faceLocationF(tx + (tx - ex), ty + (ty - ey))
-        p.i = (p.i + p.dir) % PATROL_POINTS
+        p.i = wrap(p.i + p.dir)
         p.legUntil = nil
         table.insert(tasks, {action="Time", anim="AimRifle", time=PATROL_SCAN})
         return {status=true, next="Main", tasks=tasks}
@@ -145,7 +165,7 @@ HitmanZombiePrograms.Airborne.Main = function(hitman)
         -- 길이 막혀 못 간 지점은 건너뛴다
         print(string.format("[PongDu][Airborne] patrol skip id=%s point=%d (not reached in %dms)",
             tostring(brain.id), p.i, PATROL_LEG_MS))
-        p.i = (p.i + p.dir) % PATROL_POINTS
+        p.i = wrap(p.i + p.dir)
         p.legUntil = nil
         table.insert(tasks, {action="Time", anim="ShiftWeight", time=30})
         return {status=true, next="Main", tasks=tasks}

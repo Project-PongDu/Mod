@@ -109,9 +109,32 @@ HitmanPrograms.Weapon.Aim = function(hitman, enemyCharacter, slot, fixedTime)
     return tasks
 end
 
+-- PONGDU: 자동 사격 속도(발/초)를 플레이어가 같은 총을 쏠 때와 맞춘다.
+-- B41 자동 사격은 발마다 Bob_AttackRifle_Small 클립(3200틱 / 4800틱/초 = 0.667초)을
+-- 한 번 재생하므로 발당 시간 = 0.667 / (노드 SpeedScale x 2D 블렌드 SpeedScale 0.8).
+--   [6]Rotary : Arsenal AnimSets/player/ranged/firearm/AssaultRifle[6]Rotary.xml SpeedScale 15
+--               -> 0.8 x 15 / 0.667 = 초당 18발 (1080 RPM)
+--   Auto      : Arsenal 이 AssaultRifleDefault.xml 을 SpeedScale 8 로 덮는다 -> 초당 9.6발.
+--               Arsenal 이 없으면 바닐라 autoShootSpeed 4 (SwipeStatePlayer) -> 초당 4.8발.
+-- 표에 없는 모드는 nil (예전처럼 fire.interval 틱 간격).
+local RIFLE_CLIP_S = 3200 / 4800
+HitmanPrograms.Weapon.AutoRate = function(weaponItem)
+    local fm = weaponItem:getFireMode()
+    if fm == "[6]Rotary" then return 0.8 * 15 / RIFLE_CLIP_S end
+    if fm == "Auto" then
+        local arsenal = getScriptManager():FindItem("Base.XM214") ~= nil
+        return 0.8 * (arsenal and 8 or 4) / RIFLE_CLIP_S
+    end
+    return nil
+end
+
 -- fire (optional): {bullets=n, interval=ticks, firstTime=ticks} replaces the
 -- default burst rule (auto weapons: 2~7 rounds under 15 tiles, else 1 round).
 -- Only honoured for weapons with an Auto fire mode.
+-- PONGDU: when Weapon.AutoRate knows the fire mode, the whole plan is ONE Shoot
+-- task (rate, left, window) that ZAShoot fires at that rate frame by frame
+-- (the one-round-per-task pipeline costs at least 3 frames a round and cannot
+-- reach 18 rounds/s). firstTime = ticks before the first round.
 -- (PONGDU: airborne troopers, features/airborne.lua FirePlan)
 HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot, fire)
     local tasks = {}
@@ -180,6 +203,16 @@ HitmanPrograms.Weapon.Shoot = function(hitman, enemyCharacter, slot, fire)
 
     local x, y, z = enemyCharacter:getX() + fd:getX(), enemyCharacter:getY() + fd:getY(), enemyCharacter:getZ()
     local eid = HitmanUtils.GetCharacterID(enemyCharacter)
+
+    local rate = fire and hasAuto and HitmanPrograms.Weapon.AutoRate(weaponItem) or nil
+    if rate then
+        local delay = math.max(0, firingtime)
+        local window = math.ceil(bullets / rate * 60) + 6
+        table.insert(tasks, {action="Shoot", anim=anim, time=delay + window, window=window, rate=rate, left=bullets,
+                             slot=slot, x=x, y=y, z=z, eid=eid})
+        return tasks
+    end
+
     local task = {action="Shoot", anim=anim, time=firingtime, slot=slot, x=x, y=y, z=z, eid=eid}
     table.insert(tasks, task)
     for i=2, bullets do

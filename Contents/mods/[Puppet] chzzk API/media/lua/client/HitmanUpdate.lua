@@ -1111,11 +1111,14 @@ local function ManageCombat(hitman)
     local isOutside = hitman:getSquare():isOutside()
     local isTrooper = PongDuAirborne ~= nil and brain.program ~= nil and brain.program.name == "Airborne"
 
-    -- airborne trooper: a tactical retreat (5+ enemies within 3 tiles) beats
-    -- everything else; while it runs no shot is planned
+    -- airborne trooper: PATROL / FLEE / FIRE state machine (features/airborne.lua
+    -- Think). FLEE (5+ enemies within 3 tiles while in combat) beats everything
+    -- else and plans no shot; FIRE hands over the target of phase 1/2/3.
+    local trooperTarget, trooperDist
     if isTrooper then
-        local rtasks = PongDuAirborne.RetreatTick(hitman, brain)
-        if rtasks then return rtasks end
+        local mode, a, b = PongDuAirborne.Think(hitman, brain)
+        if mode == "flee" then return a end
+        if mode == "fire" then trooperTarget, trooperDist = a, b end
     end
 
     local bestDist = 40
@@ -1157,14 +1160,12 @@ local function ManageCombat(hitman)
     local bwdDist = 2.8
 
     -- PRIORITY 1: ZOMBIES AGGRO'D ON THIS HITMAN
-    -- (airborne trooper: PickTarget keeps one target until it is dead; a new one
-    --  is picked as closest enemy within 10 tiles > hostile hitman shooting at
-    --  the trooper > worst threat to the escorted player)
+    -- (airborne trooper: target comes from Think above -- phase 1 danger >
+    --  phase 2 own 10 tiles > phase 3 escort, locked until it dies)
     if isTrooper then
-        local t, tDist, tTier = PongDuAirborne.PickTarget(hitman, brain)
-        if t then
-            bestDist, enemyCharacter = tDist, t
-            tier = (tTier == "escort") and "escort" or "threat"
+        if trooperTarget then
+            bestDist, enemyCharacter = trooperDist, trooperTarget
+            tier = "threat"
         else
             -- no target this tick (the locked one just died with nobody else in
             -- sight, or it is hidden): drop the rounds still queued for it instead
@@ -1173,10 +1174,11 @@ local function ManageCombat(hitman)
             if cur and (cur.action == "Shoot" or cur.action == "Aim") then
                 local left = 0
                 for _, qt in pairs(brain.tasks) do
-                    if qt.action == "Shoot" then left = left + 1 end
+                    -- rate-fire tasks (HitmanPrograms.Weapon.Shoot) carry their remaining rounds in .left
+                    if qt.action == "Shoot" then left = left + (qt.left or 1) end
                 end
                 Hitman.ClearTasks(hitman)
-                print(string.format("[PongDu][Airborne] id=%s no target, dropped %d queued shots (eid=%s)",
+                print(string.format("[PongDu][Airborne] id=%s no target, dropped %d queued rounds (eid=%s)",
                     tostring(brain.id), left, tostring(cur.eid)))
             end
         end

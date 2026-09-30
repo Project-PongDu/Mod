@@ -17,13 +17,12 @@
 --      모션을 건너뛰고 바로 AI 를 푼다 (모션 중엔 반격을 못 한다).
 --      (예전 BumpType 방식은 turnalerted/falling 상태에 bumped 전이가 없어서
 --       두리번 모션이 먼저 나오거나 아예 안 나왔다.)
---   ③ 표적 선정/사격 제어: 대원 전투 AI(HitmanUpdate.lua ManageCombat)가 부르는
---      - RetreatTick: 3타일 안 적 5마리 이상이면 반대쪽으로 10타일 후퇴 (최우선)
---      - PickTarget: 표적 고정. 잡은 표적은 죽을 때까지 유지하고, 새로 고를 때만
---        PickSelfThreat(대원 10타일 안 최근접) > FindAttacker(대원을 쏘는 적대
---        히트맨) > PickEscortThreat(호위 대상에게 가장 위협적인 적) 순으로 고른다
+--   ③ 착지 후 행동 상태: 대원 전투 AI(HitmanUpdate.lua ManageCombat)가 매 프레임 Think
+--      - PATROL(50타일 안 보이는 적 없음) / FLEE(위험 + 3타일 안 5마리) / FIRE
+--      - FIRE phase1 위험(자신을 무는 좀비/쏘는 적대 히트맨) > phase2 대원 10타일
+--        > phase3 플레이어 호위. phase2/3 은 드론 호위 로직(A>L>N>D)
 --      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준
---  를 맡는다.
+--  를 맡는다. 자세한 규칙은 "착지 후 행동 상태" 절.
 --
 --  키는 onlineID 가 아니라 히트맨 id(HitmanUtils.GetZombieID)다. SP 에선 모든
 --  좀비의 onlineID 가 -1 이라 onlineID 키면 모든 좀비가 대원으로 잡힌다.
@@ -270,30 +269,65 @@ Events.OnZombieDead.Add(function(zombie)
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  표적 선정 (HitmanUpdate.lua ManageCombat 이 대원일 때 호출)
+--  착지 후 행동 상태 (HitmanUpdate.lua ManageCombat 이 대원일 때 매 프레임 _a.Think)
+--
+--  상태 3가지
+--    PATROL  대원 50타일(DETECT_R) 안에 보이는 적이 없다 -> ZPAirborne 순찰
+--    FLEE    위험 + 3타일 안 적 5마리 이상 -> 반대쪽으로 10타일 후퇴(RetreatTick)
+--    FIRE    그 외 교전. 발포 phase 3단계:
+--      phase1 위험: 대원에게 공격모션(물기)이 나온 좀비 / 대원을 쏘는 적대 히트맨.
+--             후퇴가 막혔거나 쿨다운이면 3타일 안 최근접. 표적 고정을 무시하고 즉시 전환.
+--      phase2 여유 + 대원 10타일 안에 적: 드론 호위 로직을 대원 자신을 중심으로
+--      phase3 여유 + 대원 10타일 안이 정리됨: 드론 호위 로직을 플레이어 중심 20타일로
+--    FIRE 인데 쏠 표적이 없으면(감지는 됐는데 phase2/3 조건 밖) 순찰을 멈추고
+--    플레이어 곁에서 감지된 적 쪽을 겨누며 대기한다(ZPAirborne 경계).
+--
+--  위험 판정 (FIRE/FLEE 일 때만. PATROL 에서는 판정 안 함)
+--    - 3타일(RETREAT_R) 안 적 RETREAT_N(5) 마리 이상
+--    - 공격모션: 드론(firesupport.lua dronePickTarget)의 공격 판정은 좀비 상태
+--      attack/attack-network 다. 좀비가 히트맨을 물 때는 바닐라 attack 상태로 안 가고
+--      UpdateZombies 가 bumped + BumpType "Bite" 로 흉내 내므로(히트맨은
+--      setZombiesDontAttack) 둘 다 공격모션으로 본다. 대상이 이 대원이어야 한다.
+--      적대 히트맨이 이 대원에게 조준/사격/근접 태스크를 들고 있으면 그것도 공격모션.
+--
+--  드론 호위 로직 (dronePickTarget 과 같은 분류, 각 군 안에서는 중심점 최근접)
+--    A 공격 판정 중 > L 돌진 중 > N 정상(걷기/추적/기어오는 크롤러) > D 제압 중
+--    드론과 다른 점: 대원은 땅 위에서 쏘므로 같은 층 + 시야(CanSee/LineClear) 필수.
+--
+--  표적 고정: 잡은 표적은 죽을 때까지 유지한다. 예외는 더 높은 우선순위
+--  (phase 숫자가 작거나, 같은 phase 에서 군이 더 급함)가 나타날 때와,
+--  표적이 가려진 동안 다른 쏠 수 있는 적이 있을 때뿐이다. 쏠 표적이 전혀 없으면
+--  가려진 표적은 LOCK_LOST_MS 동안 붙잡고 사격만 멈춘다.
 -- ═══════════════════════════════════════════════════════════════════════════
-local ESCORT_SCAN_R    = 20    -- 호위 대상 중심 위협 탐지 반경 (드론 기본 인식 반경과 같음)
-local ESCORT_RESCAN_MS = 100   -- 좀비 리스트 전수 스캔 주기 (표적이 죽으면 즉시 재스캔)
-local SELF_R           = 10    -- 자기 방어 반경: 이 안의 적은 호위보다 먼저 가장 가까운 순으로 처리
-local SELF_R2          = SELF_R * SELF_R
-local SELF_RESCAN_MS   = 100
-local SELF_SWITCH_GAIN = 1.5   -- 새 적이 지금 표적보다 이만큼(타일) 더 가까워야 표적을 갈아탄다
+local DETECT_R        = 50     -- 이 안에 보이는 적이 있으면 교전(FIRE/FLEE), 없으면 순찰
+local DETECT_SCAN_MS  = 250
+local DETECT_GRACE_MS = 2000   -- 마지막으로 본 뒤 이 시간은 교전 유지 (시야가 깜빡일 때 상태가 뒤집히지 않게)
+local SELF_R          = 10     -- phase2: 대원 중심 반경
+local ESCORT_SCAN_R   = 20     -- phase3: 플레이어 중심 반경 (드론 기본 인식 반경과 같음)
+local BITE_R          = 1.5    -- 공격모션 판정 거리 (UpdateZombies 는 0.8 안에서 문다)
+local ATTACKER_R      = 30     -- 대원을 노리는 적대 히트맨 탐지 반경
+local PICK_SCAN_MS    = 100
+local LOCK_MAX_R      = 45     -- 이보다 멀면 "안 보임"으로 친다 (XM214 판정 사거리 45)
+local LOCK_LOST_MS    = 2000
+local RETREAT_R       = 3      -- 전략적 후퇴 절과 공유
+local RETREAT_N       = 5
 
 -- 사격 제어 (HitmanUpdate.lua ManageCombat -> HitmanPrograms.Weapon.Aim/Shoot)
+-- 연사 속도 자체는 HitmanPrograms.Weapon.AutoRate 가 총의 FireMode 로 정한다
+-- (Arsenal AnimSet 기준, XM214 [6]Rotary = 초당 18발).
 _a.AIM_TICKS            = 8    -- 조준 시간(틱, 1/60초). 기본 히트맨은 18 + 거리*2.5 (최대 60)
-local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발 (기본 히트맨 연사 기준 거리와 같음)
-local FULLAUTO_ROUNDS   = 10   -- 연발 1회 계획 탄수. 다 쏘면 표적을 다시 확인하고 이어서 쏜다
+local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발
+local FULLAUTO_ROUNDS   = 18   -- 연발 1회 계획 탄수(약 1초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
 local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
-local AUTO_INTERVAL     = 6    -- 연발 탄 간격(틱). 기본 히트맨 점사와 같은 값
-local ATTACKER_R       = 30    -- 자기를 노리는 적대 히트맨 탐지 반경
+local AUTO_INTERVAL     = 6    -- 연사 속도를 모르는 총일 때의 탄 간격(틱)
 
--- 좀비 상태 분류는 firesupport.lua dronePickTarget 과 같다. 한쪽을 바꾸면 맞출 것.
 local ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
 local LUNGE_STATES  = { ["lunge"] = true, ["lunge-network"] = true }
 local DOWN_STATES   = {
     ["hitreaction"] = true, ["hitreaction-hit"] = true, ["hitwhilestaggered"] = true,
     ["staggerback"] = true, ["falldown"] = true, ["onground"] = true, ["getup"] = true,
 }
+local TIER_ORDER    = { A = 1, L = 2, N = 3, D = 4 }
 local ATTACK_ACTIONS = { Aim = true, Shoot = true, Smack = true, Push = true }
 
 -- 적대 히트맨이 지금 eid 를 노리는 공격 태스크를 들고 있나.
@@ -303,7 +337,7 @@ local function hitmanAttacking(brain, eid)
     return t ~= nil and ATTACK_ACTIONS[t.action] == true and t.eid == eid
 end
 
--- 자기 위협: 자기를 공격 중인 적대 히트맨 중 가장 가까운(볼 수 있는) 놈
+-- 이 대원을 공격 중인 적대 히트맨 중 가장 가까운(볼 수 있는) 놈
 function _a.FindAttacker(hitman, brain)
     local myId = HitmanUtils.GetCharacterID(hitman)
     local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
@@ -326,263 +360,364 @@ function _a.FindAttacker(hitman, brain)
     return best, bestDist
 end
 
--- 위협 등급 (작을수록 먼저). nil = 표적 아님.
---  1 A: 호위 대상을 물고 있는 좀비 / 호위 대상을 공격 중인 적대 히트맨
---  2 L: 돌진 중인 좀비
---  3 S: 특수 풀 -- 특수좀비(PuppetMutant) + 적대 히트맨
---  4 N: 일반 좀비 (걷기/추적/기어오는 크롤러)
---  5 D: 제압 중(넘어짐/기상/피격 반응)
-local function threatRank(z, escortId)
-    if z:getVariableBoolean("Hitman") then
-        local b = HitmanBrain.Get(z)
-        if not b or not (b.hostile or b.hostileP) then return nil end
-        if hitmanAttacking(b, escortId) then return 1 end
-        return 3
-    end
-    if z:getVariableBoolean("Bandit") then return nil end   -- Bandits 모드 NPC: 적대 여부 불명
-
-    local remote = z:isRemoteZombie()
+local function zombieState(z)
     local ok, st = pcall(function()
-        if remote then return tostring(z:getRealState()) end
+        if z:isRemoteZombie() then return tostring(z:getRealState()) end
         return z:getActionStateName()
     end)
-    if not ok then st = nil end
-    if st and ATTACK_STATES[st] then return 1 end
-    if st and LUNGE_STATES[st] then return 2 end
+    if ok then return st end
+    return nil
+end
 
+-- 공격모션: 바닐라 공격 상태이거나, 히트맨 물기 흉내(bumped + BumpType "Bite").
+-- 원격 좀비는 st 가 소유 클라의 realState 라 로컬 상태도 같이 본다. BumpType 은 물기가
+-- 끝나도 남아 있으므로 bumped 상태일 때만 인정한다. 공격 중 여부만 보고 대상은 호출부가 본다.
+local function isAttacking(z, st)
+    if st and ATTACK_STATES[st] then return true end
+    local ok, res = pcall(function()
+        if z:getBumpType() ~= "Bite" then return false end
+        return st == "bumped" or z:getActionStateName() == "bumped"
+    end)
+    return ok and res == true
+end
+
+-- 드론 분류 (dronePickTarget 과 같은 판정 순서: 공격/돌진 먼저, 그다음 제압, 나머지 정상)
+local function droneTier(z)
+    local st = zombieState(z)
+    if isAttacking(z, st) then return "A" end
+    if st and LUNGE_STATES[st] then return "L" end
     local down = (st and DOWN_STATES[st]) and true or false
-    if not down and not remote then
+    if not down and not z:isRemoteZombie() then
         local okF, fl = pcall(function()
             if z:isKnockedDown() then return true end
             return z:isOnFloor() and not z:isCrawling()
         end)
         down = okF and fl or false
     end
-    if down then return 5 end
-
-    local md = z:getModData()
-    if md and md["PuppetMutant"] then return 3 end
-    return 4
+    if down then return "D" end
+    return "N"
 end
 
-local _pick = {}   -- [brain.id] = { at = ms, target = zombie|nil, rank = n }
-local _self = {}   -- [brain.id] = { at = ms, target = zombie|nil }
-
+local function d2Less(a, b) return a.d2 < b.d2 end
 local function candLess(a, b)
     if a.rank ~= b.rank then return a.rank < b.rank end
     return a.d2 < b.d2
 end
 
-local function d2Less(a, b) return a.d2 < b.d2 end
-
-local function aliveSameFloor(z, zz)
-    return z ~= nil and z:isAlive() and not z:isDead() and math.abs(z:getZ() - zz) < 0.5
+-- 쏠 수 있는 적인가 (살아 있음, Bandits NPC 아님, 대원과 같은 층)
+local function validEnemy(z, hitman, zz)
+    return z ~= nil and z ~= hitman and z:isAlive() and not z:isDead()
+        and math.abs(z:getZ() - zz) < 0.5 and not z:getVariableBoolean("Bandit")
 end
 
-local function logPick(kind, brain, prev, best, n)
-    if best == prev then return end
-    print(string.format("[PongDu][Airborne] %s target id=%s -> %s (candidates=%d)", kind,
-        tostring(brain.id), best and tostring(HitmanUtils.GetCharacterID(best)) or "none", n))
+local function visible(hitman, z)
+    return hitman:CanSee(z) and HitmanUtils.LineClear(hitman, z)
 end
 
--- 자기 위협: 대원 기준 SELF_R 안의 적 중 가장 가까운 놈 (일반 좀비 전부 + 적대 히트맨).
--- 잡은 표적은 죽거나/시야를 잃거나/반경을 벗어나기 전까지 유지하고, 새 적이
--- SELF_SWITCH_GAIN 이상 더 가까울 때만 갈아탄다 -- 거리가 비슷한 두 놈 사이에서
--- 매 스캔마다 표적이 뒤집히면 돌아서기만 하다 못 쏜다.
--- 반환: 표적, 대원과의 거리
-function _a.PickSelfThreat(hitman, brain)
-    local now = getTimestampMs()
-    local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
-    local c = _self[brain.id]
-    local cur = c and c.target
-    local curD2
-    if aliveSameFloor(cur, zz) then
-        local dx, dy = cur:getX() - zx, cur:getY() - zy
-        curD2 = dx * dx + dy * dy
-        if curD2 > SELF_R2 then cur, curD2 = nil, nil end
-    else
-        cur = nil
-    end
-    -- 스캔 사이에는 잡은 표적 유지. 표적이 죽으면 캐시를 무시하고 바로 다시 찾는다.
-    if cur and now < c.at + SELF_RESCAN_MS then
-        return cur, math.sqrt(curD2)
-    end
+-- ── 감지 (50타일, 시야) ─────────────────────────────────────────────────────
+local _det = {}   -- [brain.id] = { at, seenAt, found, nx, ny, nd }
 
-    local cache = HitmanZombie.Cache
+local function detect(hitman, brain, now, zx, zy, zz)
+    local d = _det[brain.id]
+    if d and now < d.at + DETECT_SCAN_MS then return d end
+    d = d or {}
+    d.at = now
+    local r2 = DETECT_R * DETECT_R
     local cands, n = {}, 0
     for id, light in pairs(HitmanZombie.CacheLight) do
         local dx, dy = light.x - zx, light.y - zy
-        if dx <= SELF_R and dx >= -SELF_R and dy <= SELF_R and dy >= -SELF_R then
+        if dx <= DETECT_R and dx >= -DETECT_R and dy <= DETECT_R and dy >= -DETECT_R
+           and math.abs(light.z - zz) < 0.5 then
             local d2 = dx * dx + dy * dy
-            if d2 <= SELF_R2 and HitmanUtils.AreEnemies(light.brain, brain) then
+            if d2 <= r2 and HitmanUtils.AreEnemies(light.brain, brain) then
                 n = n + 1
                 cands[n] = { id = id, d2 = d2 }
             end
         end
     end
     if n > 1 then table.sort(cands, d2Less) end
-
-    local best, bestD2
+    local cache = HitmanZombie.Cache
+    d.found = false
     for i = 1, n do
         local z = cache[cands[i].id]
-        if z and z ~= hitman and aliveSameFloor(z, zz) and not z:getVariableBoolean("Bandit")
-           and hitman:CanSee(z) and HitmanUtils.LineClear(hitman, z) then
-            local dx, dy = z:getX() - zx, z:getY() - zy
-            best, bestD2 = z, dx * dx + dy * dy
+        if validEnemy(z, hitman, zz) and hitman:CanSee(z) then
+            d.found, d.seenAt = true, now
+            d.nx, d.ny, d.nd = z:getX(), z:getY(), math.sqrt(cands[i].d2)
             break
         end
     end
-
-    if cur and best ~= cur and hitman:CanSee(cur) and HitmanUtils.LineClear(hitman, cur) then
-        if not best or math.sqrt(bestD2) > math.sqrt(curD2) - SELF_SWITCH_GAIN then
-            best, bestD2 = cur, curD2
-        end
-    end
-
-    logPick("self", brain, c and c.target, best, n)
-    _self[brain.id] = { at = now, target = best }
-    if best then return best, math.sqrt(bestD2) end
-    return nil
+    _det[brain.id] = d
+    return d
 end
 
--- 호위 대상에게 가장 위협적인 적 (등급 -> 호위 대상과의 거리). 대원이 볼 수
--- 있고 같은 층인 놈만 -- 못 쏘는 표적을 잡고 있으면 아무것도 못 한다.
--- 잡은 표적은 살아 있고 보이는 동안 유지하며, 등급이 더 높은(숫자가 작은) 적이
--- 나타날 때만 갈아탄다. 같은 등급끼리 거리 순위가 바뀌는 건 무시한다.
-function _a.PickEscortThreat(hitman, brain, escort)
-    local now = getTimestampMs()
-    local zz = hitman:getZ()
-    local c = _pick[brain.id]
-    local cur = c and c.target
-    if not aliveSameFloor(cur, zz) then cur = nil end
-    if c and now < c.at + ESCORT_RESCAN_MS and (cur or not c.target) then
-        return cur
-    end
-
-    local escortId = HitmanUtils.GetCharacterID(escort)
-    local ex, ey = escort:getX(), escort:getY()
-    local r2 = ESCORT_SCAN_R * ESCORT_SCAN_R
-    local cands, n = {}, 0
-    local curRank
-    local zl = getCell():getZombieList()
-    for i = 0, zl:size() - 1 do
-        local z = zl:get(i)
-        if z and z ~= hitman and not z:isDead() and math.abs(z:getZ() - zz) < 0.5 then
-            local dx, dy = z:getX() - ex, z:getY() - ey
+-- ── 위험 판정 ────────────────────────────────────────────────────────────────
+-- 반환: 3타일 안 적 수, 공격모션 표적(물고 있는 좀비 최근접 > 대원을 쏘는 적대 히트맨),
+--       그 거리, 종류("bite"|"hitman"), 3타일 안 보이는 최근접 적, 그 거리^2
+local function assessDangerScan(hitman, brain, zx, zy, zz)
+    local cache = HitmanZombie.Cache
+    local r2 = RETREAT_R * RETREAT_R
+    local b2 = BITE_R * BITE_R
+    local n, biter, biterD2, near, nearD2 = 0, nil, nil, nil, nil
+    for id, light in pairs(HitmanZombie.CacheLight) do
+        local dx, dy = light.x - zx, light.y - zy
+        if dx <= RETREAT_R and dx >= -RETREAT_R and dy <= RETREAT_R and dy >= -RETREAT_R
+           and math.abs(light.z - zz) < 1 and HitmanUtils.AreEnemies(light.brain, brain) then
             local d2 = dx * dx + dy * dy
             if d2 <= r2 then
-                local rank = threatRank(z, escortId)
-                if rank then
+                local z = cache[id]
+                if z and z ~= hitman and z:isAlive() and not z:getVariableBoolean("Bandit") then
                     n = n + 1
-                    cands[n] = { z = z, rank = rank, d2 = d2 }
-                    if z == cur then curRank = rank end
+                    if math.abs(z:getZ() - zz) < 0.5 then
+                        if d2 <= b2 and (not biterD2 or d2 < biterD2)
+                           and isAttacking(z, zombieState(z)) and z:getTarget() == hitman then
+                            biter, biterD2 = z, d2
+                        end
+                        if (not nearD2 or d2 < nearD2) and visible(hitman, z) then
+                            near, nearD2 = z, d2
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if biter then return n, biter, math.sqrt(biterD2), "bite", near, nearD2 end
+    local shooter, sd = _a.FindAttacker(hitman, brain)
+    if shooter then return n, shooter, sd, "hitman", near, nearD2 end
+    return n, nil, nil, nil, near, nearD2
+end
+
+-- DANGER_SCAN_MS 마다 다시 센다. 그 사이 공격자가 죽었으면 바로 다시 센다.
+local DANGER_SCAN_MS = 50
+local _dng = {}   -- [brain.id] = { at, n, a, ad, ak, near, nearD2 }
+local function assessDanger(hitman, brain, now, zx, zy, zz)
+    local c = _dng[brain.id]
+    if not c or now >= c.at + DANGER_SCAN_MS or (c.a and not c.a:isAlive()) then
+        local n, a, ad, ak, near, nearD2 = assessDangerScan(hitman, brain, zx, zy, zz)
+        c = { at = now, n = n, a = a, ad = ad, ak = ak, near = near, nearD2 = nearD2 }
+        _dng[brain.id] = c
+    end
+    return c.n, c.a, c.ad, c.ak, c.near, c.nearD2
+end
+
+-- ── 드론 호위 로직 스캔 (중심점 cx,cy 반경 r) ────────────────────────────────
+-- 반환: 표적, 군, 대원과의 거리
+local function droneScan(hitman, brain, cx, cy, r, zx, zy, zz)
+    local cache = HitmanZombie.Cache
+    local r2 = r * r
+    local maxR2 = LOCK_MAX_R * LOCK_MAX_R
+    local cands, n = {}, 0
+    for id, light in pairs(HitmanZombie.CacheLight) do
+        local dx, dy = light.x - cx, light.y - cy
+        if dx <= r and dx >= -r and dy <= r and dy >= -r and math.abs(light.z - zz) < 0.5 then
+            local d2 = dx * dx + dy * dy
+            local tx, ty = light.x - zx, light.y - zy
+            if d2 <= r2 and tx * tx + ty * ty <= maxR2 and HitmanUtils.AreEnemies(light.brain, brain) then
+                local z = cache[id]
+                if validEnemy(z, hitman, zz) then
+                    local tier = droneTier(z)
+                    n = n + 1
+                    cands[n] = { z = z, tier = tier, rank = TIER_ORDER[tier], d2 = d2 }
                 end
             end
         end
     end
     if n > 1 then table.sort(cands, candLess) end
-
-    local best, bestRank = nil, nil
     for i = 1, n do
         local z = cands[i].z
-        if hitman:CanSee(z) and HitmanUtils.LineClear(hitman, z) then
-            best, bestRank = z, cands[i].rank
-            break
+        if visible(hitman, z) then
+            local dx, dy = z:getX() - zx, z:getY() - zy
+            return z, cands[i].tier, math.sqrt(dx * dx + dy * dy)
         end
     end
-
-    -- 지금 표적이 여전히 반경 안이고 보이면, 더 급한 등급이 아닌 한 유지
-    if cur and curRank and best ~= cur and (not bestRank or bestRank >= curRank)
-       and hitman:CanSee(cur) and HitmanUtils.LineClear(hitman, cur) then
-        best, bestRank = cur, curRank
-    end
-
-    logPick("escort", brain, c and c.target, best, n)
-    _pick[brain.id] = { at = now, target = best, rank = bestRank }
-    return best
+    return nil
 end
 
--- 사격 계획: FULLAUTO_MAX 이내는 무조건 연발(첫 발부터 연발 간격), 그 밖은
--- 5발 점사(첫 발은 기본 발사 지연 = 점사 사이 간격). HitmanPrograms.Weapon.Shoot
--- 는 Auto 모드가 있는 총에만 이 계획을 쓴다.
--- fresh = 막 새로 잡은 표적(_a.TakeFreshLock): 멀어도 첫 점사는 기본 발사 지연
--- 없이 바로 쏜다. 점사 사이 간격은 같은 표적의 두 번째 점사부터 적용된다.
-function _a.FirePlan(dist, fresh)
-    if dist <= FULLAUTO_MAX then
-        return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = AUTO_INTERVAL }
+-- 여유 상태 최선 표적: phase2(대원 10타일) 가 있으면 그것, 없으면 phase3(플레이어 20타일)
+local function relaxedBest(hitman, brain, zx, zy, zz)
+    local z, tier, d = droneScan(hitman, brain, zx, zy, SELF_R, zx, zy, zz)
+    if z then return z, 2, tier, d end
+    local escort = HitmanUtils.GetTrackedPlayer(hitman)
+    if escort then
+        z, tier, d = droneScan(hitman, brain, escort:getX(), escort:getY(), ESCORT_SCAN_R, zx, zy, zz)
+        if z then return z, 3, tier, d end
     end
-    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and AUTO_INTERVAL or nil }
+    return nil
 end
 
--- ═══════════════════════════════════════════════════════════════════════════
---  표적 고정 (HitmanUpdate.lua ManageCombat 이 대원일 때 부르는 진입점)
---
---  한 번 잡은 표적은 죽을 때까지 바꾸지 않는다. 우선순위(자기 10타일 안 최근접 >
---  대원을 쏘는 적대 히트맨 > 호위 위협)는 "새로 고를 때"에만 쓴다.
---  예외: 표적이 LOCK_LOST_MS 동안 계속 안 보이거나(벽 뒤/다른 층/LOCK_MAX_R 밖)
---  하면 놓아준다 -- 못 쏘는 표적에 묶여 있으면 대원이 아무것도 못 한다.
---  안 보이는 동안에는 nil 을 돌려줘 사격을 멈춘다(벽에 탄을 쏟지 않게).
--- ═══════════════════════════════════════════════════════════════════════════
-local LOCK_MAX_R   = 45      -- 이보다 멀어지면 "안 보임"으로 친다 (XM214 판정 사거리 45)
-local LOCK_LOST_MS = 2000
+-- 지금 표적의 여유 상태 phase/군 (phase2 반경 안이면 2, phase3 반경 안이면 3, 둘 다 밖이면 nil)
+local function relaxedClassOf(hitman, z, zx, zy)
+    local dx, dy = z:getX() - zx, z:getY() - zy
+    if dx * dx + dy * dy <= SELF_R * SELF_R then return 2, droneTier(z) end
+    local escort = HitmanUtils.GetTrackedPlayer(hitman)
+    if escort then
+        local ex, ey = z:getX() - escort:getX(), z:getY() - escort:getY()
+        if ex * ex + ey * ey <= ESCORT_SCAN_R * ESCORT_SCAN_R then return 3, droneTier(z) end
+    end
+    return nil
+end
 
-local _lock = {}   -- [brain.id] = { z = 표적, tier = "self"|"attacker"|"escort", lostAt = ms|nil }
+local function better(p1, t1, p2, t2)
+    if p1 ~= p2 then return p1 < p2 end
+    return TIER_ORDER[t1] < TIER_ORDER[t2]
+end
 
--- 반환: 표적, 대원과의 거리, 등급
-function _a.PickTarget(hitman, brain)
-    local now = getTimestampMs()
-    local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
+-- ── 표적 고정 ────────────────────────────────────────────────────────────────
+local _lock = {}   -- [brain.id] = { z, phase, tier, lostAt, fresh }
+local _scan = {}   -- [brain.id] = { at, z, phase, tier, d }
+
+local function lockTo(brain, z, phase, tier, d, why)
+    local prev = _lock[brain.id]
+    _lock[brain.id] = { z = z, phase = phase, tier = tier, fresh = true }
+    print(string.format("[PongDu][Airborne] lock id=%s -> %s phase=%d tier=%s dist=%.1f (%s%s)",
+        tostring(brain.id), tostring(HitmanUtils.GetCharacterID(z)), phase, tier, d or -1, why,
+        prev and (", was " .. tostring(HitmanUtils.GetCharacterID(prev.z)) .. " phase=" .. tostring(prev.phase)) or ""))
+end
+
+local function releaseLock(brain, why)
+    if _lock[brain.id] then
+        print("[PongDu][Airborne] lock released id=" .. tostring(brain.id) .. " (" .. why .. ")")
+        _lock[brain.id] = nil
+    end
+end
+
+-- 여유 상태 표적 선정 (phase2/3). 반환: 표적, 거리, phase  |  nil = 쏠 표적 없음
+local function pickRelaxed(hitman, brain, now, zx, zy, zz)
     local L = _lock[brain.id]
+    local cur, curD, curP, curT, hidden
+    local force = false   -- 이번에 고정이 풀렸으면 주기와 무관하게 바로 다시 찾는다 (즉시 전환)
     if L then
         local t = L.z
         if not t or t:isDead() or not t:isAlive() then
-            print("[PongDu][Airborne] lock released id=" .. tostring(brain.id) .. " (target down)")
-            _lock[brain.id] = nil
+            releaseLock(brain, "target down")
+            force = true
+        elseif HitmanZombie.Cache[HitmanUtils.GetCharacterID(t)] ~= t then
+            releaseLock(brain, "gone")   -- 월드에서 빠짐(언로드/제거): 살아 있어도 쏠 수 없다
+            force = true
         else
             local dx, dy = t:getX() - zx, t:getY() - zy
-            local d = math.sqrt(dx * dx + dy * dy)
-            local ok = math.abs(t:getZ() - zz) < 0.5 and d <= LOCK_MAX_R
-                and hitman:CanSee(t) and HitmanUtils.LineClear(hitman, t)
-            if ok then
+            curD = math.sqrt(dx * dx + dy * dy)
+            if math.abs(t:getZ() - zz) < 0.5 and curD <= LOCK_MAX_R and visible(hitman, t) then
                 L.lostAt = nil
-                return t, d, L.tier
-            end
-            if not L.lostAt then L.lostAt = now end
-            if now - L.lostAt > LOCK_LOST_MS then
-                print(string.format("[PongDu][Airborne] lock released id=%s (lost %dms, dist=%.1f)",
-                    tostring(brain.id), now - L.lostAt, d))
-                _lock[brain.id] = nil
+                curP, curT = relaxedClassOf(hitman, t, zx, zy)
+                if curP then
+                    cur = t
+                    L.phase, L.tier = curP, curT
+                else
+                    releaseLock(brain, string.format("out of range, dist=%.1f", curD))
+                    force = true
+                end
             else
-                return nil   -- 잠깐 가려짐: 표적은 유지하고 사격만 멈춘다
+                if not L.lostAt then L.lostAt = now; force = true end
+                if now - L.lostAt > LOCK_LOST_MS then
+                    releaseLock(brain, string.format("lost %dms, dist=%.1f", now - L.lostAt, curD))
+                    force = true
+                else
+                    hidden = t
+                end
             end
         end
     end
 
-    local t, d, tier = _a.PickSelfThreat(hitman, brain)
-    tier = "self"
-    if not t then
-        t, d = _a.FindAttacker(hitman, brain)
-        tier = "attacker"
+    -- 최선 후보 재계산: PICK_SCAN_MS 주기, 또는 방금 고정이 풀렸거나 표적이 가려졌을 때 즉시.
+    -- (쏠 표적이 없는 대기 중에는 주기대로만 -- 매 프레임 시야 검사를 반복하지 않게)
+    local s = _scan[brain.id]
+    if not s or force or now >= s.at + PICK_SCAN_MS then
+        local z, p, t, d = relaxedBest(hitman, brain, zx, zy, zz)
+        s = { at = now, z = z, phase = p, tier = t, d = d }
+        _scan[brain.id] = s
     end
-    if not t then
-        local escort = HitmanUtils.GetTrackedPlayer(hitman)
-        t = escort and _a.PickEscortThreat(hitman, brain, escort)
-        if t then
-            local dx, dy = t:getX() - zx, t:getY() - zy
-            d = math.sqrt(dx * dx + dy * dy)
-        end
-        tier = "escort"
-    end
-    if not t then return nil end
+    local bz = s.z
+    if bz and (bz:isDead() or not bz:isAlive()) then bz = nil end
 
-    _lock[brain.id] = { z = t, tier = tier, fresh = true }
-    print(string.format("[PongDu][Airborne] lock id=%s -> %s tier=%s dist=%.1f", tostring(brain.id),
-        tostring(HitmanUtils.GetCharacterID(t)), tier, d or -1))
-    return t, d, tier
+    if cur then
+        if bz and bz ~= cur and better(s.phase, s.tier, curP, curT) then
+            lockTo(brain, bz, s.phase, s.tier, s.d, "higher priority")
+            return bz, s.d, s.phase
+        end
+        return cur, curD, curP
+    end
+    if bz then
+        lockTo(brain, bz, s.phase, s.tier, s.d, hidden and "locked target hidden" or "new")
+        return bz, s.d, s.phase
+    end
+    return nil   -- 가려진 표적만 있거나 아무도 없음: 사격 중지(고정은 유지)
+end
+
+local function setState(brain, state, why)
+    if brain.abState ~= state then
+        print(string.format("[PongDu][Airborne] state id=%s %s -> %s (%s)",
+            tostring(brain.id), tostring(brain.abState or "LANDED"), state, why))
+        brain.abState = state
+    end
+end
+
+-- ManageCombat 진입점.
+-- 반환: "flee", 태스크  |  "fire", 표적, 거리, phase  |  "hold"(교전인데 쏠 표적 없음)  |  "patrol"
+function _a.Think(hitman, brain)
+    local now = getTimestampMs()
+    local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
+
+    -- 후퇴 중이면 도착/시간초과까지 계속 달린다
+    if brain.abRetreat then
+        local t = _a.RetreatTick(hitman, brain)
+        if t then return "flee", t end
+    end
+
+    local det = detect(hitman, brain, now, zx, zy, zz)
+    if det.found then brain.abFace = { x = det.nx, y = det.ny } end
+    if not (det.seenAt and now - det.seenAt <= DETECT_GRACE_MS) then
+        setState(brain, "PATROL", "no zombie in sight within " .. DETECT_R)
+        brain.abFace = nil
+        if _lock[brain.id] then releaseLock(brain, "patrol") end
+        return "patrol"
+    end
+
+    -- 순찰 -> 교전 전환: 걷던 순찰 구간을 끊는다 (안 끊으면 표적이 없을 때 구간 끝까지 걷는다)
+    if brain.abState == "PATROL" and Hitman.HasMoveTask(hitman) then
+        Hitman.ClearTasks(hitman)
+    end
+
+    -- 위험
+    local n, attacker, ad, akind, near, nearD2 = assessDanger(hitman, brain, now, zx, zy, zz)
+    if near and not near:isAlive() then near = nil end
+    if n >= RETREAT_N then
+        local t = _a.RetreatTick(hitman, brain)
+        if t then
+            setState(brain, "FLEE", n .. " enemies within " .. RETREAT_R)
+            return "flee", t
+        end
+    end
+    local danger = attacker or (n >= RETREAT_N and near)
+    if danger then
+        local d = ad or math.sqrt(nearD2)
+        local L = _lock[brain.id]
+        if not L or L.z ~= danger then
+            lockTo(brain, danger, 1, "A", d, akind and ("danger " .. akind) or ("danger crowd " .. n))
+        else
+            L.phase, L.tier = 1, "A"
+        end
+        setState(brain, "FIRE", "danger")
+        return "fire", danger, d, 1
+    end
+
+    -- 여유
+    setState(brain, "FIRE", string.format("zombie seen at %.1f", det.nd or -1))
+    local t, d, p = pickRelaxed(hitman, brain, now, zx, zy, zz)
+    if t then return "fire", t, d, p end
+    return "hold"
+end
+
+-- 사격 계획: FULLAUTO_MAX 이내는 연발(바로 이어서), 그 밖은 5발 점사(첫 발은
+-- 기본 발사 지연 = 점사 사이 간격). fresh = 막 새로 잡은 표적(_a.TakeFreshLock):
+-- 멀어도 첫 점사는 지연 없이 쏜다. 연사 속도는 Weapon.Shoot 가 총 FireMode 로 정한다.
+function _a.FirePlan(dist, fresh)
+    if dist <= FULLAUTO_MAX then
+        return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = 0 }
+    end
+    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and 0 or nil }
 end
 
 -- 지금 표적이 새로 잡은 뒤 아직 한 번도 사격 계획을 안 세운 표적이면 true (한 번만).
--- ManageCombat 이 FirePlan 에 넘겨 전환 직후 첫 점사를 바로 쏘게 한다.
 function _a.TakeFreshLock(brain)
     local L = _lock[brain.id]
     if L and L.fresh then
@@ -600,8 +735,6 @@ end
 --  정반대가 막혀 있으면 좌우 30/60/90도로 틀어 본다. 다 막히면 그 자리에서 싸운다.
 --  반환: nil = 후퇴 아님(평소대로 교전) / 태스크 목록 = 후퇴 중(비어 있으면 이동 중)
 -- ═══════════════════════════════════════════════════════════════════════════
-local RETREAT_R        = 3
-local RETREAT_N        = 5
 local RETREAT_DIST     = 10
 local RETREAT_REACH    = 1.3
 local RETREAT_MAX_MS   = 7000    -- 막혀서 못 가면 이 시간 뒤 포기하고 교전 재개
@@ -687,8 +820,9 @@ end
 -- 대원 사망 시 표적/후퇴 상태 정리 (HitmanUpdate.lua OnZombieDead 에서 호출)
 function _a.Forget(brain)
     if brain and brain.id then
-        _pick[brain.id] = nil
-        _self[brain.id] = nil
+        _det[brain.id] = nil
+        _dng[brain.id] = nil
+        _scan[brain.id] = nil
         _lock[brain.id] = nil
     end
 end

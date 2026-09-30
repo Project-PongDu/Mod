@@ -466,6 +466,83 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
 end
 
 
+-- ── PONGDU: rate fire (HitmanPrograms.Weapon.Shoot rate task) ──────────────
+-- One Shoot task = one burst: {rate = rounds/s, left = rounds, window = ticks of
+-- firing at the end of task.time}. Rounds are fired frame by frame in onWorking
+-- from real elapsed time, so the cadence does not depend on FPS. The owed
+-- fraction is carried per shooter across tasks, so back-to-back bursts keep the
+-- exact rate; after a pause longer than RATE_RESET_MS the first round goes at once.
+local RATE_RESET_MS      = 250
+local RATE_MAX_PER_FRAME = 4      -- cap after a hitch
+local rateState = {}              -- [shooter brain id] = { last = ms, carry = rounds }
+local rateWeapon = {}             -- [shooter brain id] = { task = task, item = HandWeapon }
+
+local function rateWeaponItem(brainShooter, weapon, task)
+    local c = rateWeapon[brainShooter.id]
+    if c and c.task == task then return c.item end
+    local item = HitmanCompatibility.InstanceItem(weapon.name)
+    if item then item = HitmanUtils.ModifyWeapon(item, brainShooter) end
+    rateWeapon[brainShooter.id] = { task = task, item = item }
+    return item
+end
+
+local function rateFire(zombie, task, enemy)
+    local brainShooter = HitmanBrain.Get(zombie)
+    if not brainShooter then return end
+    local weapon = brainShooter.weapons[task.slot]
+    if not weapon or (weapon.bulletsLeft or 0) <= 0 then task.left = 0; return end
+
+    local sx, sy, sz, sd = zombie:getX(), zombie:getY(), zombie:getZ(), zombie:getDirectionAngle()
+    if not HitmanUtils.IsFacing(sx, sy, sd, enemy:getX(), enemy:getY(), 5) then return end
+
+    local now = getTimestampMs()
+    local sid = brainShooter.id
+    local st = rateState[sid]
+    local owed
+    if not st or now - st.last > RATE_RESET_MS then
+        st = { last = now, carry = 0 }
+        rateState[sid] = st
+        owed = 1
+    else
+        owed = (now - st.last) * task.rate / 1000 + st.carry
+    end
+    local n = math.floor(owed)
+    if n > RATE_MAX_PER_FRAME then n = RATE_MAX_PER_FRAME; owed = n end
+    if n > task.left then n = task.left end
+    if n > weapon.bulletsLeft then n = weapon.bulletsLeft end
+    if n <= 0 then return end
+
+    local weaponItem = rateWeaponItem(brainShooter, weapon, task)
+    if not weaponItem then task.left = 0; return end
+
+    local projectiles = getProjectileCount(weaponItem:getWeaponReloadType())
+    local clear = HitmanUtils.LineClear(zombie, enemy)
+    for _ = 1, n do
+        weapon.bulletsLeft = weapon.bulletsLeft - 1
+        task.left = task.left - 1
+        HitmanProjectile.Add(sid, sx, sy, sz, sd, projectiles)
+        if clear then manageLineOfFire(zombie, enemy, weaponItem) end
+    end
+    st.carry = owed - n
+    if st.carry > 1 then st.carry = 1 end
+    st.last = now
+
+    -- effects once per frame, not per round
+    HitmanCompatibility.StartMuzzleFlash(zombie)
+    zombie:getEmitter():playSound(weaponItem:getSwingSound())
+    if not brainShooter.sound or brainShooter.sound == 0 then
+        addSound(getSpecificPlayer(0), sx, sy, sz, 40, 100)
+        brainShooter.sound = 1
+    end
+    if not weaponItem:isManuallyRemoveSpentRounds() then
+        zombie:playSound(weaponItem:getShellFallSound())
+    end
+    if weaponItem:isRackAfterShoot() then
+        weapon.racked = false
+        task.left = 0
+    end
+end
+
 HitmanZombieActions.Shoot = {}
 HitmanZombieActions.Shoot.onStart = function(zombie, task)
     zombie:setBumpType(task.anim)
@@ -481,14 +558,31 @@ HitmanZombieActions.Shoot.onWorking = function(zombie, task)
         return true
     end
 
-    if zombie:getBumpType() ~= task.anim then 
+    local bumpOk = zombie:getBumpType() == task.anim
+    if not bumpOk then 
         zombie:setBumpType(task.anim)
+    end
+
+    -- PONGDU: rate task fires inside its window (the delay before it is the burst spacing)
+    if task.rate then
+        if bumpOk and task.time <= task.window and (task.left or 0) > 0 then
+            rateFire(zombie, task, enemy)
+        end
+        if (task.left or 0) <= 0 then return true end
     end
 
     return false
 end
 
 HitmanZombieActions.Shoot.onComplete = function(zombie, task)
+
+    -- PONGDU: rate task rounds were fired in onWorking; refresh the death drop once per burst
+    if task.rate then
+        local brainShooter = HitmanBrain.Get(zombie)
+        if brainShooter then rateWeapon[brainShooter.id] = nil end
+        Hitman.UpdateItemsToSpawnAtDeath(zombie)
+        return true
+    end
 
     local bumpType = zombie:getBumpType()
     if bumpType ~= task.anim then return true end
