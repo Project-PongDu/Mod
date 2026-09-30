@@ -1165,6 +1165,20 @@ local function ManageCombat(hitman)
         if t then
             bestDist, enemyCharacter = tDist, t
             tier = (tTier == "escort") and "escort" or "threat"
+        else
+            -- no target this tick (the locked one just died with nobody else in
+            -- sight, or it is hidden): drop the rounds still queued for it instead
+            -- of emptying the rest of the burst into a corpse or a wall
+            local cur = Hitman.GetTask(hitman)
+            if cur and (cur.action == "Shoot" or cur.action == "Aim") then
+                local left = 0
+                for _, qt in pairs(brain.tasks) do
+                    if qt.action == "Shoot" then left = left + 1 end
+                end
+                Hitman.ClearTasks(hitman)
+                print(string.format("[PongDu][Airborne] id=%s no target, dropped %d queued shots (eid=%s)",
+                    tostring(brain.id), left, tostring(cur.eid)))
+            end
         end
     else
         local threat, threatDist = FindThreatZombie(hitman, zx, zy, zz)
@@ -1434,7 +1448,7 @@ local function ManageCombat(hitman)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
                         else
-                            local fire = isTrooper and PongDuAirborne.FirePlan(bestDist) or nil
+                            local fire = isTrooper and PongDuAirborne.FirePlan(bestDist, PongDuAirborne.TakeFreshLock(brain)) or nil
                             local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, fireSlot, fire)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
                         end

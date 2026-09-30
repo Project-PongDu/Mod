@@ -505,11 +505,13 @@ end
 -- 사격 계획: FULLAUTO_MAX 이내는 무조건 연발(첫 발부터 연발 간격), 그 밖은
 -- 5발 점사(첫 발은 기본 발사 지연 = 점사 사이 간격). HitmanPrograms.Weapon.Shoot
 -- 는 Auto 모드가 있는 총에만 이 계획을 쓴다.
-function _a.FirePlan(dist)
+-- fresh = 막 새로 잡은 표적(_a.TakeFreshLock): 멀어도 첫 점사는 기본 발사 지연
+-- 없이 바로 쏜다. 점사 사이 간격은 같은 표적의 두 번째 점사부터 적용된다.
+function _a.FirePlan(dist, fresh)
     if dist <= FULLAUTO_MAX then
         return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = AUTO_INTERVAL }
     end
-    return { bullets = LONG_BURST, interval = AUTO_INTERVAL }
+    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and AUTO_INTERVAL or nil }
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -573,10 +575,21 @@ function _a.PickTarget(hitman, brain)
     end
     if not t then return nil end
 
-    _lock[brain.id] = { z = t, tier = tier }
+    _lock[brain.id] = { z = t, tier = tier, fresh = true }
     print(string.format("[PongDu][Airborne] lock id=%s -> %s tier=%s dist=%.1f", tostring(brain.id),
         tostring(HitmanUtils.GetCharacterID(t)), tier, d or -1))
     return t, d, tier
+end
+
+-- 지금 표적이 새로 잡은 뒤 아직 한 번도 사격 계획을 안 세운 표적이면 true (한 번만).
+-- ManageCombat 이 FirePlan 에 넘겨 전환 직후 첫 점사를 바로 쏘게 한다.
+function _a.TakeFreshLock(brain)
+    local L = _lock[brain.id]
+    if L and L.fresh then
+        L.fresh = nil
+        return true
+    end
+    return false
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
