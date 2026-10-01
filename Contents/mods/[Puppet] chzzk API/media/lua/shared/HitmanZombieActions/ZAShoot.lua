@@ -117,7 +117,260 @@ local function addHolePlayer (player)
     player:resetModel()
 end
 
-local function hit(shooter, item, victim)
+-- ── PONGDU: shot model (penetration + damage vs zombies) ─────────────────
+-- A hitman round on a zombie (plain zombie or enemy hitman) is resolved like a
+-- player firing the same HandWeapon. The hitman counts as a player with Aiming 0,
+-- no traits/moodles/pain, standing still and holding the gun in both hands.
+--
+-- Mode is picked per round:
+--   * Improved Projectile active (mod + SandboxVars.ImprovedProjectile):
+--       penetration = IPPJ "Penetration" page, damage = IPPJ "Main" page
+--   * otherwise: script MaxHitCount + vanilla/Arsenal firearm damage (B41 Java)
+--
+-- Vanilla (SwipeStatePlayer.java / IsoGameCharacter.processHitDamage / Hit):
+--   d  = Min + Rand(int((Max-Min)*1000))/1000, rolled per target
+--   d /= hitIdx/2                      (1st target x2, 2nd x1, 3rd x0.67 ...)
+--   d *= |1 - def/100|                 def = clothing(part, scratch)/2 + clothing(part, bite), bullet, max 70
+--   Hit(): d *= modDelta (2 if RangeFalloff else 1), x1.5 if the victim is not
+--          facing the shooter (IsoPlayer wielder only), x1.5 non-player victim,
+--          x0.3 weapon level 0, crit x max(2, CritDmgMultiplier), hitTime ramp,
+--          Health -= d * 0.7 (aimed firearm)
+--   crit%  = CriticalChance + (dist<4 ? (4-dist)*7 : -(dist-4)*7) - shootInARow*10 (Auto)
+--            +-6 Lore.Toughness, clamp 10..90; damage roll adds +5 from behind
+--            (+30 if the zombie has no target), knockdown re-rolls without it
+--   targets per round = script MaxHitCount (a missed target still takes a slot)
+--
+-- Improved Projectile (ImprovedProjectile_01_main.lua / _02_init.lua):
+--   d  = (Min + rand*(Max-Min)), sqrt adjust if IPPJDamageAdjustment, x IPPJDamageMult, min 0.1
+--   d *= 1 - IPPJDmgReduction% * dist/range        (range = MaxRange x IPPJRangeMult)
+--   zone by IPPJHitBox*Ratio share -> x IPPJHitBox*Mult, crit (CriticalChance%) x1.8
+--   Health -= d; each hit: hits left - 1, d *= 1 - IPPJDmgReductionOnPnt
+--   hits per round = IPPJPenetrationSetting (1 script MaxHitCount, 2 per-ammo/CustomGun, 3 one),
+--   IPPJPntOnKill stops the round on a survivor. Only real hits take a slot.
+--   The hitbox zone is aimed geometry in IPPJ; here it is rolled from the ratios.
+--
+-- Shotguns keep the old pellet logic for how many bodies a shell reaches; each
+-- body still takes the damage above. Accuracy (calculateHitChance) is unchanged.
+-- All rolls use HitmanRandom so every client resolves the same round.
+
+local function rand01()
+    return (HitmanRandom.Get() % 10000) / 10000
+end
+
+local function rollPct()
+    return HitmanRandom.Get() % 100
+end
+
+-- the mod list does not change in a session: resolved on the first round
+local ippjActive = nil
+local function ippjOn()
+    if ippjActive == nil then
+        ippjActive = SandboxVars.ImprovedProjectile ~= nil and getActivatedMods():contains("ImprovedProjectile")
+        print("[HITMANS] shot model: " .. (ippjActive and "Improved Projectile settings" or "script MaxHitCount + vanilla damage"))
+    end
+    return ippjActive
+end
+
+-- rounds one target slot per round may take (see header)
+local maxHitsCache = {}   -- [fullType .. mode] = n
+local function maxHitsOf(weaponItem, ippj)
+    local ft = weaponItem:getFullType()
+    local key = ft .. (ippj and "|ippj" or "|van")
+    local n = maxHitsCache[key]
+    if n then return n end
+
+    local script = ScriptManager.instance:getItem(ft)
+    n = script and script:getMaxHitCount() or weaponItem:getMaxHitCount()
+    local src = "script"
+    if ippj then
+        local sv = SandboxVars.ImprovedProjectile
+        if sv.IPPJPenetrationSetting == 2 then
+            local ammo = weaponItem:getAmmoType()
+            if ammo then
+                local opt = getSandboxOptions():getOptionByName("ImprovedProjectile.IPPJ" .. string.sub(ammo, 6))
+                if opt and opt:getValue() ~= 0 then n = opt:getValue(); src = "ammo" end
+            end
+            for _, v in pairs(luautils.split(sv.IPPJCustomGun, ";")) do
+                local kv = luautils.split(v, "=")
+                if kv[1] == ft and tonumber(kv[2]) then n = tonumber(kv[2]); src = "custom" end
+            end
+        elseif sv.IPPJPenetrationSetting == 3 then
+            n = 1; src = "single"
+        end
+    end
+    n = math.floor(tonumber(n) or 1)
+    if n < 1 then n = 1 end
+    maxHitsCache[key] = n
+    print(string.format("[HITMANS] shot model %s: maxHits=%d (%s, %s) dmg=%.2f-%.2f crit=%.1f",
+        tostring(ft), n, src, ippj and "ippj" or "vanilla",
+        weaponItem:getMinDamage(), weaponItem:getMaxDamage(), weaponItem:getCriticalChance()))
+    return n
+end
+
+-- player.shootInARow: Auto fire mode, next round within 600 ms
+local SHOOT_IN_ROW_MS = 600
+local rowState = {}       -- [shooter brain id] = { last = ms, n = rounds in a row }
+local function noteShot(sid, weaponItem)
+    local now = getTimestampMs()
+    local st = rowState[sid]
+    if not st then st = { last = 0, n = 0 }; rowState[sid] = st end
+    if weaponItem:getFireMode() == "Auto" and now - st.last < SHOOT_IN_ROW_MS then
+        st.n = st.n + 1
+    else
+        st.n = 0
+    end
+    st.last = now
+    return st.n
+end
+
+-- IsoPlayer.calculateCritChance for a ranged weapon, Aiming 0
+local function vanillaCritChance(weaponItem, dist, inRow)
+    if weaponItem:isAlwaysKnockdown() then return 100 end
+    local c = math.floor(weaponItem:getCriticalChance())
+    if dist < 4 then
+        c = c + math.floor((4 - dist) * 7)
+    else
+        c = c - math.floor((dist - 4) * 7)
+    end
+    if weaponItem:getFireMode() == "Auto" then c = c - inRow * 10 end
+    local tough = SandboxVars.Lore.Toughness
+    if tough == 1 then c = c - 6 elseif tough == 3 then c = c + 6 end
+    if c < 10 then c = 10 end
+    if c > 90 then c = 90 end
+    return c
+end
+
+local HAND_L_IDX, NECK_IDX = nil, nil
+
+-- damageSplit / modDelta for victim:Hit(item, fakeZombie, ...) so the result
+-- matches a player wielder; plus the two crit rolls
+local function vanillaShot(shooter, weaponItem, victim, dist, hitIdx, inRow)
+    local mn, mx = weaponItem:getMinDamage(), weaponItem:getMaxDamage()
+    local span = math.floor((mx - mn) * 1000)
+    local d = mn
+    if span > 0 then d = mn + (HitmanRandom.Get() % span) / 1000 end
+    d = d / (hitIdx / 2)
+
+    if not HAND_L_IDX then
+        HAND_L_IDX = BodyPartType.ToIndex(BodyPartType.Hand_L)
+        NECK_IDX = BodyPartType.ToIndex(BodyPartType.Neck)
+    end
+    local part = HAND_L_IDX + HitmanRandom.Get() % (NECK_IDX - HAND_L_IDX + 1)
+    local def = victim:getBodyPartClothingDefense(part, false, true) / 2 + victim:getBodyPartClothingDefense(part, true, true)
+    if def > 70 then def = 70 end
+    d = d * math.abs(1 - def / 100)
+
+    -- processHitDamage: x1.5 when the victim does not face the shooter (player wielder only)
+    local vx, vy = victim:getX() - shooter:getX(), victim:getY() - shooter:getY()
+    local len = math.sqrt(vx * vx + vy * vy)
+    if len > 0 then
+        local a = math.rad(victim:getDirectionAngle())
+        if (vx * math.cos(a) + vy * math.sin(a)) / len > -0.3 then d = d * 1.5 end
+    end
+    -- processHitDamage halves a two-handed gun the wielder does not hold in both
+    -- hands; a player does, the fake zombie wielder does not
+    if weaponItem:isTwoHandWeapon() then d = d * 2 end
+
+    local modDelta = weaponItem:isRangeFalloff() and 2 or 1
+
+    local c = vanillaCritChance(weaponItem, dist, inRow)
+    local cDmg = c
+    if shooter:isBehind(victim) then
+        cDmg = cDmg + (victim:getTarget() == nil and 30 or 5)
+    end
+    local critDmg = rollPct() < cDmg
+    local knock = rollPct() < c
+    return d, modDelta, critDmg, knock
+end
+
+local ippjHighReact    = {"HeadLeft", "HeadRight", "Uppercut"}
+local ippjMidReact     = {"ShotBelly", "ShotChestL", "ShotChestR"}
+local ippjMidReactCrit = {"ShotBellyStep", "ShotChestStepL", "ShotChestStepR"}
+local ippjLowReact     = {"ShotLegL", "ShotLegR"}
+
+-- base damage of one IPPJ round (before falloff / zone / crit / penetration)
+local function ippjBaseDamage(weaponItem)
+    local sv = SandboxVars.ImprovedProjectile
+    local mn, mx = weaponItem:getMinDamage(), weaponItem:getMaxDamage()
+    local d = mn + rand01() * (mx - mn)
+    if sv.IPPJDamageAdjustment then d = 2.64575 * math.sqrt(d) end
+    d = d * sv.IPPJDamageMult
+    if d < 0.1 then d = 0.1 + rand01() * 0.1 end
+    return d
+end
+
+-- one IPPJ hit on a zombie: returns damage, critical, zone ratio
+local function ippjShot(weaponItem, base, dist)
+    local sv = SandboxVars.ImprovedProjectile
+    local d = base
+    local red = sv.IPPJDmgReduction * 0.01
+    if red > 0 then
+        local range = HitmanCompatibility.GetMaxRange(weaponItem) * sv.IPPJRangeMult
+        if range > 0 then
+            local f = dist / range
+            if f > 1 then f = 1 end
+            d = d * (1 - red * f)
+        end
+    end
+
+    local hi, mid, lo = sv.IPPJHitBoxHighRatio, sv.IPPJHitBoxMidRatio, sv.IPPJHitBoxLowRatio
+    local total = hi + mid + lo
+    local r = rand01() * total
+    local zone, mult
+    if total > 0 and r < hi then
+        zone, mult = 1.0, sv.IPPJHitBoxHighMult
+    elseif total <= 0 or r < hi + mid then
+        zone, mult = 0.6, sv.IPPJHitBoxMidMult
+    else
+        zone, mult = 0.2, sv.IPPJHitBoxLowMult
+    end
+    d = d * mult
+
+    local crit = rollPct() <= weaponItem:getCriticalChance()
+    if crit then d = d * 1.8 end
+    return d, crit, zone
+end
+
+-- IPPJ hit reaction on a surviving zombie (ImprovedProjectile_01_main.lua)
+local function ippjReact(victim, crit, zone)
+    local sv = SandboxVars.ImprovedProjectile
+    if not sv.IPPJEnableZombieHitReact then
+        victim:addBlood(30)
+        return
+    end
+    local reaction
+    local doReaction = true
+    if victim:isProne() then
+        reaction = "FloorBack"
+        victim:addBlood(50)
+    elseif zone > 0.8 then
+        reaction = ippjHighReact[HitmanRandom.Get() % 3 + 1]
+        victim:addBlood(50)
+    elseif zone > 0.4 then
+        if crit then
+            reaction = ippjMidReactCrit[HitmanRandom.Get() % 3 + 1]
+            victim:addBlood(50)
+        else
+            reaction = ippjMidReact[HitmanRandom.Get() % 3 + 1]
+            victim:addBlood(25)
+        end
+        if sv.IPPJZombieHitReactCond == 3 then doReaction = false end
+    else
+        if crit then victim:setHitFromBehind(true) end
+        reaction = ippjLowReact[HitmanRandom.Get() % 2 + 1]
+        victim:addBlood(crit and 50 or 25)
+        if sv.IPPJZombieHitReactCond >= 2 then doReaction = false end
+    end
+    if doReaction then victim:setHitReaction(reaction) end
+end
+-- shot: per-round state from manageLineOfFire
+--   { ippj = bool, hits = real hits so far, inRow = shootInARow, base = IPPJ round damage }
+-- returns status, survived
+--   "hit"   took the round (survived = still alive after it)
+--   "miss"  accuracy roll failed (miss sound played)
+--   "block" not an enemy of the shooter (friendly / neutral body in the line)
+--   "pass"  nothing to resolve (already dying)
+local function hit(shooter, item, victim, shot)
 
     -- Clone the shooter to create a temporary IsoPlayer
     -- local tempShooter = HitmanUtils.CloneIsoPlayer(shooter)
@@ -128,6 +381,18 @@ local function hit(shooter, item, victim)
 
     -- Determine accuracy based on SandboxVars and shooter clan
     local brainShooter = HitmanBrain.Get(shooter)
+
+    -- PONGDU: who the round can hurt is decided before the accuracy roll, so
+    -- the caller knows whether a body in the line stops or takes the round
+    local isPlayer = instanceof(victim, "IsoPlayer")
+    if isPlayer then
+        if not (brainShooter.hostile or brainShooter.hostileP) then return "block" end
+    elseif instanceof(victim, "IsoZombie") then
+        if victim:isOnKillDone() or victim:isDead() then return "pass" end
+        if not HitmanUtils.AreEnemies(HitmanBrain.Get(victim), brainShooter) then return "block" end
+    else
+        return "pass"
+    end
 
     -- Logistic curve
     local function calculateHitChance(distance, accuracy)
@@ -156,91 +421,97 @@ local function hit(shooter, item, victim)
     --  print ("AT: " .. accuracyThreshold)
     -- if ZombRand(10000) < accuracyThreshold then
     local n = HitmanRandom.Get()
-    if n < accuracyThreshold then
-        -- print ("HIT N: " .. n)
-        if instanceof(victim, "IsoPlayer") and (brainShooter.hostile or brainShooter.hostileP) then
-            HitmanPlayer.WakeEveryone()
-
-            local hitSound = "ZSHit" .. tostring(1 + ZombRand(3))
-            victim:playSound(hitSound)
-
-            HitmanCompatibility.PlayerVoiceSound(victim, "PainFromFallHigh")
-            victim:setHitFromBehind(shooter:isBehind(victim))
-            victim:Hit(item, fakeZombie, 1.4, false, 1, false)
-
-            -- addHolePlayer(victim)
-            HitmanCompatibility.Splash(victim, item, fakeZombie)
-
-            local bodyDamage = victim:getBodyDamage()
-            if bodyDamage then
-                local health = bodyDamage:getOverallBodyHealth()
-                health = health + 8
-                if health > 100 then health = 100 end
-                bodyDamage:setOverallBodyHealth(health)
-            end
-
-            if (victim:isSprinting() or victim:isRunning()) and ZombRand(12) == 1 then
-                victim:clearVariable("BumpFallType")
-                victim:setBumpType("stagger")
-                victim:setBumpFall(true)
-                victim:setBumpFallType("pushedBehind")
-            end
-
-        elseif instanceof(victim, "IsoZombie") and not victim:isOnKillDone() then
-            local brainVictim = HitmanBrain.Get(victim)
-            if HitmanUtils.AreEnemies(brainVictim, brainShooter) then
-            -- if not brainVictim or (brainVictim.clan ~= brainShooter.clan and (brainShooter.hostile or brainVictim.hostile)) then
-
-                local isSeen = false
-                local playerList = HitmanPlayer.GetPlayers()
-                for i=0, playerList:size()-1 do
-                    local player = playerList:get(i)
-                    if player and player:CanSee(victim) and victim:getSquare():isCanSee(0) then
-                        isSeen = true
-                    end
-                end
-
-                if true then
-
-                    local dmg = item:getMaxDamage()
-                    if instanceof(victim, "IsoZombie") then
-                        dmg = dmg * 2
-                    end
-
-                    victim:setBumpDone(true)
-                    victim:setHitFromBehind(shooter:isBehind(victim))
-                    victim:setHitAngle(shooter:getForwardDirection())
-                    victim:setPlayerAttackPosition(victim:testDotSide(shooter))
-                    victim:setHitReaction("ShotBelly")
-                    victim:Hit(item, fakeZombie, dmg, false, 1, false)
-                    victim:setAttackedBy(shooter)
-                    addHole(victim)
-                    HitmanCompatibility.Splash(victim, item, fakeZombie)
-
-                    local h = victim:getHealth()
-                    local id = HitmanUtils.GetCharacterID(victim)
-                    local args = {id=id, h=h}
-                    sendClientCommand(getSpecificPlayer(0), 'Hitman_Sync', 'Health', args)
-
-                else
-                    --victim:changeState(ZombieOnGroundState.instance())
-                    victim:removeFromSquare()
-                    victim:removeFromWorld()
-                end
-            end
-        end
-
-
-    else
+    if n >= accuracyThreshold then
         local missSound = "ZSMiss".. tostring(1 + ZombRand(8))
         victim:getSquare():playSound(missSound)
+        return "miss"
     end
+
+    -- print ("HIT N: " .. n)
+    if isPlayer then
+        HitmanPlayer.WakeEveryone()
+
+        local hitSound = "ZSHit" .. tostring(1 + ZombRand(3))
+        victim:playSound(hitSound)
+
+        HitmanCompatibility.PlayerVoiceSound(victim, "PainFromFallHigh")
+        victim:setHitFromBehind(shooter:isBehind(victim))
+        victim:Hit(item, fakeZombie, 1.4, false, 1, false)
+
+        -- addHolePlayer(victim)
+        HitmanCompatibility.Splash(victim, item, fakeZombie)
+
+        local bodyDamage = victim:getBodyDamage()
+        if bodyDamage then
+            local health = bodyDamage:getOverallBodyHealth()
+            health = health + 8
+            if health > 100 then health = 100 end
+            bodyDamage:setOverallBodyHealth(health)
+        end
+
+        if (victim:isSprinting() or victim:isRunning()) and ZombRand(12) == 1 then
+            victim:clearVariable("BumpFallType")
+            victim:setBumpType("stagger")
+            victim:setBumpFall(true)
+            victim:setBumpFallType("pushedBehind")
+        end
+
+        shot.hits = shot.hits + 1
+        return "hit", not victim:isDead()
+    end
+
+    -- zombie (plain or enemy hitman): resolved like a player shooting this gun
+    shot.hits = shot.hits + 1
+    victim:setHitFromBehind(shooter:isBehind(victim))
+    victim:setHitAngle(shooter:getForwardDirection())
+    victim:setPlayerAttackPosition(victim:testDotSide(shooter))
+
+    if shot.ippj then
+        if not shot.base then shot.base = ippjBaseDamage(item) end
+        local d, crit, zone = ippjShot(item, shot.base, dist)
+        shot.base = shot.base * (1 - SandboxVars.ImprovedProjectile.IPPJDmgReductionOnPnt)
+
+        victim:setAttackedBy(shooter)
+        victim:setHealth(victim:getHealth() - d)
+        victim:reportEvent("wasHit")
+        if victim:isDead() or victim:getHealth() <= 0 then
+            victim:setHitReaction("ShotBelly")
+            victim:Kill(fakeZombie)
+        else
+            ippjReact(victim, crit, zone)
+        end
+    else
+        local d, modDelta, critDmg, knock = vanillaShot(shooter, item, victim, dist, shot.hits, shot.inRow)
+        victim:setBumpDone(true)
+        victim:setHitReaction("ShotBelly")
+        -- the fake zombie is the wielder: its crit flag drives processHitDamage
+        fakeZombie:setCriticalHit(critDmg)
+        local ok, err = pcall(function() victim:Hit(item, fakeZombie, d, false, modDelta, false) end)
+        fakeZombie:setCriticalHit(false)
+        if not ok then
+            print("[HITMANS] shot Hit failed: " .. tostring(err))
+        end
+        victim:setAttackedBy(shooter)
+        -- knockdown: the player's hitConsequences re-rolls the crit (no behind bonus);
+        -- in MP it is only applied for a local IsoPlayer wielder, so set it here
+        if not victim:isDead() then
+            victim:setKnockedDown(knock or victim:isOnFloor())
+        end
+    end
+
+    addHole(victim)
+    HitmanCompatibility.Splash(victim, item, fakeZombie)
+
+    local h = victim:getHealth()
+    local id = HitmanUtils.GetCharacterID(victim)
+    local args = {id=id, h=h}
+    sendClientCommand(getSpecificPlayer(0), 'Hitman_Sync', 'Health', args)
 
     -- Clean up the temporary player after use
     -- tempShooter:removeFromWorld()
     -- tempShooter = nil
 
-    return true
+    return "hit", h > 0 and not victim:isDead()
 end
 
 local function thump (object, thumper)
@@ -269,7 +540,7 @@ local function getMatId(matName)
     return 0
 end
 
-local function manageLineOfFire (shooter, enemy, weaponItem)
+local function manageLineOfFire (shooter, enemy, weaponItem, inRow)
 
     local cell = getCell()
 
@@ -294,8 +565,16 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
     local projectiles = getProjectileCount(weaponItem:getWeaponReloadType())
     local shooterId = HitmanUtils.GetCharacterID(shooter)
 
+    -- PONGDU: how many bodies one round goes through (see shot model header)
+    local ippj = ippjOn()
+    local shotgun = projectiles > 1
+    local maxHits = maxHitsOf(weaponItem, ippj)
+    local shot = { ippj = ippj, hits = 0, inRow = inRow or 0, base = nil }
+    local slots = 0                 -- vanilla: targets the round reached (hit or miss)
+    local pntOnKill = ippj and SandboxVars.ImprovedProjectile.IPPJPntOnKill
+
     -- characters standing on the square take the bullet
-    -- returns true if anyone was there (hit roll is done inside hit())
+    -- returns true when the round stops here
     local function hitCharacters(square)
         local chrs = square:getMovingObjects()
         local wasHit = false
@@ -303,13 +582,24 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
             local chr = chrs:get(j)
             if instanceof(chr, "IsoZombie") or instanceof(chr, "IsoPlayer") then
                 if shooterId ~= HitmanUtils.GetCharacterID(chr) then
-                    hit(shooter, weaponItem, chr)
-                    wasHit = true
-                    if j + 1 >= projectiles then break end
+                    local status, survived = hit(shooter, weaponItem, chr, shot)
+                    if shotgun then
+                        -- shotgun: old pellet logic (up to `projectiles` bodies, stops unless piercing)
+                        wasHit = true
+                        if j + 1 >= projectiles then break end
+                    elseif status == "block" then
+                        -- friendly / neutral body: soaks the round unless the gun pierces (old rule)
+                        if not piercing then return true end
+                    elseif status == "hit" or (status == "miss" and not ippj) then
+                        slots = slots + 1
+                        local used = ippj and shot.hits or slots
+                        if used >= maxHits then return true end
+                        if status == "hit" and survived and pntOnKill then return true end
+                    end
                 end
             end
         end
-        return wasHit
+        return shotgun and wasHit and not piercing
     end
 
     -- Bresenham's line of fire to detect what needs to destroyed between shooter and target
@@ -325,19 +615,22 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
             local r = (i > 1) and 2 or 1
             for x = -r, r do
                 for y = -r, r do
-                    table.insert(list, {x = cx + x, y = cy + y, z=cz})
+                    table.insert(list, {x = cx + x, y = cy + y, z=cz, d = x * x + y * y})
                 end
             end
+            -- PONGDU: target square first, then outward, so the hit cap is spent on
+            -- the bodies nearest the aim point
+            table.sort(list, function(a, b) return a.d < b.d end)
         else
             table.insert(list, {x=cx, y=cy, z=cz})
         end
 
-        for _, c in pairs(list) do
+        for _, c in ipairs(list) do
             local square = cell:getGridSquare(c.x, c.y, c.z)
             if i <= 1 and isLast and square then
                 -- point blank: the first 2 steps are the shooter's own/adjacent squares
                 -- and are skipped by the obstacle sweep below, so resolve characters only
-                if hitCharacters(square) and not piercing then return false end
+                if hitCharacters(square) then return false end
 
             elseif i > 1 and square then
                 -- manage wall obstacle
@@ -443,7 +736,7 @@ local function manageLineOfFire (shooter, enemy, weaponItem)
                 end
 
                 -- manage character "obstacles"
-                if hitCharacters(square) and not piercing then return false end
+                if hitCharacters(square) then return false end
 
             end
         end
@@ -575,7 +868,8 @@ local function rateFire(zombie, task, enemy)
         weapon.bulletsLeft = weapon.bulletsLeft - 1
         task.left = task.left - 1
         HitmanProjectile.Add(sid, sx, sy, sz, sd, projectiles)
-        if clear then manageLineOfFire(zombie, aimAt, weaponItem) end
+        local inRow = noteShot(sid, weaponItem)
+        if clear then manageLineOfFire(zombie, aimAt, weaponItem, inRow) end
     end
     st.carry = owed - n
     if st.carry > 1 then st.carry = 1 end
@@ -679,6 +973,7 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
     local reloadType = weaponItem:getWeaponReloadType()
     local projectiles = getProjectileCount(reloadType)
     HitmanProjectile.Add(brainShooter.id, sx, sy, sz, sd, projectiles)
+    local inRow = noteShot(brainShooter.id, weaponItem)
 
     -- handle real and "world" sound 
     -- local emitter = getWorld():getFreeEmitter(sx, sy, sz)
@@ -695,7 +990,7 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
 
     -- manage line of fire damage to characters and objects
     if HitmanUtils.LineClear(shooter, enemy) then
-        manageLineOfFire(shooter, enemy, weaponItem)
+        manageLineOfFire(shooter, enemy, weaponItem, inRow)
     end
 
     -- handle post-shot things
@@ -708,4 +1003,4 @@ HitmanZombieActions.Shoot.onComplete = function(zombie, task)
     end
 
     return true
-end
+end
