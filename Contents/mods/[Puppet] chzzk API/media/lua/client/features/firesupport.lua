@@ -80,14 +80,29 @@ end
 -- 조용히 어긋날 위험만 만든다. 값 범위(min/max/default)는 sandbox-options.txt
 -- 한 곳에서만 정의한다.
 
--- 저격 파라미터: Sniper_Radius / Sniper_Duration(s) / Sniper_Interval(ms).
+-- 원래 샌드박스 옵션이었던 값들. 옵션에서 빼고 당시 기본값으로 고정했다.
+--   SNIPER_KNOCKDOWN_CHANCE : PongDu.Sniper_KnockdownChance (저격: 관통 생존 시 넘어질 확률 %, 기본 50)
+--   HELI_CRIT_DAMAGE        : PongDu.Heli_CritDamage       (헬기: 크리티컬 데미지, 기본 6.00)
+--   HELI_NORMAL_DAMAGE      : PongDu.Heli_NormalDamage     (헬기: 일반 데미지, 기본 0.43)
+--   DRONE_CRIT_DAMAGE       : PongDu.Drone_CritDamage      (드론: 크리티컬 데미지, 기본 6.00)
+--   DRONE_NORMAL_DAMAGE     : PongDu.Drone_NormalDamage    (드론: 일반 데미지, 기본 0.10)
+-- 데미지 단위는 좀비 체력. 참고: 보통 좀비 1.8~2.1, 강함 3.5~3.8, 브루트 기본 5.0
+-- (6 = 사실상 즉사, 헬기 일반 0.43 = 보통 좀비 5발, 드론 일반 0.10 = 약 20발).
+local SNIPER_KNOCKDOWN_CHANCE = 50
+local HELI_CRIT_DAMAGE        = 6.00
+local HELI_NORMAL_DAMAGE      = 0.43
+local DRONE_CRIT_DAMAGE       = 6.00
+local DRONE_NORMAL_DAMAGE     = 0.10
+
+-- 저격 파라미터: Sniper_Radius / Sniper_Duration(s) / Sniper_Interval(ms) / Sniper_PierceChance(%)
+-- + 넉다운 확률(고정값, 위 SNIPER_KNOCKDOWN_CHANCE).
 local function sniperCfg()
     local sv = SandboxVars.PongDu
     return sv.Sniper_Radius,
            sv.Sniper_Duration,
            sv.Sniper_Interval,
            sv.Sniper_PierceChance,
-           sv.Sniper_KnockdownChance
+           SNIPER_KNOCKDOWN_CHANCE
 end
 
 -- 헬기 파라미터: Heli_Duration(s) / Heli_Radius / Heli_Interval(ms) / Heli_CritChance(%).
@@ -448,16 +463,15 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 local HIT_SCALE          = 1.5 * 0.3 * 0.5 * 0.7   -- 0.1575
 
--- kind: "heli" | "drone". 헬기/드론 데미지는 샌드박스에서 따로 설정한다
--- (Heli_/Drone_ CritDamage, NormalDamage). 발동 시점에 읽는다(샌드박스 캐싱 금지).
+-- kind: "heli" | "drone". 헬기/드론 데미지는 고정값이다(원래 샌드박스 옵션
+-- Heli_/Drone_ CritDamage, NormalDamage -- 파일 위쪽 저격 파라미터 앞 주석 참조).
 local function fsShotHp(kind, crit)
-    local sv = SandboxVars.PongDu
     if kind == "drone" then
-        if crit then return sv.Drone_CritDamage end
-        return sv.Drone_NormalDamage
+        if crit then return DRONE_CRIT_DAMAGE end
+        return DRONE_NORMAL_DAMAGE
     end
-    if crit then return sv.Heli_CritDamage end
-    return sv.Heli_NormalDamage
+    if crit then return HELI_CRIT_DAMAGE end
+    return HELI_NORMAL_DAMAGE
 end
 
 -- ── 검증 로그 ──────────────────────────────────────────────────────────────
