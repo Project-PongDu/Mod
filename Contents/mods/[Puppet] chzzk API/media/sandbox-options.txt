@@ -1067,10 +1067,3 @@ option PongDu.FireSupport_Airborne = {
     type = boolean, default = false,
     page = PongDu_Dev, translation = PongDu_FireSupport_Airborne,
 }
-
-option PongDu.FireSupport_Airborne_Squad = {
-    type = enum, numValues = 4, default = 1,
-    page = PongDu_Dev,
-    translation = PongDu_FireSupport_Airborne_Squad,
-    valueTranslation = PongDu_FireSupport_Airborne_Squad,
-}

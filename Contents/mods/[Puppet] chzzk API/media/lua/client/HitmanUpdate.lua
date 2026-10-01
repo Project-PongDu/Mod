@@ -310,12 +310,9 @@ local function ApplyVisuals(hitman, brain)
                 itemVisual:setTint(immutableColor)
             end
 
-            -- 프로필이 텍스처를 고정한 부위(textureAlt): 기본값 -1(무작위) 대신 지정 인덱스.
-            -- 모델 옷은 textureChoices, 몸에 칠하는 옷(티셔츠/장갑 등)은 m_BaseTextures 를 쓴다.
-            -- 해당 목록이 없는 쪽은 엔진이 -1 로 되돌리므로 둘 다 세워도 안전하다(ItemVisual).
+            -- 프로필이 텍스처를 고정한 부위(textureAlt): 기본값 -1(무작위) 대신 지정 인덱스
             if brain.texture and brain.texture[bodyLocation] then
                 itemVisual:setTextureChoice(brain.texture[bodyLocation])
-                itemVisual:setBaseTexture(brain.texture[bodyLocation])
             end
 
             itemVisuals:add(itemVisual)
@@ -1139,11 +1136,8 @@ local function ManageCombat(hitman)
     -- else and plans no shot; FIRE hands over the target of phase 1/2/3.
     local trooperTarget, trooperDist
     if isTrooper then
-        -- detection radius and target lock reach as far as the gun it carries (same range
-        -- as the shot check below). An emptied gun still counts, so a trooper in melee mode
-        -- keeps spotting what it has to run at.
-        local rangeSlot = gunSlot or (weapons.primary.name and "primary") or (weapons.secondary.name and "secondary") or nil
-        local gunRange = rangeSlot and GetRangedRangeCached(weapons[rangeSlot].name, brain) or nil
+        -- target lock reaches as far as the gun it will fire (same range as the shot check below)
+        local gunRange = gunSlot and GetRangedRangeCached(weapons[gunSlot].name, brain) or nil
         local mode, a, b = PongDuAirborne.Think(hitman, brain, gunRange)
         if mode == "flee" then return a end
         if mode == "fire" then trooperTarget, trooperDist = a, b end

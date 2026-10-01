@@ -18,7 +18,7 @@
 --      (예전 BumpType 방식은 turnalerted/falling 상태에 bumped 전이가 없어서
 --       두리번 모션이 먼저 나오거나 아예 안 나왔다.)
 --   ③ 착지 후 행동 상태: 대원 전투 AI(HitmanUpdate.lua ManageCombat)가 매 프레임 Think
---      - PATROL(든 총 사거리 안 보이는 적 없음) / FLEE(위험 + 3타일 안 5마리) / FIRE
+--      - PATROL(50타일 안 보이는 적 없음) / FLEE(위험 + 3타일 안 5마리) / FIRE
 --      - FIRE phase1 위험(자신을 무는 좀비/쏘는 적대 히트맨) > phase2 대원 10타일
 --        > phase3 플레이어 호위. phase2/3 은 드론 호위 로직(A>L>N>D)
 --      - FirePlan / AIM_TICKS: 15타일 이내 지속 사격, 그 밖 짧은 점사, 짧은 조준.
@@ -275,7 +275,7 @@ end)
 --  착지 후 행동 상태 (HitmanUpdate.lua ManageCombat 이 대원일 때 매 프레임 _a.Think)
 --
 --  상태 3가지
---    PATROL  대원의 총 사거리(_gunR) 안에 보이는 적이 없다 -> ZPAirborne 순찰
+--    PATROL  대원 50타일(DETECT_R) 안에 보이는 적이 없다 -> ZPAirborne 순찰
 --    FLEE    위험 + 3타일 안 적 5마리 이상 -> 반대쪽으로 10타일 후퇴(RetreatTick)
 --    FIRE    그 외 교전. 발포 phase 3단계:
 --      phase1 위험: 대원에게 공격모션(물기)이 나온 좀비 / 대원을 쏘는 적대 히트맨.
@@ -302,10 +302,7 @@ end)
 --  표적이 가려진 동안 다른 쏠 수 있는 적이 있을 때뿐이다. 쏠 표적이 전혀 없으면
 --  가려진 표적은 LOCK_LOST_MS 동안 붙잡고 사격만 멈춘다.
 -- ═══════════════════════════════════════════════════════════════════════════
--- 감지 반경 = 표적 고정 거리 = 든 총의 사거리(_gunR, ManageCombat 사격 판정과 같은 값).
--- 총을 바꾸면 따라간다. 이 안에 보이는 적이 있으면 교전(FIRE/FLEE), 없으면 순찰.
--- NOGUN_R 은 총 자체가 없을 때(프로필 주무기 스크립트 누락 등)만 쓰는 대체값.
-local NOGUN_R         = 50
+local DETECT_R        = 50     -- 이 안에 보이는 적이 있으면 교전(FIRE/FLEE), 없으면 순찰
 local DETECT_SCAN_MS  = 250
 local DETECT_GRACE_MS = 2000   -- 마지막으로 본 뒤 이 시간은 교전 유지 (시야가 깜빡일 때 상태가 뒤집히지 않게)
 local SELF_R          = 10     -- phase2: 대원 중심 반경
@@ -313,8 +310,9 @@ local ESCORT_SCAN_R   = 20     -- phase3: 플레이어 중심 반경 (드론 기
 local BITE_R          = 1.5    -- 공격모션 판정 거리 (UpdateZombies 는 0.8 안에서 문다)
 local ATTACKER_R      = 30     -- 대원을 노리는 적대 히트맨 탐지 반경
 local PICK_SCAN_MS    = 100
--- 표적이 이보다 멀면 "안 보임"으로 친다. Think 마다 지금 대원의 총 사거리로 다시 정한다.
-local _gunR           = NOGUN_R
+-- 이보다 멀면 "안 보임"으로 친다. 든 총의 사거리(ManageCombat 사격 판정과 같은 값)로
+-- Think 마다 다시 정한다. 총이 없으면(근접 모드) 감지 반경.
+local _lockR          = DETECT_R
 local LOCK_LOST_MS    = 2000
 local RETREAT_R       = 3      -- 전략적 후퇴 절과 공유
 local RETREAT_N       = 5
@@ -423,7 +421,7 @@ local function visible(hitman, z)
     return hitman:CanSee(z) and HitmanUtils.LineClear(hitman, z)
 end
 
--- ── 감지 (총 사거리, 시야) ──────────────────────────────────────────────────
+-- ── 감지 (50타일, 시야) ─────────────────────────────────────────────────────
 local _det = {}   -- [brain.id] = { at, seenAt, found, nx, ny, nd }
 
 local function detect(hitman, brain, now, zx, zy, zz)
@@ -431,12 +429,11 @@ local function detect(hitman, brain, now, zx, zy, zz)
     if d and now < d.at + DETECT_SCAN_MS then return d end
     d = d or {}
     d.at = now
-    local R = _gunR
-    local r2 = R * R
+    local r2 = DETECT_R * DETECT_R
     local cands, n = {}, 0
     for id, light in pairs(HitmanZombie.CacheLight) do
         local dx, dy = light.x - zx, light.y - zy
-        if dx <= R and dx >= -R and dy <= R and dy >= -R
+        if dx <= DETECT_R and dx >= -DETECT_R and dy <= DETECT_R and dy >= -DETECT_R
            and math.abs(light.z - zz) < 0.5 then
             local d2 = dx * dx + dy * dy
             if d2 <= r2 and HitmanUtils.AreEnemies(light.brain, brain) then
@@ -514,7 +511,7 @@ end
 local function droneScan(hitman, brain, cx, cy, r, zx, zy, zz)
     local cache = HitmanZombie.Cache
     local r2 = r * r
-    local maxR2 = _gunR * _gunR
+    local maxR2 = _lockR * _lockR
     local cands, n = {}, 0
     for id, light in pairs(HitmanZombie.CacheLight) do
         local dx, dy = light.x - cx, light.y - cy
@@ -606,7 +603,7 @@ local function pickRelaxed(hitman, brain, now, zx, zy, zz)
         else
             local dx, dy = t:getX() - zx, t:getY() - zy
             curD = math.sqrt(dx * dx + dy * dy)
-            if math.abs(t:getZ() - zz) < 0.5 and curD <= _gunR and visible(hitman, t) then
+            if math.abs(t:getZ() - zz) < 0.5 and curD <= _lockR and visible(hitman, t) then
                 L.lostAt = nil
                 curP, curT = relaxedClassOf(hitman, t, zx, zy)
                 if curP then
@@ -661,17 +658,11 @@ local function setState(brain, state, why)
     end
 end
 
--- ManageCombat 진입점. gunRange = 대원이 가진 총의 사거리 (총이 아예 없으면 nil)
+-- ManageCombat 진입점. gunRange = 지금 쏠 총의 사거리 (총이 없으면 nil)
 -- 반환: "flee", 태스크  |  "fire", 표적, 거리, phase  |  "hold"(교전인데 쏠 표적 없음)  |  "patrol"
 function _a.Think(hitman, brain, gunRange)
     local now = getTimestampMs()
-    local r = (gunRange and gunRange > 0) and gunRange or NOGUN_R
-    if r ~= brain.abGunR then
-        print(string.format("[PongDu][Airborne] id=%s detect/lock radius %.1f -> %.1f%s",
-            tostring(brain.id), brain.abGunR or -1, r, gunRange and "" or " (no gun, fallback)"))
-        brain.abGunR = r
-    end
-    _gunR = r
+    _lockR = (gunRange and gunRange > 0) and gunRange or DETECT_R
     local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
 
     -- 후퇴 중이면 도착/시간초과까지 계속 달린다
@@ -683,7 +674,7 @@ function _a.Think(hitman, brain, gunRange)
     local det = detect(hitman, brain, now, zx, zy, zz)
     if det.found then brain.abFace = { x = det.nx, y = det.ny } end
     if not (det.seenAt and now - det.seenAt <= DETECT_GRACE_MS) then
-        setState(brain, "PATROL", string.format("no zombie in sight within %.1f", _gunR))
+        setState(brain, "PATROL", "no zombie in sight within " .. DETECT_R)
         brain.abFace = nil
         if _lock[brain.id] then releaseLock(brain, "patrol") end
         return "patrol"
