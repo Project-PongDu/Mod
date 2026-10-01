@@ -321,7 +321,7 @@ local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발
 local FULLAUTO_ROUNDS   = 18   -- 연발 1회 계획 탄수(약 1초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
 local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
 local AUTO_INTERVAL     = 6    -- 연사 속도를 모르는 총일 때의 탄 간격(틱)
-_a.TURN_DEG_PER_S       = 180  -- 표적 쪽으로 도는 속도(도/초). 순간 회전 대신 이 속도로 돌며 계속 쏜다
+_a.TURN_DEG_PER_S       = 360  -- 표적 쪽으로 도는 속도(도/초). 순간 회전 대신 이 속도로 돌며 계속 쏜다
 
 local ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
 local LUNGE_STATES  = { ["lunge"] = true, ["lunge-network"] = true }
