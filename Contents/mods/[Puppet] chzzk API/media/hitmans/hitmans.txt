@@ -194,7 +194,7 @@
 	textureAlt: Pants = 1
 	textureAlt: KATTAJ1LowerLegs = 1
 	textureAlt: Shoes = 1
-	weapons: primary = Base.XM214
+	weapons: primary = Base.M249
 	weapons: melee = Base.Machete
 	ammo: primary = 52
 	bag: name = t3chzzkDonation.PongDuAirborneParachutePack

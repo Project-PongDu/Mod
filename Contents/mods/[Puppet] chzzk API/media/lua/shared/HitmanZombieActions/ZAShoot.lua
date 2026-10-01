@@ -495,12 +495,13 @@ end
 -- firing at the end of task.time}. Rounds are fired frame by frame in onWorking
 -- from real elapsed time, so the cadence does not depend on FPS. The owed
 -- fraction is carried per shooter across tasks, so back-to-back bursts keep the
--- exact rate; after a pause longer than RATE_RESET_MS the first round goes at once.
+-- exact rate; after a pause longer than RATE_RESET_MS and longer than one round
+-- interval (1 / rate) the first round goes at once. The second condition keeps a slow
+-- gun (semi-auto, rate < 4/s) from firing early when its next task starts quickly.
 local RATE_RESET_MS      = 250
 local RATE_MAX_PER_FRAME = 4      -- cap after a hitch
 local AIMED_TOL          = 5      -- deg: within this the round goes at the target
-local BLIND_MIN_R        = 10     -- blind rounds fly at least this far (tiles)
-local BLIND_MAX_R        = 30
+local BLIND_MIN_R        = 10     -- blind rounds fly at least this far (tiles), at most the gun's range
 
 -- aim point for a blind round (manageLineOfFire only calls getX/getY/getZ on it)
 local blindPoint = { x = 0, y = 0, z = 0 }
@@ -535,7 +536,8 @@ local function rateFire(zombie, task, enemy)
     local sid = brainShooter.id
     local st = rateState[sid]
     local owed
-    if not st or now - st.last > RATE_RESET_MS then
+    local gap = st and (now - st.last) or 0
+    if not st or (gap > RATE_RESET_MS and gap * task.rate >= 1000) then
         st = { last = now, carry = 0 }
         rateState[sid] = st
         owed = 1
@@ -561,7 +563,9 @@ local function rateFire(zombie, task, enemy)
         -- (and around the end point), so zombies swept by the barrel can die.
         local ex, ey = enemy:getX() - sx, enemy:getY() - sy
         local r = math.sqrt(ex * ex + ey * ey)
-        if r < BLIND_MIN_R then r = BLIND_MIN_R elseif r > BLIND_MAX_R then r = BLIND_MAX_R end
+        task.maxR = task.maxR or HitmanCompatibility.GetMaxRange(weaponItem)
+        if r > task.maxR then r = task.maxR end
+        if r < BLIND_MIN_R then r = BLIND_MIN_R end
         local rad = math.rad(sd)
         blindPoint.x, blindPoint.y, blindPoint.z = sx + math.cos(rad) * r, sy + math.sin(rad) * r, sz
         aimAt, clear = blindPoint, true

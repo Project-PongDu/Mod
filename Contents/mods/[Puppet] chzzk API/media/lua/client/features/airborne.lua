@@ -21,7 +21,9 @@
 --      - PATROL(50타일 안 보이는 적 없음) / FLEE(위험 + 3타일 안 5마리) / FIRE
 --      - FIRE phase1 위험(자신을 무는 좀비/쏘는 적대 히트맨) > phase2 대원 10타일
 --        > phase3 플레이어 호위. phase2/3 은 드론 호위 로직(A>L>N>D)
---      - FirePlan / AIM_TICKS: 15타일 이내 연발, 그 밖 5발 점사, 짧은 조준,
+--      - FirePlan / AIM_TICKS: 15타일 이내 지속 사격, 그 밖 짧은 점사, 짧은 조준.
+--        탄수/연사 속도/재발사 간격은 든 총의 스펙(HitmanPrograms.Weapon.FireSpec)에서 뽑는다.
+--        표적을 붙잡는 거리도 든 총의 사거리(ManageCombat 사격 판정과 같은 값)다.
 --        표적 전환 시 순간 회전 없이 TURN_DEG_PER_S 로 돌며 계속 사격(눈먼 탄)
 --  를 맡는다. 자세한 규칙은 "착지 후 행동 상태" 절.
 --
@@ -308,19 +310,22 @@ local ESCORT_SCAN_R   = 20     -- phase3: 플레이어 중심 반경 (드론 기
 local BITE_R          = 1.5    -- 공격모션 판정 거리 (UpdateZombies 는 0.8 안에서 문다)
 local ATTACKER_R      = 30     -- 대원을 노리는 적대 히트맨 탐지 반경
 local PICK_SCAN_MS    = 100
-local LOCK_MAX_R      = 45     -- 이보다 멀면 "안 보임"으로 친다 (XM214 판정 사거리 45)
+-- 이보다 멀면 "안 보임"으로 친다. 든 총의 사거리(ManageCombat 사격 판정과 같은 값)로
+-- Think 마다 다시 정한다. 총이 없으면(근접 모드) 감지 반경.
+local _lockR          = DETECT_R
 local LOCK_LOST_MS    = 2000
 local RETREAT_R       = 3      -- 전략적 후퇴 절과 공유
 local RETREAT_N       = 5
 
 -- 사격 제어 (HitmanUpdate.lua ManageCombat -> HitmanPrograms.Weapon.Aim/Shoot)
--- 연사 속도 자체는 HitmanPrograms.Weapon.AutoRate 가 총의 FireMode 로 정한다
--- (Arsenal AnimSet 기준, XM214 [6]Rotary = 초당 18발).
+-- 무기 박자(연사 속도, 점사 탄수, 다시 쏘기까지의 간격)는 총마다 다르므로 여기 두지 않는다.
+-- HitmanPrograms.Weapon.FireSpec 이 플레이어가 그 총을 쏠 때와 같은 값으로 계산한다.
+-- 아래는 총과 무관한 사격 "전술"이다 (초 단위 -> 총의 연사 속도로 탄수가 정해진다).
 _a.AIM_TICKS            = 8    -- 조준 시간(틱, 1/60초). 기본 히트맨은 18 + 거리*2.5 (최대 60)
-local FULLAUTO_MAX      = 15   -- 이 거리(타일) 이내: 연발
-local FULLAUTO_ROUNDS   = 18   -- 연발 1회 계획 탄수(약 1초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
-local LONG_BURST        = 5    -- FULLAUTO_MAX 밖: 5발 점사
-local AUTO_INTERVAL     = 6    -- 연사 속도를 모르는 총일 때의 탄 간격(틱)
+local CLOSE_R           = 15   -- 이 거리(타일) 이내: 지속 사격
+local SUSTAIN_S         = 1.0  -- 지속 사격 1회 계획 길이(초). 다 쏘면 표적을 다시 확인하고 이어서 쏜다
+local FAR_BURST_S       = 0.5  -- CLOSE_R 밖, 연사 총의 점사 길이(초)
+local FAR_PAUSE_S       = 0.5  -- CLOSE_R 밖, 점사(단발) 사이 쉬는 시간(초). 새 표적의 첫 사격은 안 쉰다
 _a.TURN_DEG_PER_S       = 360  -- 표적 쪽으로 도는 속도(도/초). 순간 회전 대신 이 속도로 돌며 계속 쏜다
 
 local ATTACK_STATES = { ["attack"] = true, ["attack-network"] = true }
@@ -506,7 +511,7 @@ end
 local function droneScan(hitman, brain, cx, cy, r, zx, zy, zz)
     local cache = HitmanZombie.Cache
     local r2 = r * r
-    local maxR2 = LOCK_MAX_R * LOCK_MAX_R
+    local maxR2 = _lockR * _lockR
     local cands, n = {}, 0
     for id, light in pairs(HitmanZombie.CacheLight) do
         local dx, dy = light.x - cx, light.y - cy
@@ -598,7 +603,7 @@ local function pickRelaxed(hitman, brain, now, zx, zy, zz)
         else
             local dx, dy = t:getX() - zx, t:getY() - zy
             curD = math.sqrt(dx * dx + dy * dy)
-            if math.abs(t:getZ() - zz) < 0.5 and curD <= LOCK_MAX_R and visible(hitman, t) then
+            if math.abs(t:getZ() - zz) < 0.5 and curD <= _lockR and visible(hitman, t) then
                 L.lostAt = nil
                 curP, curT = relaxedClassOf(hitman, t, zx, zy)
                 if curP then
@@ -653,10 +658,11 @@ local function setState(brain, state, why)
     end
 end
 
--- ManageCombat 진입점.
+-- ManageCombat 진입점. gunRange = 지금 쏠 총의 사거리 (총이 없으면 nil)
 -- 반환: "flee", 태스크  |  "fire", 표적, 거리, phase  |  "hold"(교전인데 쏠 표적 없음)  |  "patrol"
-function _a.Think(hitman, brain)
+function _a.Think(hitman, brain, gunRange)
     local now = getTimestampMs()
+    _lockR = (gunRange and gunRange > 0) and gunRange or DETECT_R
     local zx, zy, zz = hitman:getX(), hitman:getY(), hitman:getZ()
 
     -- 후퇴 중이면 도착/시간초과까지 계속 달린다
@@ -709,16 +715,40 @@ function _a.Think(hitman, brain)
     return "hold"
 end
 
--- 사격 계획: FULLAUTO_MAX 이내는 연발(바로 이어서), 그 밖은 5발 점사(첫 발은
--- 기본 발사 지연 = 점사 사이 간격). fresh = 막 새로 잡은 표적(_a.TakeFreshLock):
--- 멀어도 첫 점사는 지연 없이 쏜다. 연사 속도는 Weapon.Shoot 가 총 FireMode 로 정한다.
+-- 사격 계획. 총 이름을 보지 않고 FireSpec(플레이어가 그 총을 쏠 때의 박자)으로 탄수를 정한다.
+--   연사 총 : CLOSE_R 이내 SUSTAIN_S 초 분량을 이어서, 그 밖은 FAR_BURST_S 초 분량 점사 후 FAR_PAUSE_S 쉼
+--   점사 총 : 한 번에 그 총의 점사 탄수. 점사 사이는 그 총의 재발사 간격(cycle) 이상
+--   단발 총 : CLOSE_R 이내 SUSTAIN_S 초 동안 쏠 수 있는 만큼, 그 밖은 1발씩 FAR_PAUSE_S 쉼
+--   발 사이 간격은 ZAShoot 이 spec.rate 로 지킨다(태스크가 바뀌어도 이어진다).
+-- fresh = 막 새로 잡은 표적(_a.TakeFreshLock): 전술상 쉬는 시간 없이 바로 쏜다.
 -- turnRate: 사격 태스크가 표적 쪽으로 TURN_DEG_PER_S 로 돌면서 쏜다. 총구가 아직 표적을
 -- 향하지 않은 동안 나가는 탄은 총구 방향으로 날아가(눈먼 탄) 그 선 위의 좀비를 맞힐 수 있다.
-function _a.FirePlan(dist, fresh)
-    if dist <= FULLAUTO_MAX then
-        return { bullets = FULLAUTO_ROUNDS, interval = AUTO_INTERVAL, firstTime = 0, turnRate = _a.TURN_DEG_PER_S }
+local function roundsFor(rate, seconds)
+    local n = math.floor(rate * seconds + 0.5)
+    if n < 1 then n = 1 end
+    return n
+end
+
+function _a.FirePlan(hitman, weaponName, dist, fresh)
+    local item = HitmanCompatibility.InstanceItem(weaponName)
+    if not item then return nil end   -- 기본 히트맨 사격 규칙으로
+    local spec = HitmanPrograms.Weapon.FireSpec(item, hitman)
+    local close = dist <= CLOSE_R
+
+    local pause = (close or fresh) and 0 or FAR_PAUSE_S   -- 전술상 쉬는 시간
+    local bullets
+    if spec.auto then
+        bullets = roundsFor(spec.rate, close and SUSTAIN_S or FAR_BURST_S)
+    elseif (spec.burst or 1) > 1 then
+        bullets = spec.burst
+        -- 점사 사이 반동 대기(cycle)는 총의 성질이라 새 표적이어도 줄지 않는다.
+        -- 단발/연사는 ZAShoot 이 rate 로 발 간격을 지키므로 여기서 더할 필요가 없다.
+        if pause < spec.cycle then pause = spec.cycle end
+    else
+        bullets = close and roundsFor(spec.rate, SUSTAIN_S) or 1
     end
-    return { bullets = LONG_BURST, interval = AUTO_INTERVAL, firstTime = fresh and 0 or nil, turnRate = _a.TURN_DEG_PER_S }
+
+    return { bullets = bullets, firstTime = math.floor(pause * 60 + 0.5), turnRate = _a.TURN_DEG_PER_S }
 end
 
 -- 지금 표적이 새로 잡은 뒤 아직 한 번도 사격 계획을 안 세운 표적이면 true (한 번만).

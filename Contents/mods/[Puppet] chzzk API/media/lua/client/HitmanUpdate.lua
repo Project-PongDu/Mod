@@ -1109,8 +1109,9 @@ end
 --                     ranking, special pool = mutants + hostile hitmen)
 --                  never players, never tier 3. A target is kept until it is
 --                  dead (PickTarget), 5+ enemies within 3 tiles trigger a 10-tile
---                  retreat first (RetreatTick), a retarget turns instantly, aims
---                  for AIM_TICKS and fires per FirePlan (full auto <= 15 tiles)
+--                  retreat first (RetreatTick), a retarget turns at TURN_DEG_PER_S,
+--                  aims for AIM_TICKS and fires per FirePlan, sized from the gun's
+--                  own spec (HitmanPrograms.Weapon.FireSpec)
 -- ranged mode: while any gun has ammo the hitman never uses melee weapons;
 --              enemies at contact range get shoved with the gun in hand, then shot
 local function ManageCombat(hitman)
@@ -1135,7 +1136,9 @@ local function ManageCombat(hitman)
     -- else and plans no shot; FIRE hands over the target of phase 1/2/3.
     local trooperTarget, trooperDist
     if isTrooper then
-        local mode, a, b = PongDuAirborne.Think(hitman, brain)
+        -- target lock reaches as far as the gun it will fire (same range as the shot check below)
+        local gunRange = gunSlot and GetRangedRangeCached(weapons[gunSlot].name, brain) or nil
+        local mode, a, b = PongDuAirborne.Think(hitman, brain, gunRange)
         if mode == "flee" then return a end
         if mode == "fire" then trooperTarget, trooperDist = a, b end
     end
@@ -1470,7 +1473,7 @@ local function ManageCombat(hitman)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
 
                         else
-                            local fire = isTrooper and PongDuAirborne.FirePlan(bestDist, PongDuAirborne.TakeFreshLock(brain)) or nil
+                            local fire = isTrooper and PongDuAirborne.FirePlan(hitman, weapon.name, bestDist, PongDuAirborne.TakeFreshLock(brain)) or nil
                             local stasks = HitmanPrograms.Weapon.Shoot(hitman, enemyCharacter, fireSlot, fire)
                             for _, t in pairs(stasks) do table.insert(tasks, t) end
                         end
