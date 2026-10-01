@@ -197,5 +197,5 @@
 	weapons: primary = Base.M249
 	weapons: scope = Base.Scope_ATACR7_F1
 	weapons: melee = Base.Machete
-	ammo: primary = 52
+	ammo: primary = 20
 	bag: name = t3chzzkDonation.PongDuAirborneParachutePack
