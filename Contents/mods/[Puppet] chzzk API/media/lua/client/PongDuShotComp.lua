@@ -11,11 +11,16 @@
 --   같은 프레임에 재진입시킬 방법이 없다.
 --
 --  보정:
---   연사(Auto 계열 / Rotary) 중 실제 스윙 간격을 애니 시간(getTimeDelta 누적)으로 잰다.
---   FPS 가 REF_FPS 이상일 때의 간격 중앙값을 그 총·발사모드·자세의 기준 간격으로 삼고
---   (플레이어 modData 에 저장해 다음 접속에도 씀), FPS 가 COMP_FPS 미만인 동안
---   "기준 간격대로 쐈다면 지금까지 나갔을 발수"보다 실제 발수가 모자라면
---   스윙 사이 프레임에 모자란 만큼 추가 발사한다.
+--   연사(Auto 계열 / Rotary) 중 "60fps 에서였다면 나갔을 발수"보다 실제 발수가 모자라면
+--   스윙 사이 프레임에 모자란 만큼 추가 발사한다. 시간은 애니 시간(getTimeDelta 누적)으로 잰다.
+--   기준 간격(총·발사모드·자세별):
+--    1) 실측: FPS 가 REF_FPS 이상일 때 잰 스윙 간격 중앙값 (플레이어 modData 에 저장)
+--    2) 모델: 실측이 없으면 실제 발이 나갈 때 재생 중인 사격 클립 트랙을 읽어 계산한다.
+--       애니 시간 D = (클립 길이 - 조기 전환 페이드아웃 시간) / 재생 배율
+--       반동 R    = 스윙 시점 플레이어 RecoilDelay (60fps 에서 프레임당 0.5 감소)
+--       기준 간격 = max(ceil(D*60)+1, ceil(R/0.5)) / 60 초   (위 엔진 주기 공식을 60fps 로 계산)
+--       대규모 좀비로 처음부터 고FPS 를 못 보는 상황에서도 바로 동작하게 하려는 것.
+--       실측이 생기면 실측을 쓰고, 둘을 같이 로그에 남겨 모델을 검증할 수 있게 한다.
 --   추가 발사는 실제 명중 시점과 같은 Lua 이벤트 OnWeaponSwingHitPoint 를 직접 발생시켜
 --   Arsenal 탄 차감·약실·탄걸림(onShoot)과 Improved Projectile 투사체 생성이 실제 발과
 --   똑같이 돌게 한다. 발사음·총구화염도 Arsenal attackHook 과 같은 조건으로 낸다.
@@ -27,16 +32,21 @@
 --     탄만 줄고 피해가 없어서 보정하지 않는다
 --   - 추가 발에는 엔진 ConnectSwing 이 없다: 지구력 소모·무기 내구도 감소·바닐라 경험치 없음
 --   - 고FPS(COMP_FPS 이상)에서는 아무것도 하지 않는다 (바닐라 그대로)
+--   - 모델은 60fps 기준이다. 144fps 등에서 실제로 더 빨리 쏘던 사람에게는 실측값이 생기기
+--     전까지 그보다 약간 느린 기준이 쓰인다
+--   - 사격 클립 이름은 PongDuRangedShotFix 가 애니셋을 고칠 때 모아 둔다(PongDuShotFix.shotClips)
 --  샌드박스 PongDu.ShotComp 로 끈다.
 -- ═══════════════════════════════════════════════════════════════════════════
 PongDuShotComp = PongDuShotComp or {}
 PongDuShotComp.firingExtra = false   -- 추가 발 이벤트 발생 중 표시 (PongDuShotDiag 가 구분용으로 읽음)
 
 local LOG = "[PongDu][ShotComp] "
-local REF_FPS = 55        -- 이 FPS 이상에서 잰 간격만 기준값 표본으로 쓴다
+local REF_FPS = 55        -- 이 FPS 이상에서 잰 간격만 실측 기준값 표본으로 쓴다
 local COMP_FPS = 50       -- 이 FPS 미만일 때만 보충한다
+local MODEL_FPS = 60      -- 모델 기준 간격을 계산하는 FPS (B41 기본 FPS 상한)
+local RECOIL_STEP = 0.5   -- 60fps 한 프레임에 줄어드는 RecoilDelay (0.625 * getMultiplier() 0.8)
 local CONT_GAP = 0.35     -- 스윙 간격(애니 시간, 초)이 이보다 길면 연사가 끊긴 것으로 본다
-local SAMPLE_N = 15       -- 기준 간격 표본 개수 (중앙값)
+local SAMPLE_N = 15       -- 실측 기준 간격 표본 개수 (중앙값)
 local MIN_SAMPLES = 5     -- 이만큼 모여야 새로 잰 기준값을 쓴다
 local MAX_PER_TICK = 2    -- 한 프레임에 추가로 쏘는 최대 발수
 local MAX_DEFICIT = 3     -- 긴 끊김 뒤 몰아쏘기 방지: 밀린 발수 상한
@@ -48,7 +58,8 @@ local AUTO_MODES = {
 }
 
 local clk = 0             -- 애니 시간 누적(초). 엔진 애니와 같은 dt(getTimeDelta, 프레임당 상한 83ms)
-local refs = {}           -- key -> { s = {표본}, i = 다음 기록 위치, med = 중앙값 }
+local refs = {}           -- key -> { s = {표본}, i = 다음 기록 위치, med = 실측 중앙값 }
+local models = {}         -- key -> { anim = 사격 애니 실시간(초), recoil = RecoilDelay 추정 }
 local burst = nil         -- 진행 중인 연사
 local logged = {}         -- 한 번만 남길 로그
 
@@ -101,17 +112,104 @@ local function savedRefs(player)
     return md[MODDATA_KEY]
 end
 
-local function refOf(player, key)
+-- ── 모델 기준 간격 ─────────────────────────────────────────────────────────
+
+local function num(v)
+    return tonumber(tostring(v))
+end
+
+-- 지금 재생 중인 사격 클립 트랙에서 "사격 상태를 빠져나가기까지의 실제 시간"(초)을 읽는다.
+-- 이전 발의 같은 클립이 페이드아웃 중일 수 있고 2D 블렌드는 트랙이 여럿이라, 가장 긴 값을 쓴다
+-- (짧게 잡으면 바닐라보다 빨리 쏘게 되므로 보수적으로).
+local function shotAnimTime(player)
+    local fx = PongDuShotFix
+    if not fx or not fx.fieldVal or not fx.shotClips then return nil, "PongDuRangedShotFix not loaded" end
+    local fv = fx.fieldVal
+    local ap = player:getAnimationPlayer()
+    local mt = ap and fv(ap, "aplayer", "m_multiTrack")
+    local tracks = mt and fv(mt, "multitrack", "m_tracks")
+    if not tracks then return nil, "animation tracks unreadable" end
+    local best, seen = nil, {}
+    for i = 0, tracks:size() - 1 do
+        local tr = tracks:get(i)
+        local name = tostring(fv(tr, "track", "name"))
+        seen[#seen + 1] = name
+        if fx.shotClips[string.lower(name)] then
+            local clip = fv(tr, "track", "CurrentClip")
+            local dur = clip and num(fv(clip, "clip", "Duration"))
+            local spd = num(fv(tr, "track", "SpeedDelta"))
+            if dur and spd and spd > 0 then
+                local cut = 0
+                if tostring(fv(tr, "track", "triggerOnNonLoopedAnimFadeOutEvent")) == "true" then
+                    cut = num(fv(tr, "track", "earlyBlendOutTime")) or 0
+                end
+                local d = (dur - cut) / spd
+                if d > 0 and (not best or d > best) then best = d end
+            end
+        end
+    end
+    if not best then return nil, "no shot clip track playing [" .. table.concat(seen, ",") .. "]" end
+    return best
+end
+
+-- 스윙 시점의 반동 대기값을 기록한다. 스윙 이벤트 전에 이번 프레임 감소분(0.625 * getMultiplier)이
+-- 이미 빠졌으므로 되돌리면 공격 때 설정된 값이 나온다. 0 까지 빠졌으면 "감소분 이하"라는 것만
+-- 알 수 있어 무기 값과 감소분 중 작은 쪽을 상한으로 두고, 상한들 중 가장 작은 것을 쓴다.
+-- 정확한 값을 한 번이라도 얻으면 그쪽을 쓴다.
+local function noteRecoil(player, weapon, m)
+    local step = 0.625 * getGameTime():getMultiplier()
+    local r = player:getRecoilDelay()
+    if r > 0 then
+        m.recoilExact = r + step
+    else
+        local bound = math.min(math.max(weapon:getRecoilDelay(), 0), step)
+        if not m.recoilBound or bound < m.recoilBound then m.recoilBound = bound end
+    end
+    m.recoil = m.recoilExact or m.recoilBound or 0
+end
+
+-- 모델 기준 간격(초), 애니 프레임 수, 반동 프레임 수 (60fps 기준)
+local function modelOf(m)
+    local animFrames = math.max(1, math.ceil(m.anim * MODEL_FPS - 1e-4)) + 1
+    local recoilFrames = math.ceil((m.recoil or 0) / RECOIL_STEP - 1e-3)
+    return math.max(animFrames, recoilFrames) / MODEL_FPS, animFrames, recoilFrames
+end
+
+local function logModel(key, m)
+    local ref, af, rf = modelOf(m)
+    local r = refs[key]
+    print(string.format(LOG .. "model key=%s anim=%.3fs frames=%d recoil=%.2f frames=%d interval=%.3fs (%.1f/s)%s",
+        key, m.anim, af, m.recoil or 0, rf, ref, 1 / ref,
+        (r and r.med) and string.format(" measured=%.3fs", r.med) or ""))
+end
+
+-- ── 실측 기준 간격 ─────────────────────────────────────────────────────────
+
+local function measuredOf(player, key)
     local r = refs[key]
     if r and r.med then return r.med end
+    if r and r.noSaved then return nil end
     local saved = tonumber(savedRefs(player)[key])
+    refs[key] = r or { s = {}, i = 1 }
     if saved and saved > 0 then
-        refs[key] = refs[key] or { s = {}, i = 1 }
         refs[key].med = saved
         print(string.format(LOG .. "ref loaded key=%s interval=%.3fs (%.1f/s) from player modData", key, saved, 1 / saved))
         return saved
     end
+    refs[key].noSaved = true
     return nil
+end
+
+-- 기준 간격과 출처 (실측 우선, 없으면 모델)
+local function refOf(player, key)
+    local med = measuredOf(player, key)
+    if med then return med, "measured" end
+    local m = models[key]
+    if m and m.anim then
+        local ref = modelOf(m)
+        return ref, "model"
+    end
+    return nil, nil
 end
 
 local function addSample(player, key, iv)
@@ -128,19 +226,46 @@ local function addSample(player, key, iv)
     table.sort(tmp)
     local med = tmp[math.floor((#tmp + 1) / 2)]
     if not r.med or math.abs(med - r.med) > r.med * 0.05 then
-        print(string.format(LOG .. "ref key=%s interval=%.3fs (%.1f/s) samples=%d", key, med, 1 / med, #tmp))
+        local m = models[key]
+        local mref = m and m.anim and modelOf(m)
+        print(string.format(LOG .. "ref key=%s interval=%.3fs (%.1f/s) samples=%d%s", key, med, 1 / med, #tmp,
+            mref and string.format(" model=%.3fs", mref) or ""))
         savedRefs(player)[key] = med
     end
     r.med = med
 end
 
+-- ── 연사 추적 / 보정 ───────────────────────────────────────────────────────
+
 local function endBurst(reason)
     local b = burst
     burst = nil
     if b and b.extras > 0 then
-        print(string.format(LOG .. "burst key=%s real=%d extra=%d dur=%.2fs ref=%.3fs fps=%d end=%s",
-            b.key, b.shots - b.extras, b.extras, b.last - b.t0, b.ref or -1,
+        print(string.format(LOG .. "burst key=%s real=%d extra=%d dur=%.2fs ref=%.3fs(%s) fps=%d end=%s",
+            b.key, b.shots - b.extras, b.extras, b.last - b.t0, b.ref or -1, tostring(b.src),
             math.floor(getAverageFPS() + 0.5), reason))
+    end
+end
+
+-- 기준 간격을 다시 읽고 이번 연사를 보정할지 정한다 (스윙마다, 그리고 모델이 처음 생겼을 때)
+local function evalComp(player, b)
+    local ref, src = refOf(player, b.key)
+    b.ref, b.src = ref, src
+    if b.lastIv <= 0 then b.lastIv = ref or 0 end
+    b.comp = false
+    if getAverageFPS() < COMP_FPS and enabled() then
+        if not ref then
+            -- 아직 기준이 없다: 첫 발 명중 시점에 사격 애니를 읽으면 다시 평가한다
+            -- (못 읽으면 그쪽에서 이유를 로그로 남긴다)
+        elseif not ippjReady(b.weapon) then
+            logOnce("noippj|" .. b.key, "Improved Projectile not handling key=" .. b.key .. ", no compensation")
+        else
+            b.comp = true
+        end
+    end
+    if not b.comp and ref then
+        -- 보정하지 않는 동안은 기준 시각을 실제 발수에 맞춰 밀린 발수를 0 으로 유지한다
+        b.t0 = b.last - (b.shots - 1) * ref
     end
 end
 
@@ -163,7 +288,7 @@ local function fireExtra(player, weapon)
     return true
 end
 
--- 실제 스윙(②). 연사 간격을 재고 보정 여부를 정한다.
+-- 실제 스윙(②). 연사 간격을 재고 반동값을 기록하고 보정 여부를 정한다.
 Events.OnWeaponSwing.Add(function(player, weapon)
     if not isLocal0(player) then return end
     if not weapon or not instanceof(weapon, "HandWeapon") or not weapon:isRanged()
@@ -175,6 +300,19 @@ Events.OnWeaponSwing.Add(function(player, weapon)
 
     local key = keyOf(player, weapon)
     local fps = getAverageFPS()
+
+    local m = models[key]
+    if not m then
+        m = {}
+        models[key] = m
+    end
+    local oldRef = m.anim and modelOf(m)
+    noteRecoil(player, weapon, m)
+    if oldRef then
+        local newRef = modelOf(m)
+        if newRef ~= oldRef then logModel(key, m) end
+    end
+
     local b = burst
     if b and b.key == key and b.weapon == weapon and clk - b.last <= CONT_GAP then
         local iv = clk - b.last
@@ -184,27 +322,34 @@ Events.OnWeaponSwing.Add(function(player, weapon)
         b.shots = b.shots + 1
     else
         if b then endBurst("new burst") end
-        b = { key = key, weapon = weapon, t0 = clk, last = clk, lastIv = 0, shots = 1, extras = 0 }
+        b = { key = key, weapon = weapon, t0 = clk, last = clk, lastIv = 0, shots = 1, extras = 0, read = false }
         burst = b
     end
+    evalComp(player, b)
+end)
 
-    b.ref = refOf(player, key)
-    if b.lastIv <= 0 then b.lastIv = b.ref or 0 end
-    b.comp = false
-    if fps < COMP_FPS and enabled() then
-        if not b.ref then
-            logOnce("noref|" .. key, "no reference cadence yet for key=" .. key
-                .. " (fire it once above " .. REF_FPS .. " fps), no compensation")
-        elseif not ippjReady(weapon) then
-            logOnce("noippj|" .. key, "Improved Projectile not handling key=" .. key .. ", no compensation")
-        else
-            b.comp = true
-        end
+-- 실제 명중 시점(③). 연사마다 첫 발에서 사격 애니를 읽어 모델 기준 간격을 갱신한다.
+Events.OnWeaponSwingHitPoint.Add(function(player, weapon)
+    if PongDuShotComp.firingExtra or not isLocal0(player) or not eligible(weapon) then return end
+    local b = burst
+    if not b or b.read or b.weapon ~= weapon then return end
+    b.read = true
+    local key = b.key
+    local ok, anim, why = pcall(shotAnimTime, player)
+    if not ok then
+        logOnce("animerr|" .. key, "shot animation read failed for key=" .. key .. ": " .. tostring(anim))
+        return
     end
-    if not b.comp and b.ref then
-        -- 보정하지 않는 동안은 기준 시각을 실제 발수에 맞춰 밀린 발수를 0 으로 유지한다
-        b.t0 = b.last - (b.shots - 1) * b.ref
+    if not anim then
+        logOnce("noanim|" .. key, "no model cadence for key=" .. key .. ": " .. tostring(why))
+        return
     end
+    local m = models[key]
+    if not m.anim or math.abs(anim - m.anim) > m.anim * 0.02 then
+        m.anim = anim
+        logModel(key, m)
+    end
+    evalComp(player, b)
 end)
 
 -- 매 프레임: 시계를 진행하고, 보정 중이면 모자란 발수만큼 쏜다.
@@ -244,4 +389,4 @@ Events.OnPlayerUpdate.Add(function(player)
     end
 end)
 
-print(LOG .. "loaded (ref>=" .. REF_FPS .. "fps, compensate<" .. COMP_FPS .. "fps)")
+print(LOG .. "loaded (measured ref>=" .. REF_FPS .. "fps or " .. MODEL_FPS .. "fps animation model, compensate<" .. COMP_FPS .. "fps)")

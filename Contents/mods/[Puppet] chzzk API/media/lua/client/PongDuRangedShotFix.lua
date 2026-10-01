@@ -43,6 +43,10 @@
 --  애니셋은 캐릭터마다가 아니라 이름별 공유 객체라 한 번만 고치면 된다.
 --  차량 탑승 시 쓰는 player-vehicle 애니셋도 바뀌는 순간 같이 고친다.
 --  Kahlua 는 AnimNode 등을 노출하지 않으므로 공개 필드를 getClassField 리플렉션으로 읽는다.
+--
+--  PongDuShotComp(저FPS 연사속도 보정)용으로 두 가지를 전역 PongDuShotFix 에 내보낸다:
+--   fieldVal  : 아래 리플렉션 헬퍼
+--   shotClips : 판정 이벤트가 있는 ranged 노드들이 쓰는 클립 이름 집합 (m_AnimName + 2D 블렌드, 소문자)
 -- ═══════════════════════════════════════════════════════════════════════════
 local LOG = "[PongDu][ShotFix] "
 local DONOR_NAME = "PongDuShotEventDonor"
@@ -72,6 +76,30 @@ local function fieldVal(obj, kind, name)
     end
     if not f then return nil end
     return getClassFieldVal(obj, f)
+end
+
+PongDuShotFix = PongDuShotFix or {}
+PongDuShotFix.fieldVal = fieldVal
+PongDuShotFix.shotClips = PongDuShotFix.shotClips or {}
+
+-- 노드가 재생하는 클립 이름(단일 애니 + 2D 블렌드 트랙)을 소문자로 shotClips 에 모은다
+local function addClip(name)
+    if not name or name == "" then return 0 end
+    local k = string.lower(name)
+    if PongDuShotFix.shotClips[k] then return 0 end
+    PongDuShotFix.shotClips[k] = true
+    return 1
+end
+
+local function addClips(node)
+    local n = addClip(fieldVal(node, "node", "m_AnimName"))
+    local blends = fieldVal(node, "node", "m_2DBlends")
+    if blends then
+        for j = 0, blends:size() - 1 do
+            n = n + addClip(fieldVal(blends:get(j), "blend", "m_AnimName"))
+        end
+    end
+    return n
 end
 
 local function eventInfo(ev)
@@ -136,7 +164,7 @@ local function patchSet(animSet)
         return false
     end
 
-    local patched, already, names = 0, 0, {}
+    local patched, already, names, newClips = 0, 0, {}, 0
     for i = 0, nodes:size() - 1 do
         local node = nodes:get(i)
         local nodeName = fieldVal(node, "node", "m_Name")
@@ -156,6 +184,9 @@ local function patchSet(animSet)
                     shotVar = true
                 end
             end
+            if timedHit or earlyHit then
+                newClips = newClips + addClips(node)
+            end
             if timedHit then
                 already = already + 1
             elseif earlyHit then
@@ -167,8 +198,8 @@ local function patchSet(animSet)
             end
         end
     end
-    print(string.format(LOG .. "animset=%s ranged nodes=%d patched=%d (End fallback) alreadyTimed=%d [%s]",
-        setName, nodes:size(), patched, already, table.concat(names, ",")))
+    print(string.format(LOG .. "animset=%s ranged nodes=%d patched=%d (End fallback) alreadyTimed=%d shotClips+%d [%s]",
+        setName, nodes:size(), patched, already, newClips, table.concat(names, ",")))
     return true
 end
 
