@@ -549,7 +549,9 @@ end
 -- Unlike Clan/Type this skips spawn point generation, so z may be an air square
 -- the caller prepared (createNewGridSquare). Returns the spawned zombie or nil.
 --   fallbackPrimary: used when the profile's primary gun script is missing
-HitmanServer.SpawnAt = function(player, cid, x, y, z, program, fallbackPrimary)
+--   profileName: only profiles whose "general: name" matches (e.g. one airborne
+--                class out of several in the same clan); nil = any profile
+HitmanServer.SpawnAt = function(player, cid, x, y, z, program, fallbackPrimary, profileName)
     local clan = HitmanCustom.ClanGet(cid)
     if not clan then
         print("[HITMANS] SpawnAt: unknown clan " .. tostring(cid))
@@ -558,9 +560,12 @@ HitmanServer.SpawnAt = function(player, cid, x, y, z, program, fallbackPrimary)
 
     local keys = {}
     local options = HitmanCustom.GetFromClan(cid)
-    for bid in pairs(options) do table.insert(keys, bid) end
+    for bid, data in pairs(options) do
+        if not profileName or data.general.name == profileName then table.insert(keys, bid) end
+    end
     if #keys == 0 then
-        print("[HITMANS] SpawnAt: clan " .. tostring(cid) .. " has no hitman profile")
+        print("[HITMANS] SpawnAt: clan " .. tostring(cid) .. " has no hitman profile"
+            .. (profileName and (" named " .. tostring(profileName)) or ""))
         return nil
     end
     local bid = keys[ZombRand(#keys) + 1]
