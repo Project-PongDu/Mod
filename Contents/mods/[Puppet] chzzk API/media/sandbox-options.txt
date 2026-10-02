@@ -23,11 +23,6 @@ option PongDu.Host_AllowAdmin = {
     page = PongDu_Main, translation = PongDu_Host_AllowAdmin,
 }
 
-option PongDu.ShotComp = {
-    type = boolean, default = true,
-    page = PongDu_Main, translation = PongDu_ShotComp,
-}
-
 option PongDu.Divider_BuffTier = {
     type = boolean, default = false,
     page = PongDu_Main, translation = PongDu_Divider_BuffTier,

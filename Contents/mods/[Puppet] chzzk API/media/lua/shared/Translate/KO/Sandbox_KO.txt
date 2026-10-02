@@ -291,8 +291,6 @@ Sandbox_KO = {
 	Sandbox_PongDu_Host_SteamID_tooltip = "서버 후원을 발동할 수 있는 서버장 Steam ID (steamcommunity.com/profiles/ 뒤 숫자). 비우면 서버 후원 비활성 (어드민 허용은 예외). 직접 IP 접속 전용 서버는 판정 불가.",
 	Sandbox_PongDu_Host_AllowAdmin = "어드민도 서버 후원 발동 허용",
 	Sandbox_PongDu_Host_AllowAdmin_tooltip = "켜면 어드민도 서버 후원 발동 가능 (Steam ID와 무관, 직접 IP 서버에서도 동작).",
-	Sandbox_PongDu_ShotComp = "저FPS 연사속도 보정",
-	Sandbox_PongDu_ShotComp_tooltip = "좀비가 많아 FPS가 50 미만으로 떨어지면 연사 총기(자동·로터리)의 줄어든 발수를 추가 발사로 채워 평소(고FPS) 연사속도를 유지한다. 탄도학(Improved Projectile) 모드가 처리하는 총만 해당. 추가 발은 지구력·무기 내구도를 소모하지 않는다.",
 
 	Sandbox_PongDu_Divider_BuffTier = "_______________ 개인후원 금액 (도움 효과) _______________",
 	Sandbox_PongDu_Divider_BuffTier_tooltip = "구분선 (설정 없음).",
